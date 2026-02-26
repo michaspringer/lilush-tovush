@@ -750,7 +750,7 @@ async function generateStory() {
     }, 2000);
     
     try {
-        const response = await fetch('http://localhost:8000/api/generate-story', {
+        const response = await fetch('https://web-production-ec858.up.railway.app/api/generate-story', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(appState.bookData)
