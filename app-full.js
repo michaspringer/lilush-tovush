@@ -108,7 +108,7 @@
         };
 
         // Server configuration
-        const SERVER_URL = 'http://localhost:8000';
+        const SERVER_URL = 'https://web-production-ec858.up.railway.app';
 
         // Demo story data (in real app, this comes from API)
         const demoStory = {
