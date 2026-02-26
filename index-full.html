@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>לילוש טובוש - ספרי ילדים מותאמים אישית</title>
+    <link rel="stylesheet" href="styles-full.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Screen 1: Landing Page -->
+        <div class="screen landing-screen active" id="landingScreen">
+            <div class="landing-content">
+                <h1 class="main-title">🌈 לילוש טובוש 🌈</h1>
+                <h2 class="main-subtitle">הילד שלך הוא הכוכב של הסיפור!</h2>
+                <p class="main-description">
+                    צרו ספר ילדים מותאם אישית עם הילד שלכם כגיבור הראשי!<br>
+                    בעזרת בינה מלאכותית, אנחנו יוצרים סיפור ייחודי עם איורים מקסימים,<br>
+                    שמותאם בדיוק לגיל, לתחומי העניין ולאישיות של הילד שלכם.
+                </p>
+                <button class="cta-button" onclick="startCreation()">
+                    ✨ התחילו לצור ✨
+                </button>
+                <div class="features">
+                    <div class="feature">
+                        <div class="feature-icon">📖</div>
+                        <div class="feature-title">סיפור ייחודי</div>
+                        <div class="feature-text">נכתב במיוחד עבור הילד שלכם</div>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-icon">🎨</div>
+                        <div class="feature-title">איורים מקסימים</div>
+                        <div class="feature-text">נוצרים בבינה מלאכותית</div>
+                    </div>
+                    <div class="feature">
+                        <div class="feature-icon">💝</div>
+                        <div class="feature-title">מתנה מושלמת</div>
+                        <div class="feature-text">יום הולדת, חגים, או סתם כך</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Screen 2: Creator Form -->
+        <div class="screen creator-screen" id="creatorScreen">
+            <div class="container">
+                <div class="progress-bar">
+                    <div class="progress-step active" id="step1-indicator">1</div>
+                    <div class="progress-line"></div>
+                    <div class="progress-step" id="step2-indicator">2</div>
+                    <div class="progress-line"></div>
+                    <div class="progress-step" id="step3-indicator">3</div>
+                    <div class="progress-line"></div>
+                    <div class="progress-step" id="step4-indicator">4</div>
+                </div>
+
+                <!-- Step 1: Basic Info -->
+                <div class="form-step active" id="step1">
+                    <h2 class="form-title">בואו נכיר! 👋</h2>
+                    
+                    <div class="form-group">
+                        <label>מה שם הילד/ה?</label>
+                        <input type="text" id="childName" placeholder="למשל: נועה, דני, תמר..." class="form-input">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>בן או בת כמה?</label>
+                        <div class="age-buttons">
+                            <button class="age-btn" onclick="selectAge('0-2')">0-2</button>
+                            <button class="age-btn" onclick="selectAge('3-5')">3-5</button>
+                            <button class="age-btn" onclick="selectAge('6-8')">6-8</button>
+                            <button class="age-btn" onclick="selectAge('9-12')">9-12</button>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>מגדר</label>
+                        <div class="gender-buttons">
+                            <button class="gender-btn" onclick="selectGender('boy')">👦 בן</button>
+                            <button class="gender-btn" onclick="selectGender('girl')">👧 בת</button>
+                        </div>
+                    </div>
+                    
+                    <button class="btn btn-primary" onclick="nextStep()" id="step1-next" disabled>
+                        המשך ➜
+                    </button>
+                </div>
+
+                <!-- Step 2: Theme -->
+                <div class="form-step" id="step2">
+                    <h2 class="form-title">באיזה עולם נטייל? 🌍</h2>
+                    <p class="form-subtitle">בחרו נושא לסיפור</p>
+                    
+                    <div class="theme-grid">
+                        <div class="theme-card" onclick="selectTheme('animals')">
+                            <div class="theme-icon">🦁</div>
+                            <div class="theme-name">חיות וטבע</div>
+                            <div class="theme-desc">הרפתקאות עם חיות וטבע</div>
+                        </div>
+                        <div class="theme-card" onclick="selectTheme('family')">
+                            <div class="theme-icon">❤️</div>
+                            <div class="theme-name">משפחה ואהבה</div>
+                            <div class="theme-desc">סיפורים על קשרים משפחתיים</div>
+                        </div>
+                        <div class="theme-card" onclick="selectTheme('space')">
+                            <div class="theme-icon">🚀</div>
+                            <div class="theme-name">חלל וכוכבים</div>
+                            <div class="theme-desc">מסע לחלל ולכוכבים</div>
+                        </div>
+                        <div class="theme-card" onclick="selectTheme('magic')">
+                            <div class="theme-icon">✨</div>
+                            <div class="theme-name">קסם ופנטזיה</div>
+                            <div class="theme-desc">עולמות קסומים ודמיון</div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-nav">
+                        <button class="btn btn-secondary" onclick="prevStep()">➜ חזור</button>
+                        <button class="btn btn-primary" onclick="nextStep()" id="step2-next" disabled>המשך ➜</button>
+                    </div>
+                </div>
+
+                <!-- Step 3: Style -->
+                <div class="form-step" id="step3">
+                    <h2 class="form-title">איזה סגנון? 🎭</h2>
+                    <p class="form-subtitle">בחרו את אופי הסיפור</p>
+                    
+                    <div class="style-options">
+                        <div class="style-card" onclick="selectStyle('funny')">
+                            <div class="style-icon">😄</div>
+                            <div class="style-name">מצחיק ומשעשע</div>
+                            <div class="style-desc">הרבה הומור וצחוקים</div>
+                        </div>
+                        <div class="style-card" onclick="selectStyle('educational')">
+                            <div class="style-icon">📚</div>
+                            <div class="style-name">חינוכי ומלמד</div>
+                            <div class="style-desc">סיפור עם מסרים וערכים</div>
+                        </div>
+                    </div>
+                    
+                    <div class="form-nav">
+                        <button class="btn btn-secondary" onclick="prevStep()">➜ חזור</button>
+                        <button class="btn btn-primary" onclick="nextStep()" id="step3-next" disabled>המשך ➜</button>
+                    </div>
+                </div>
+
+                <!-- Step 4: Custom Input -->
+                <div class="form-step" id="step4">
+                    <h2 class="form-title">מגע אישי 💫</h2>
+                    <p class="form-subtitle">יש משהו מיוחד שתרצו להוסיף?</p>
+                    
+                    <div class="form-group">
+                        <label>פרטים נוספים (אופציונלי)</label>
+                        <textarea id="customInput" 
+                                  class="form-textarea" 
+                                  placeholder="למשל: הילד אוהב דינוזאורים, יש לו כלב בשם מקס, אוהב את הצבע כחול..."
+                                  rows="5"></textarea>
+                        <div class="input-hint">
+                            💡 ככל שתספקו יותר פרטים, הסיפור יהיה יותר מותאם אישית!
+                        </div>
+                    </div>
+                    
+                    <div class="summary-box">
+                        <h3>📋 סיכום:</h3>
+                        <div id="summaryContent"></div>
+                    </div>
+                    
+                    <div class="form-nav">
+                        <button class="btn btn-secondary" onclick="prevStep()">➜ חזור</button>
+                        <button class="btn btn-success" onclick="generateStory()">
+                            🎨 צרו את הספר! 🎨
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Screen 3: Generating -->
+        <div class="screen generating-screen" id="generatingScreen">
+            <div class="generating-content">
+                <div class="generating-animation">
+                    <div class="book-animation">📚</div>
+                    <div class="sparkles">✨</div>
+                </div>
+                <h2 class="generating-title">יוצרים את הספר שלכם...</h2>
+                <p class="generating-text" id="generatingText">זה עלול לקחת כמה דקות, תתאזרו בסבלנות...</p>
+                <div class="progress-steps">
+                    <div class="progress-item" id="progress-story">
+                        <div class="progress-icon">📝</div>
+                        <div class="progress-label">יוצר סיפור...</div>
+                    </div>
+                    <div class="progress-item" id="progress-images">
+                        <div class="progress-icon">🎨</div>
+                        <div class="progress-label">יוצר איורים...</div>
+                    </div>
+                    <div class="progress-item" id="progress-done">
+                        <div class="progress-icon">✨</div>
+                        <div class="progress-label">מסיים...</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Screen 4: Preview -->
+        <div class="screen preview-screen" id="previewScreen">
+            <div class="book-container">
+                <h1 class="book-title" id="previewTitle">🌈 הספר של נועה 🌈</h1>
+                <div class="story-pages" id="storyPages">
+                    <!-- Pages will be generated here -->
+                </div>
+                
+                <div class="final-actions">
+                    <button class="btn btn-success" onclick="downloadPDF()">
+                        📄 הורד PDF להדפסה
+                    </button>
+                    <button class="btn btn-secondary" onclick="saveToHistory()">
+                        💾 שמור להיסטוריה
+                    </button>
+                    <button class="btn btn-secondary" onclick="showHistory()">
+                        📚 הצג ספרים שמורים
+                    </button>
+                    <button class="btn btn-secondary" onclick="startOver()">
+                        🔄 צור ספר חדש
+                    </button>
+                </div>
+                
+                <div style="text-align: center; margin-top: 1rem; color: #666; font-size: 0.9rem;">
+                    <span id="lastSavedIndicator">טוען...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal" id="pdfModal">
+        <div class="modal-content">
+            <div class="loading-spinner">📄</div>
+            <h2 class="modal-title">יוצר PDF...</h2>
+            <p class="modal-text">אנא המתן</p>
+        </div>
+    </div>
+
+    <script src="app-full.js"></script>
+</body>
+</html>
