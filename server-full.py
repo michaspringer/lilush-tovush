@@ -232,7 +232,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         }
         
         pages_by_age = {
-            '0-2': '8-10',
+            '0-2': '4-6',
             '3-5': '12-14',
             '6-8': '16-18',
             '9-12': '20-24'
