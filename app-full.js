@@ -192,49 +192,62 @@
         }
 
         // Display story
-        function displayStory(story) {
-            const container = document.getElementById('storyPages');
-            container.innerHTML = '';
-            
-            document.getElementById('previewTitle').textContent = `🌈 הספר של ${story.childName} 🌈`;
-            
-            story.pages.forEach((page, index) => {
-                const pageDiv = document.createElement('div');
-                pageDiv.className = 'story-page';
-                pageDiv.id = `page-${index}`;
-                pageDiv.innerHTML = `
-                    <div class="page-number">עמוד ${index + 1}</div>
-                    
-                    <div class="page-text-container">
-                        <div class="page-text" id="text-${index}">${page.text}</div>
-                        <textarea class="page-text-edit" id="edit-${index}" style="display: none;">${page.text}</textarea>
-                    </div>
-                    
-                    <div class="page-illustration-note">
-                        <strong>💡 הוראות לאיור:</strong><br>
-                        ${page.illustration}
-                    </div>
-                    
-                    <div class="page-actions">
-                        <button class="btn-small btn-edit" onclick="startEdit(${index})">
-                            ✏️ ערוך טקסט
-                        </button>
-                        <button class="btn-small btn-suggest" onclick="suggestAlternatives(${index})">
-                            💡 הצע חלופה
-                        </button>
-                        <button class="btn-small btn-save" id="save-${index}" style="display: none;" onclick="saveEdit(${index})">
-                            ✓ שמור
-                        </button>
-                        <button class="btn-small btn-cancel" id="cancel-${index}" style="display: none;" onclick="cancelEdit(${index})">
-                            ✗ ביטול
-                        </button>
-                    </div>
-                    
-                    <div id="alternatives-${index}" class="alternatives-container" style="display: none;"></div>
-                `;
-                container.appendChild(pageDiv);
-            });
+      function displayStory(story) {
+    const container = document.getElementById('storyPages');
+    container.innerHTML = '';
+    
+    document.getElementById('previewTitle').textContent = `🌈 הספר של ${story.childName} 🌈`;
+    
+    story.pages.forEach((page, index) => {
+        const pageDiv = document.createElement('div');
+        pageDiv.className = 'story-page';
+        pageDiv.id = `page-${index}`;
+        
+        // יצירת HTML לתמונה
+        let imageHTML = '';
+        if (page.imageUrl) {
+            // יש תמונה - הצג אותה!
+            imageHTML = `<img src="${page.imageUrl}" class="page-image" alt="איור עמוד ${index + 1}" style="width: 100%; max-width: 500px; border-radius: 15px; margin-bottom: 1rem;">`;
+        } else {
+            // אין תמונה - הצג placeholder
+            imageHTML = `
+                <div class="page-image-placeholder" style="background: linear-gradient(135deg, #e0f7fa 0%, #b2ebf2 100%); border-radius: 15px; padding: 3rem; text-align: center; color: #666; margin-bottom: 1rem;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">🎨</div>
+                    <div style="font-size: 0.9rem;">${page.illustration || '[מקום לאיור]'}</div>
+                </div>
+            `;
         }
+        
+        pageDiv.innerHTML = `
+            <div class="page-number">עמוד ${index + 1}</div>
+            
+            ${imageHTML}
+            
+            <div class="page-text-container">
+                <div class="page-text" id="text-${index}">${page.text}</div>
+                <textarea class="page-text-edit" id="edit-${index}" style="display: none;">${page.text}</textarea>
+            </div>
+            
+            <div class="page-actions">
+                <button class="btn-small btn-edit" onclick="startEdit(${index})">
+                    ✏️ ערוך טקסט
+                </button>
+                <button class="btn-small btn-suggest" onclick="suggestAlternatives(${index})">
+                    💡 הצע חלופה
+                </button>
+                <button class="btn-small btn-save" id="save-${index}" style="display: none;" onclick="saveEdit(${index})">
+                    ✓ שמור
+                </button>
+                <button class="btn-small btn-cancel" id="cancel-${index}" style="display: none;" onclick="cancelEdit(${index})">
+                    ✗ ביטול
+                </button>
+            </div>
+            
+            <div id="alternatives-${index}" class="alternatives-container" style="display: none;"></div>
+        `;
+        container.appendChild(pageDiv);
+    });
+}
 
         // Edit functions
         function startEdit(pageIndex) {
