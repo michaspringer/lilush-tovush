@@ -201,7 +201,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                         img_str = base64.b64encode(image_data).decode()
                         
                         print(f"  ✅ Image received ({len(image_data)} bytes)")
-                        
+                        print(f"  📦 Base64 length: {len(img_str)}")  # ← הוסף!
+                        print(f"  📦 Starts with: data:image/jpeg;base64,{img_str[:50]}...")
                         return f"data:image/jpeg;base64,{img_str}"
             
             raise Exception("Timeout waiting for Leonardo")
