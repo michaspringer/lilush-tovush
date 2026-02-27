@@ -190,6 +190,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                     
                     if check_result['generations_by_pk']['status'] == 'COMPLETE':
                         image_url = check_result['generations_by_pk']['generated_images'][0]['url']
+                        print(f"  📍 Image URL: {image_url[:50]}...")
                         
                         # Download image
                         img_req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
