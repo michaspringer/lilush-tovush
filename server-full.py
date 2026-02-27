@@ -25,7 +25,7 @@ HUGGINGFACE_TOKEN = os.environ.get('HUGGINGFACE_TOKEN', 'YOUR_HF_TOKEN_HERE')
 LEONARDO_API_KEY = os.environ.get('LEONARDO_API_KEY', '')  # אופציונלי
 
 # מצב תמונות: 'huggingface' או 'leonardo' או 'none'
-IMAGE_MODE = os.environ.get('IMAGE_MODE', 'replicate')
+IMAGE_MODE = os.environ.get('IMAGE_MODE', 'huggingface')
 # ========================================
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
@@ -132,9 +132,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"  🖼️  Generating image {i+1}/{len(pages)}...")
             
             try:
-                if IMAGE_MODE == 'replicate':
-                    image_url = self.generate_image_replicate(page['illustration'])
-                elif IMAGE_MODE == 'huggingface':
+                if IMAGE_MODE == 'huggingface':
                     image_url = self.generate_image_huggingface(page['illustration'])
                 elif IMAGE_MODE == 'leonardo':
                     image_url = self.generate_image_leonardo(page['illustration'])
@@ -148,123 +146,45 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 page['imageUrl'] = None
         
         return story_data
-        
-    def generate_image_replicate(self, prompt):
-        """יוצר תמונה עם Replicate"""
-        try:
-            import os
-            import requests
-            import base64
-            import time
-            
-            api_token = os.environ.get('REPLICATE_API_TOKEN')
-            if not api_token:
-                raise Exception('REPLICATE_API_TOKEN not configured')
-            
-            print(f"  🎨 Replicate: {prompt[:60]}...")
-            
-            # Replicate API
-            url = "https://api.replicate.com/v1/predictions"
-            
-            headers = {
-                "Authorization": f"Token {api_token}",
-                "Content-Type": "application/json"
-            }
-            
-            data = {
-                "version": "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
-                "input": {
-                    "prompt": f"{prompt}, children's book illustration, colorful, friendly, warm colors",
-                    "width": 1024,
-                    "height": 1024
-                }
-            }
-            
-            # Start generation
-            response = requests.post(url, headers=headers, json=data)
-            result = response.json()
-            
-            if response.status_code != 201:
-                raise Exception(f"Replicate API error: {result}")
-            
-            # Poll for result
-            prediction_url = result['urls']['get']
-            
-            for i in range(60):  # Wait up to 60 seconds
-                time.sleep(1)
-                check_response = requests.get(prediction_url, headers=headers)
-                check_result = check_response.json()
-                
-                if check_result['status'] == 'succeeded':
-                    image_url = check_result['output'][0]
-                    
-                    # Download image
-                    img_response = requests.get(image_url)
-                    img_str = base64.b64encode(img_response.content).decode()
-                    
-                    print(f"  ✅ Image received ({len(img_response.content)} bytes)")
-                    return f"data:image/png;base64,{img_str}"
-                
-                elif check_result['status'] == 'failed':
-                    raise Exception(f"Generation failed: {check_result.get('error')}")
-            
-            raise Exception("Timeout waiting for image")
-            
-        except Exception as e:
-            print(f"  ⚠️ Replicate failed: {str(e)}")
-            return None
-            
+    
     def generate_image_huggingface(self, prompt):
-        """יוצר תמונה עם Replicate (דרך API ישיר)"""
+        """יוצר תמונה עם Pollinations.AI (חינמי לגמרי!)"""
         try:
             import urllib.request
             import urllib.parse
             import base64
-            import json
             import ssl
-            import time
             
-            # Replicate - API חזק יותר
-            # זה משתמש ב-Stable Diffusion דרך Replicate
+            print(f"  🎨 Pollinations: {prompt[:60]}...")
             
-            print(f"  🎨 Generating: {prompt[:60]}...")
+            # Pollinations - API חינמי לחלוטין ללא הגבלה!
+            enhanced_prompt = f"{prompt}, children's book illustration, colorful, friendly, warm colors, high quality"
+            encoded_prompt = urllib.parse.quote(enhanced_prompt)
+            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true"
             
-            # DeepAI - API פשוט נוסף לנסות
-            api_url = "https://api.deepai.org/api/text2img"
-            
+            # SSL context
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             
-            data = urllib.parse.urlencode({
-                'text': f"{prompt}, children's book illustration, colorful, friendly"
-            }).encode()
-            
-            req = urllib.request.Request(
-                api_url,
-                data=data,
-                headers={
-                    'User-Agent': 'Mozilla/5.0',
-                    'api-key': 'quickstart-QUdJIGlzIGNvbWluZy4uLi4K'  # Demo key
-                }
-            )
+            # Download image
+            req = urllib.request.Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
             
             with urllib.request.urlopen(req, timeout=90, context=ctx) as response:
-                result = json.loads(response.read().decode())
-                image_url = result.get('output_url')
-                
-                if not image_url:
-                    raise Exception("No image URL in response")
-                
-                # הורדת התמונה
-                img_req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_response:
-                    image_data = img_response.read()
-                
-                # המרה ל-base64
-                img_str = base64.b64encode(image_data).decode()
-                
-                print(f"  ✅ Image received ({len(image_data)} bytes)")
+                image_data = response.read()
+            
+            # Convert to base64
+            img_str = base64.b64encode(image_data).decode()
+            
+            print(f"  ✅ Image received ({len(image_data)} bytes)")
+            
+            return f"data:image/jpeg;base64,{img_str}"
+            
+        except Exception as e:
+            print(f"  ⚠️ Pollinations failed: {str(e)}")
+            return None
                 
                 return f"data:image/jpeg;base64,{img_str}"
             
@@ -299,7 +219,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         }
         
         pages_by_age = {
-            '0-2': '4-6',
+            '0-2': '8-10',
             '3-5': '12-14',
             '6-8': '16-18',
             '9-12': '20-24'
