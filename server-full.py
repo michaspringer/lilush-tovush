@@ -25,7 +25,7 @@ HUGGINGFACE_TOKEN = os.environ.get('HUGGINGFACE_TOKEN', 'YOUR_HF_TOKEN_HERE')
 LEONARDO_API_KEY = os.environ.get('LEONARDO_API_KEY', '')  # אופציונלי
 
 # מצב תמונות: 'huggingface' או 'leonardo' או 'none'
-IMAGE_MODE = os.environ.get('IMAGE_MODE', 'huggingface')
+IMAGE_MODE = os.environ.get('IMAGE_MODE', 'replicate')
 # ========================================
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
