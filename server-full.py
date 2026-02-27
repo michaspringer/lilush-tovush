@@ -132,7 +132,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"  🖼️  Generating image {i+1}/{len(pages)}...")
             
             try:
-                if IMAGE_MODE == 'huggingface':
+                if IMAGE_MODE == 'replicate':
+                    image_url = self.generate_image_replicate(page['illustration'])
+                elif IMAGE_MODE == 'huggingface':
                     image_url = self.generate_image_huggingface(page['illustration'])
                 elif IMAGE_MODE == 'leonardo':
                     image_url = self.generate_image_leonardo(page['illustration'])
@@ -146,7 +148,72 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 page['imageUrl'] = None
         
         return story_data
-    
+        
+    def generate_image_replicate(self, prompt):
+        """יוצר תמונה עם Replicate"""
+        try:
+            import os
+            import requests
+            import base64
+            import time
+            
+            api_token = os.environ.get('REPLICATE_API_TOKEN')
+            if not api_token:
+                raise Exception('REPLICATE_API_TOKEN not configured')
+            
+            print(f"  🎨 Replicate: {prompt[:60]}...")
+            
+            # Replicate API
+            url = "https://api.replicate.com/v1/predictions"
+            
+            headers = {
+                "Authorization": f"Token {api_token}",
+                "Content-Type": "application/json"
+            }
+            
+            data = {
+                "version": "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
+                "input": {
+                    "prompt": f"{prompt}, children's book illustration, colorful, friendly, warm colors",
+                    "width": 1024,
+                    "height": 1024
+                }
+            }
+            
+            # Start generation
+            response = requests.post(url, headers=headers, json=data)
+            result = response.json()
+            
+            if response.status_code != 201:
+                raise Exception(f"Replicate API error: {result}")
+            
+            # Poll for result
+            prediction_url = result['urls']['get']
+            
+            for i in range(60):  # Wait up to 60 seconds
+                time.sleep(1)
+                check_response = requests.get(prediction_url, headers=headers)
+                check_result = check_response.json()
+                
+                if check_result['status'] == 'succeeded':
+                    image_url = check_result['output'][0]
+                    
+                    # Download image
+                    img_response = requests.get(image_url)
+                    img_str = base64.b64encode(img_response.content).decode()
+                    
+                    print(f"  ✅ Image received ({len(img_response.content)} bytes)")
+                    return f"data:image/png;base64,{img_str}"
+                
+                elif check_result['status'] == 'failed':
+                    raise Exception(f"Generation failed: {check_result.get('error')}")
+            
+            raise Exception("Timeout waiting for image")
+            
+        except Exception as e:
+            print(f"  ⚠️ Replicate failed: {str(e)}")
+            return None
+            
     def generate_image_huggingface(self, prompt):
         """יוצר תמונה עם Replicate (דרך API ישיר)"""
         try:
