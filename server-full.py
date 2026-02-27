@@ -1,11 +1,7 @@
 #!/usr/bin/env python3
 """
-לילוש טובוש - שרת מלא
-תומך ב:
-- יצירת סיפורים (Claude)
-- יצירת תמונות (Hugging Face / Leonardo)
-- PDF בעברית
-- הצעת חלופות
+לילוש טובוש - שרת מלא עם Pollinations
+תמונות חינמיות ללא הגבלה!
 """
 
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -15,23 +11,17 @@ import urllib.error
 from io import BytesIO
 import base64
 import os
-import time
 
 # ========================================
 # 🔑 API Keys
 # ========================================
 CLAUDE_API_KEY = os.environ.get('CLAUDE_API_KEY', 'YOUR_CLAUDE_KEY_HERE')
-HUGGINGFACE_TOKEN = os.environ.get('HUGGINGFACE_TOKEN', 'YOUR_HF_TOKEN_HERE')
-LEONARDO_API_KEY = os.environ.get('LEONARDO_API_KEY', '')  # אופציונלי
-
-# מצב תמונות: 'huggingface' או 'leonardo' או 'none'
-IMAGE_MODE = os.environ.get('IMAGE_MODE', 'replicate')
+IMAGE_MODE = os.environ.get('IMAGE_MODE', 'huggingface')
 # ========================================
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
 class CORSRequestHandler(SimpleHTTPRequestHandler):
-    """Handler עם CORS ו-API endpoints"""
     
     def end_headers(self):
         self.send_header('Access-Control-Allow-Origin', '*')
@@ -54,7 +44,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.send_error(404)
     
     def handle_generate_story(self):
-        """יוצר סיפור + תמונות"""
         try:
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
@@ -63,15 +52,12 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             child_name = request_data.get('childName', 'ילד')
             print(f"\n📖 Creating story for: {child_name}")
             
-            # בדיקת מפתחות
             if CLAUDE_API_KEY == 'YOUR_CLAUDE_KEY_HERE':
                 raise Exception('Claude API key not configured')
             
-            # 1. יצירת הסיפור
             print("📝 Step 1: Generating story with Claude...")
             story_data = self.create_story_with_claude(request_data)
             
-            # 2. יצירת תמונות
             if IMAGE_MODE != 'none' and story_data.get('pages'):
                 print(f"🎨 Step 2: Generating images ({IMAGE_MODE})...")
                 story_data = self.add_images_to_story(story_data)
@@ -92,7 +78,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.send_json_response({'error': str(e)}, status=500)
     
     def create_story_with_claude(self, data):
-        """יוצר סיפור עם Claude"""
         prompt = self.build_story_prompt(data)
         
         claude_request = {
@@ -118,29 +103,19 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             response_data = json.loads(response.read().decode('utf-8'))
             content = response_data['content'][0]['text']
             
-            # Parse JSON
             clean_content = content.replace('```json', '').replace('```', '').strip()
             story_data = json.loads(clean_content)
             
             return story_data
     
     def add_images_to_story(self, story_data):
-        """מוסיף תמונות לסיפור"""
         pages = story_data.get('pages', [])
         
         for i, page in enumerate(pages):
             print(f"  🖼️  Generating image {i+1}/{len(pages)}...")
             
             try:
-                if IMAGE_MODE == 'replicate':
-                    image_url = self.generate_image_replicate(page['illustration'])
-                elif IMAGE_MODE == 'huggingface':
-                    image_url = self.generate_image_huggingface(page['illustration'])
-                elif IMAGE_MODE == 'leonardo':
-                    image_url = self.generate_image_leonardo(page['illustration'])
-                else:
-                    image_url = None
-                
+                image_url = self.generate_image_pollinations(page['illustration'])
                 page['imageUrl'] = image_url
                 
             except Exception as e:
@@ -148,122 +123,42 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 page['imageUrl'] = None
         
         return story_data
-        
-    def generate_image_replicate(self, prompt):
-        """יוצר תמונה עם Replicate"""
+    
+    def generate_image_pollinations(self, prompt):
+        """יוצר תמונה עם Pollinations.AI - חינמי לגמרי!"""
         try:
-            import os
-            import requests
-            import base64
-            import time
+            import urllib.parse
+            import ssl
             
-            api_token = os.environ.get('REPLICATE_API_TOKEN')
-            if not api_token:
-                raise Exception('REPLICATE_API_TOKEN not configured')
+            print(f"  🎨 Pollinations: {prompt[:60]}...")
             
-            print(f"  🎨 Replicate: {prompt[:60]}...")
+            # Pollinations - API חינמי ללא הגבלה
+            enhanced_prompt = f"{prompt}, children's book illustration, colorful, friendly, warm colors, high quality"
+            encoded_prompt = urllib.parse.quote(enhanced_prompt)
+            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true"
             
-            # Replicate API
-            url = "https://api.replicate.com/v1/predictions"
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
             
-            headers = {
-                "Authorization": f"Token {api_token}",
-                "Content-Type": "application/json"
-            }
+            req = urllib.request.Request(url, headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
             
-            data = {
-                "version": "stability-ai/sdxl:39ed52f2a78e934b3ba6e2a89f5b1c712de7dfea535525255b1aa35c5565e08b",
-                "input": {
-                    "prompt": f"{prompt}, children's book illustration, colorful, friendly, warm colors",
-                    "width": 1024,
-                    "height": 1024
-                }
-            }
+            with urllib.request.urlopen(req, timeout=90, context=ctx) as response:
+                image_data = response.read()
             
-            # Start generation
-            response = requests.post(url, headers=headers, json=data)
-            result = response.json()
+            img_str = base64.b64encode(image_data).decode()
             
-            if response.status_code != 201:
-                raise Exception(f"Replicate API error: {result}")
+            print(f"  ✅ Image received ({len(image_data)} bytes)")
             
-            # Poll for result
-            prediction_url = result['urls']['get']
-            
-            for i in range(60):  # Wait up to 60 seconds
-                time.sleep(1)
-                check_response = requests.get(prediction_url, headers=headers)
-                check_result = check_response.json()
-                
-                if check_result['status'] == 'succeeded':
-                    image_url = check_result['output'][0]
-                    
-                    # Download image
-                    img_response = requests.get(image_url)
-                    img_str = base64.b64encode(img_response.content).decode()
-                    
-                    print(f"  ✅ Image received ({len(img_response.content)} bytes)")
-                    return f"data:image/png;base64,{img_str}"
-                
-                elif check_result['status'] == 'failed':
-                    raise Exception(f"Generation failed: {check_result.get('error')}")
-            
-            raise Exception("Timeout waiting for image")
+            return f"data:image/jpeg;base64,{img_str}"
             
         except Exception as e:
-            print(f"  ⚠️ Replicate failed: {str(e)}")
+            print(f"  ⚠️ Pollinations failed: {str(e)}")
             return None
-            
-   def generate_image_huggingface(self, prompt):
-    """יוצר תמונה עם Pollinations.AI (חינמי לגמרי!)"""
-    try:
-        import urllib.request
-        import urllib.parse
-        import base64
-        import ssl
-        
-        print(f"  🎨 Pollinations: {prompt[:60]}...")
-        
-        # Pollinations - API חינמי לחלוטין!
-        enhanced_prompt = f"{prompt}, children's book illustration, colorful, friendly, warm colors"
-        encoded_prompt = urllib.parse.quote(enhanced_prompt)
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true"
-        
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        
-        req = urllib.request.Request(url, headers={
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        })
-        
-        with urllib.request.urlopen(req, timeout=90, context=ctx) as response:
-            image_data = response.read()
-        
-        img_str = base64.b64encode(image_data).decode()
-        
-        print(f"  ✅ Image received ({len(image_data)} bytes)")
-        
-        return f"data:image/jpeg;base64,{img_str}"
-        
-    except Exception as e:
-        print(f"  ⚠️ Pollinations failed: {str(e)}")
-        return None
-
-       
-    def generate_image_leonardo(self, prompt):
-        """יוצר תמונה עם Leonardo.AI"""
-        # TODO: יישום עתידי
-        if not LEONARDO_API_KEY:
-            raise Exception('Leonardo API key not configured')
-        
-        # Leonardo API call here
-        # ...
-        
-        return None
     
     def build_story_prompt(self, data):
-        """בונה prompt ליצירת סיפור"""
         theme_names = {
             'animals': 'חיות וטבע',
             'family': 'משפחה ואהבה',
@@ -277,13 +172,13 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         }
         
         pages_by_age = {
-            '0-2': '4-6',
-            '3-5': '12-14',
-            '6-8': '16-18',
-            '9-12': '20-24'
+            '0-2': '4-5',
+            '3-5': '6-8',
+            '6-8': '8-10',
+            '9-12': '10-12'
         }
         
-        pages = pages_by_age.get(data.get('childAge', '3-5'), '12-14')
+        pages = pages_by_age.get(data.get('childAge', '3-5'), '6-8')
         theme = theme_names.get(data.get('theme', ''), 'הרפתקאות')
         style = style_names.get(data.get('style', ''), 'מצחיק')
         
@@ -326,7 +221,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         return prompt
     
     def handle_suggest_alternative(self):
-        """מציע חלופות למשפט"""
         try:
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
@@ -392,7 +286,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.send_json_response({'error': str(e)}, status=500)
     
     def handle_generate_pdf(self):
-        """יוצר PDF"""
         try:
             from reportlab.lib.pagesizes import A4
             from reportlab.pdfgen import canvas
@@ -400,7 +293,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             from reportlab.pdfbase.ttfonts import TTFont
             from reportlab.lib.utils import simpleSplit
             
-            # BiDi
             try:
                 from bidi.algorithm import get_display
                 import arabic_reshaper
@@ -430,7 +322,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             c = canvas.Canvas(buffer, pagesize=A4)
             width, height = A4
             
-            # פונט
             hebrew_font = 'Helvetica'
             font_paths = [
                 '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
@@ -445,7 +336,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 except:
                     continue
             
-            # עמוד שער
             c.setFont(hebrew_font, 32)
             title = fix_hebrew(f"הספר של {child_name}")
             c.drawString((width - c.stringWidth(title, hebrew_font, 32)) / 2, height - 100, title)
@@ -456,19 +346,16 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             c.showPage()
             
-            # עמודי סיפור
             for i, page in enumerate(pages):
                 c.setFont(hebrew_font, 10)
                 page_num = fix_hebrew(f"עמוד {i + 1}")
                 c.drawString(width - 100, height - 30, page_num)
                 
-                # placeholder לתמונה (ימין)
                 c.setFillColorRGB(0.8, 0.9, 0.9)
                 illustration_x = width - 350
                 c.rect(illustration_x, height - 250, 300, 180, fill=1)
                 c.setFillColorRGB(0, 0, 0)
                 
-                # טקסט
                 c.setFont(hebrew_font, 14)
                 text = fix_hebrew(page.get('text', ''))
                 lines = simpleSplit(text, hebrew_font, 14, width - 100)
@@ -481,7 +368,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 
                 c.showPage()
             
-            # עמוד סיום
             c.setFont(hebrew_font, 28)
             end_text = fix_hebrew("סוף הסיפור")
             c.drawString((width - c.stringWidth(end_text, hebrew_font, 28)) / 2, height / 2, end_text)
@@ -502,7 +388,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
         except ImportError as e:
             print(f"❌ Missing library: {str(e)}")
-            self.send_json_response({'error': 'Missing required library. Install: pip install reportlab python-bidi arabic-reshaper'}, status=500)
+            self.send_json_response({'error': 'Missing required library'}, status=500)
         except Exception as e:
             print(f"❌ Error: {str(e)}")
             import traceback
@@ -522,10 +408,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
 
 
 def run_server(port=None):
-    # קבלת PORT מהסביבה (Railway/Render) או default 8000
     if port is None:
         port = int(os.environ.get('PORT', 8000))
-    # בדיקות
+    
     print("\n" + "="*60)
     print("🚀 לילוש טובוש - Server Starting")
     print("="*60)
@@ -535,28 +420,12 @@ def run_server(port=None):
     else:
         print("✅ Claude API key configured")
     
+    print(f"\n🎨 Image mode: {IMAGE_MODE}")
     if IMAGE_MODE == 'huggingface':
-        if HUGGINGFACE_TOKEN == 'YOUR_HF_TOKEN_HERE':
-            print("⚠️  HuggingFace token not set!")
-        else:
-            print("✅ HuggingFace token configured")
-            try:
-                import huggingface_hub
-                print("✅ huggingface_hub installed")
-            except:
-                print("❌ huggingface_hub NOT installed")
-                print("   Run: pip install huggingface_hub Pillow")
+        print("✅ Using Pollinations.AI (free, unlimited!)")
     
-    if IMAGE_MODE == 'leonardo':
-        if LEONARDO_API_KEY:
-            print("✅ Leonardo API key configured")
-        else:
-            print("⚠️  Leonardo API key not set")
-    
-    print(f"\n📸 Image mode: {IMAGE_MODE}")
     print("="*60)
     print(f"📡 Server: http://localhost:{port}")
-    print(f"🌐 Open: http://localhost:{port}/index.html")
     print("="*60)
     print("💡 Press Ctrl+C to stop")
     print("="*60 + "\n")
