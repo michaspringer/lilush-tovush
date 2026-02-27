@@ -214,65 +214,43 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"  ⚠️ Replicate failed: {str(e)}")
             return None
             
-    def generate_image_huggingface(self, prompt):
-        """יוצר תמונה עם Replicate (דרך API ישיר)"""
-        try:
-            import urllib.request
-            import urllib.parse
-            import base64
-            import json
-            import ssl
-            import time
-            
-            # Replicate - API חזק יותר
-            # זה משתמש ב-Stable Diffusion דרך Replicate
-            
-            print(f"  🎨 Generating: {prompt[:60]}...")
-            
-            # DeepAI - API פשוט נוסף לנסות
-            api_url = "https://api.deepai.org/api/text2img"
-            
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            
-            data = urllib.parse.urlencode({
-                'text': f"{prompt}, children's book illustration, colorful, friendly"
-            }).encode()
-            
-            req = urllib.request.Request(
-                api_url,
-                data=data,
-                headers={
-                    'User-Agent': 'Mozilla/5.0',
-                    'api-key': 'quickstart-QUdJIGlzIGNvbWluZy4uLi4K'  # Demo key
-                }
-            )
-            
-            with urllib.request.urlopen(req, timeout=90, context=ctx) as response:
-                result = json.loads(response.read().decode())
-                image_url = result.get('output_url')
-                
-                if not image_url:
-                    raise Exception("No image URL in response")
-                
-                # הורדת התמונה
-                img_req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_response:
-                    image_data = img_response.read()
-                
-                # המרה ל-base64
-                img_str = base64.b64encode(image_data).decode()
-                
-                print(f"  ✅ Image received ({len(image_data)} bytes)")
-                
-                return f"data:image/jpeg;base64,{img_str}"
-            
-        except Exception as e:
-            print(f"  ⚠️  DeepAI failed: {str(e)}")
-            # אם גם זה נכשל - פשוט תחזיר None
-            return None
-    
+   def generate_image_huggingface(self, prompt):
+    """יוצר תמונה עם Pollinations.AI (חינמי לגמרי!)"""
+    try:
+        import urllib.request
+        import urllib.parse
+        import base64
+        import ssl
+        
+        print(f"  🎨 Pollinations: {prompt[:60]}...")
+        
+        # Pollinations - API חינמי לחלוטין!
+        enhanced_prompt = f"{prompt}, children's book illustration, colorful, friendly, warm colors"
+        encoded_prompt = urllib.parse.quote(enhanced_prompt)
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&enhance=true"
+        
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        })
+        
+        with urllib.request.urlopen(req, timeout=90, context=ctx) as response:
+            image_data = response.read()
+        
+        img_str = base64.b64encode(image_data).decode()
+        
+        print(f"  ✅ Image received ({len(image_data)} bytes)")
+        
+        return f"data:image/jpeg;base64,{img_str}"
+        
+    except Exception as e:
+        print(f"  ⚠️ Pollinations failed: {str(e)}")
+        return None
+
+       
     def generate_image_leonardo(self, prompt):
         """יוצר תמונה עם Leonardo.AI"""
         # TODO: יישום עתידי
