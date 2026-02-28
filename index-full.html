@@ -80,6 +80,17 @@
                             <button class="gender-btn" onclick="selectGender('girl')">👧 בת</button>
                         </div>
                     </div>
+                    <div class="form-group">
+                        <label>תמונת הילד (אופציונלי - לאיורים מותאמים אישית!) 🌟</label>
+                        <input type="file" id="childPhoto" accept="image/jpeg,image/png,image/jpg" class="form-input" onchange="previewPhoto()">
+                        <div id="photoPreview" style="margin-top: 1rem; display: none;">
+                            <img id="previewImg" style="width: 150px; height: 150px; object-fit: cover; border-radius: 50%; border: 3px solid var(--primary-pink);">
+                        </div>
+                        <div class="input-hint">
+                            💡 העלה תמונת פנים ברורה (קרוב-אפ) לתוצאות הכי טובות!<br>
+                            ⭐ עם תמונה: הילד יופיע באיורים! ללא: איורים רגילים.
+                        </div>
+                    </div>
                     
                     <button class="btn btn-primary" onclick="nextStep()" id="step1-next" disabled>
                         המשך ➜
