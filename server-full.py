@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-לילוש טובוש - שרת מלא עם Leonardo + Face Swap
+לילוש טובוש - שרת מלא
+Leonardo + Face Swap + PDF
 """
 
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -11,6 +12,7 @@ from io import BytesIO
 import base64
 import os
 import time
+import ssl
 
 # ========================================
 # 🔑 API Keys
@@ -53,14 +55,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             request_data = json.loads(post_data.decode('utf-8'))
             
             child_name = request_data.get('childName', 'ילד')
-            child_photo = request_data.get('childPhoto')  # Base64 photo
+            child_photo = request_data.get('childPhoto')
             
             print(f"\n📖 Creating story for: {child_name}")
             if child_photo:
-                print("📸 With face photo - will use Face Swap!")
-            
-            if CLAUDE_API_KEY == 'YOUR_CLAUDE_KEY_HERE':
-                raise Exception('Claude API key not configured')
+                print("📸 Photo uploaded - will use Face Swap!")
             
             print("📝 Step 1: Generating story with Claude...")
             story_data = self.create_story_with_claude(request_data)
@@ -68,15 +67,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             if IMAGE_MODE != 'none' and story_data.get('pages'):
                 print(f"🎨 Step 2: Generating images ({IMAGE_MODE})...")
                 story_data = self.add_images_to_story(story_data, child_photo)
-            else:
-                print("⏭️  Step 2: Skipping images (mode: none)")
             
             print("✅ Story complete!")
             self.send_json_response({
                 'success': True,
-                'story': story_data,
-                'imageMode': IMAGE_MODE,
-                'usedFaceSwap': bool(child_photo and USE_FACE_SWAP)
+                'story': story_data
             })
             
         except Exception as e:
@@ -86,6 +81,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.send_json_response({'error': str(e)}, status=500)
     
     def create_story_with_claude(self, data):
+        """יוצר סיפור עם Claude"""
         prompt = self.build_story_prompt(data)
         
         claude_request = {
@@ -110,34 +106,31 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         with urllib.request.urlopen(req, timeout=60) as response:
             response_data = json.loads(response.read().decode('utf-8'))
             content = response_data['content'][0]['text']
-            
             clean_content = content.replace('```json', '').replace('```', '').strip()
             story_data = json.loads(clean_content)
-            
             return story_data
     
     def add_images_to_story(self, story_data, child_photo=None):
+        """מוסיף תמונות לסיפור"""
         pages = story_data.get('pages', [])
         
         for i, page in enumerate(pages):
-            print(f"  🖼️  Generating image {i+1}/{len(pages)}...")
+            print(f"  🖼️  Image {i+1}/{len(pages)}...")
             
             try:
-                # Generate base image
+                # יצירת תמונה
                 if IMAGE_MODE == 'leonardo':
                     image_url = self.generate_image_leonardo(page['illustration'])
                 else:
                     image_url = self.generate_image_pollinations(page['illustration'])
                 
-                # Apply face swap if photo provided
+                # Face Swap אם יש תמונה
                 if image_url and child_photo and USE_FACE_SWAP and REPLICATE_API_TOKEN:
-                    print(f"  👤 Applying face swap...")
-                    swapped_image = self.apply_face_swap(image_url, child_photo)
-                    if swapped_image:
-                        image_url = swapped_image
-                        print(f"  ✅ Face swap successful!")
-                    else:
-                        print(f"  ⚠️  Face swap failed, using original")
+                    print(f"  👤 Face swap...")
+                    swapped = self.apply_face_swap(image_url, child_photo)
+                    if swapped:
+                        image_url = swapped
+                        print(f"  ✅ Face swap done!")
                 
                 page['imageUrl'] = image_url
                 
@@ -147,11 +140,104 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         
         return story_data
     
-    def apply_face_swap(self, target_image_base64, source_face_base64):
-        """החלפת פנים עם Replicate InsightFace"""
+    def generate_image_leonardo(self, prompt):
+        """יוצר תמונה עם Leonardo"""
         try:
-            import ssl
+            if not LEONARDO_API_KEY:
+                raise Exception('Leonardo API key missing')
             
+            print(f"  🎨 Leonardo...")
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            full_prompt = f"{prompt}, children's book illustration, colorful, friendly, storybook art, high quality"
+            
+            gen_data = {
+                "prompt": full_prompt,
+                "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
+                "width": 1024,
+                "height": 1024,
+                "num_images": 1,
+                "seed": 123456789
+            }
+            
+            headers = {
+                'Authorization': f'Bearer {LEONARDO_API_KEY}',
+                'Content-Type': 'application/json'
+            }
+            
+            req = urllib.request.Request(
+                'https://cloud.leonardo.ai/api/rest/v1/generations',
+                data=json.dumps(gen_data).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                gen_id = result['sdGenerationJob']['generationId']
+            
+            # Wait for completion
+            for _ in range(60):
+                time.sleep(1)
+                
+                check_req = urllib.request.Request(
+                    f'https://cloud.leonardo.ai/api/rest/v1/generations/{gen_id}',
+                    headers=headers
+                )
+                
+                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
+                    check_result = json.loads(check_resp.read().decode('utf-8'))
+                    
+                    if check_result['generations_by_pk']['status'] == 'COMPLETE':
+                        img_url = check_result['generations_by_pk']['generated_images'][0]['url']
+                        
+                        # Download
+                        img_req = urllib.request.Request(img_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
+                            img_data = img_resp.read()
+                        
+                        img_b64 = base64.b64encode(img_data).decode()
+                        print(f"  ✅ Done ({len(img_data)} bytes)")
+                        
+                        return f"data:image/jpeg;base64,{img_b64}"
+            
+            raise Exception("Timeout")
+            
+        except Exception as e:
+            print(f"  ⚠️  Leonardo error: {str(e)}")
+            return None
+    
+    def generate_image_pollinations(self, prompt):
+        """יוצר תמונה עם Pollinations"""
+        try:
+            import urllib.parse
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            full_prompt = f"{prompt}, children's book illustration, colorful"
+            encoded = urllib.parse.quote(full_prompt)
+            url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true"
+            
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            
+            with urllib.request.urlopen(req, timeout=90, context=ctx) as response:
+                img_data = response.read()
+            
+            img_b64 = base64.b64encode(img_data).decode()
+            return f"data:image/jpeg;base64,{img_b64}"
+            
+        except Exception as e:
+            print(f"  ⚠️  Pollinations error: {str(e)}")
+            return None
+    
+    def apply_face_swap(self, target_image_b64, source_face_b64):
+        """החלפת פנים עם Replicate"""
+        try:
             if not REPLICATE_API_TOKEN:
                 return None
             
@@ -159,12 +245,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             
-            # Replicate Face Swap API
             swap_data = {
                 "version": "278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
                 "input": {
-                    "target_image": target_image_base64,
-                    "swap_image": source_face_base64
+                    "target_image": target_image_b64,
+                    "swap_image": source_face_b64
                 }
             }
             
@@ -182,31 +267,30 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
                 result = json.loads(response.read().decode('utf-8'))
-                prediction_id = result['id']
+                pred_id = result['id']
             
-            # Poll for result
-            for attempt in range(60):
+            # Wait for result
+            for _ in range(60):
                 time.sleep(1)
                 
                 check_req = urllib.request.Request(
-                    f'https://api.replicate.com/v1/predictions/{prediction_id}',
+                    f'https://api.replicate.com/v1/predictions/{pred_id}',
                     headers=headers
                 )
                 
-                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_response:
-                    check_result = json.loads(check_response.read().decode('utf-8'))
+                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
+                    check_result = json.loads(check_resp.read().decode('utf-8'))
                     
                     if check_result['status'] == 'succeeded':
                         output_url = check_result['output']
                         
-                        # Download swapped image
+                        # Download
                         img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
-                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_response:
-                            image_data = img_response.read()
+                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
+                            img_data = img_resp.read()
                         
-                        # Convert to base64
-                        img_str = base64.b64encode(image_data).decode()
-                        return f"data:image/jpeg;base64,{img_str}"
+                        img_b64 = base64.b64encode(img_data).decode()
+                        return f"data:image/jpeg;base64,{img_b64}"
                     
                     elif check_result['status'] == 'failed':
                         return None
@@ -214,118 +298,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             return None
             
         except Exception as e:
-            print(f"  ⚠️ Face swap error: {str(e)}")
-            return None
-            
-       def generate_image_leonardo(self, prompt):
-            """יוצר תמונה עם Leonardo.AI"""
-            try:
-                import ssl
-                
-                if not LEONARDO_API_KEY:
-                    raise Exception('Leonardo API key not configured')
-                
-                print(f"  🎨 Leonardo: {prompt[:60]}...")
-                
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                
-                enhanced_prompt = f"{prompt}, children's book illustration style, colorful, friendly, warm and inviting, storybook art, high quality, consistent character design"
-                
-                generation_data = {
-                    "prompt": enhanced_prompt,
-                    "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
-                    "width": 1024,
-                    "height": 1024,
-                    "num_images": 1,
-                    "guidanceScale": 7,
-                    "seed": 123456789  # ← seed קבוע לעקביות!
-                }
-                
-                headers = {
-                    'Authorization': f'Bearer {LEONARDO_API_KEY}',
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json'
-                }
-                
-                req = urllib.request.Request(
-                    'https://cloud.leonardo.ai/api/rest/v1/generations',
-                    data=json.dumps(generation_data).encode('utf-8'),
-                    headers=headers,
-                    method='POST'
-                )
-                
-                with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
-                    result = json.loads(response.read().decode('utf-8'))
-                    generation_id = result['sdGenerationJob']['generationId']
-                
-                print(f"  ⏳ Waiting for Leonardo...")
-                
-                for attempt in range(60):
-                    time.sleep(1)
-                    
-                    check_req = urllib.request.Request(
-                        f'https://cloud.leonardo.ai/api/rest/v1/generations/{generation_id}',
-                        headers=headers
-                    )
-                    
-                    with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_response:
-                        check_result = json.loads(check_response.read().decode('utf-8'))
-                        
-                        if check_result['generations_by_pk']['status'] == 'COMPLETE':
-                            image_url = check_result['generations_by_pk']['generated_images'][0]['url']
-                            
-                            img_req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
-                            with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_response:
-                                image_data = img_response.read()
-                            
-                            img_str = base64.b64encode(image_data).decode()
-                            
-                            print(f"  ✅ Image received ({len(image_data)} bytes)")
-                            
-                            return f"data:image/jpeg;base64,{img_str}"
-                
-                raise Exception("Timeout waiting for Leonardo")
-                
-            except Exception as e:
-                print(f"  ⚠️ Leonardo failed: {str(e)}")
-        return None
-    
-    def generate_image_pollinations(self, prompt):
-        """יוצר תמונה עם Pollinations.AI"""
-        try:
-            import urllib.parse
-            import ssl
-            
-            print(f"  🎨 Pollinations: {prompt[:60]}...")
-            
-            enhanced_prompt = f"{prompt}, children's book illustration, colorful, friendly, warm colors"
-            encoded_prompt = urllib.parse.quote(enhanced_prompt)
-            url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
-            
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            
-            req = urllib.request.Request(url, headers={
-                'User-Agent': 'Mozilla/5.0'
-            })
-            
-            with urllib.request.urlopen(req, timeout=90, context=ctx) as response:
-                image_data = response.read()
-            
-            img_str = base64.b64encode(image_data).decode()
-            
-            print(f"  ✅ Image received ({len(image_data)} bytes)")
-            
-            return f"data:image/jpeg;base64,{img_str}"
-            
-        except Exception as e:
-            print(f"  ⚠️ Pollinations failed: {str(e)}")
+            print(f"  ⚠️  Face swap error: {str(e)}")
             return None
     
     def build_story_prompt(self, data):
+        """בונה prompt ל-Claude"""
         theme_names = {
             'animals': 'חיות וטבע',
             'family': 'משפחה ואהבה',
@@ -334,8 +311,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         }
         
         style_names = {
-            'funny': 'מצחיק ומשעשע',
-            'educational': 'חינוכי ומלמד'
+            'funny': 'מצחיק',
+            'educational': 'חינוכי'
         }
         
         pages_by_age = {
@@ -349,60 +326,47 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         theme = theme_names.get(data.get('theme', ''), 'הרפתקאות')
         style = style_names.get(data.get('style', ''), 'מצחיק')
         
-        prompt = f"""
-צור סיפור ילדים בעברית:
+        prompt = f"""צור סיפור ילדים בעברית:
 
-פרטי הילד:
-- שם: {data.get('childName', 'ילד')}
-- גיל: {data.get('childAge', '3-5')}
-- מגדר: {'בת' if data.get('childGender') == 'girl' else 'בן'}
-
-מאפייני הסיפור:
-- נושא: {theme}
-- סגנון: {style}
-- אורך: {pages} עמודים
+שם: {data.get('childName', 'ילד')}
+גיל: {data.get('childAge', '3-5')}
+מגדר: {'בת' if data.get('childGender') == 'girl' else 'בן'}
+נושא: {theme}
+סגנון: {style}
+אורך: {pages} עמודים
 """
         
         if data.get('customInput'):
-            prompt += f"- פרטים מיוחדים: {data['customInput']}\n"
+            prompt += f"פרטים: {data['customInput']}\n"
         
         prompt += """
-דרישות:
-1. הילד הוא הגיבור הראשי
-2. כל עמוד: 1-2 משפטים
-3. צורות פניה נכונות
-4. מסר חיובי
+חשוב: תאר דמויות באופן עקבי!
+- אותו כלב בכל העמודים: "small brown fluffy dog"
+- אותה חתולה: "white cat with blue eyes"
 
-פורמט JSON:
+JSON:
 {
   "pages": [
-    {
-      "text": "טקסט העמוד בעברית",
-      "illustration": "A 4 year old child with a smile, colorful scene"
-    }
+    {"text": "...", "illustration": "A 4 year old child..."}
   ]
 }
-
-חשוב: illustration באנגלית לתמונות!
 """
         return prompt
     
     def handle_suggest_alternative(self):
+        """מציע חלופות לטקסט"""
         try:
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
             
-            prompt = f"""
-הצע 3 חלופות למשפט:
+            prompt = f"""הצע 3 חלופות:
 "{data['currentText']}"
 
-שם הילד: {data.get('childName', '')}
-
 פורמט:
-1. [חלופה 1]
-2. [חלופה 2]
-3. [חלופה 3]
+1. ...
+2. ...
+3. ...
 """
             
             claude_request = {
@@ -443,10 +407,10 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 })
                 
         except Exception as e:
-            print(f"❌ Error: {str(e)}")
             self.send_json_response({'error': str(e)}, status=500)
     
     def handle_generate_pdf(self):
+        """יוצר PDF"""
         try:
             from reportlab.lib.pagesizes import A4
             from reportlab.pdfgen import canvas
@@ -477,7 +441,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             child_name = story_data.get('childName', 'ילד')
             pages = story_data.get('pages', [])
             
-            print(f"📄 Generating PDF for: {child_name}")
+            print(f"📄 PDF for: {child_name}")
             
             buffer = BytesIO()
             c = canvas.Canvas(buffer, pagesize=A4)
@@ -486,7 +450,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             hebrew_font = 'Helvetica'
             font_paths = [
                 '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-                'C:\\Windows\\Fonts\\arial.ttf',
+                'C:\\Windows\\Fonts\\arial.ttf'
             ]
             
             for font_path in font_paths:
@@ -501,7 +465,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             c.setFont(hebrew_font, 32)
             title = fix_hebrew(f"הספר של {child_name}")
             c.drawString((width - c.stringWidth(title, hebrew_font, 32)) / 2, height - 100, title)
-            
             c.showPage()
             
             # Pages
@@ -510,7 +473,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 page_num = fix_hebrew(f"עמוד {i + 1}")
                 c.drawString(width - 100, height - 30, page_num)
                 
-                # Text
                 c.setFont(hebrew_font, 14)
                 text = fix_hebrew(page.get('text', ''))
                 lines = simpleSplit(text, hebrew_font, 14, width - 100)
@@ -530,18 +492,15 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/pdf')
-            self.send_header('Content-Disposition', f'attachment; filename="lilush_tovush_{child_name}.pdf"')
+            self.send_header('Content-Disposition', f'attachment; filename="lilush_{child_name}.pdf"')
             self.send_header('Content-Length', len(pdf_data))
             self.end_headers()
             self.wfile.write(pdf_data)
             
-            print(f"✅ PDF generated ({len(pdf_data)} bytes)")
+            print(f"✅ PDF done ({len(pdf_data)} bytes)")
             
-        except ImportError as e:
-            print(f"❌ Missing library: {str(e)}")
-            self.send_json_response({'error': 'Missing required library for PDF'}, status=500)
         except Exception as e:
-            print(f"❌ Error: {str(e)}")
+            print(f"❌ PDF error: {str(e)}")
             import traceback
             traceback.print_exc()
             self.send_json_response({'error': str(e)}, status=500)
@@ -563,12 +522,11 @@ def run_server(port=None):
         port = int(os.environ.get('PORT', 8000))
     
     print("\n" + "="*60)
-    print("🚀 לילוש טובוש - Server Starting!")
+    print("🚀 לילוש טובוש")
     print("="*60)
-    print(f"📸 Image mode: {IMAGE_MODE}")
-    print(f"👤 Face Swap: {'Enabled' if USE_FACE_SWAP and REPLICATE_API_TOKEN else 'Disabled'}")
-    print("="*60)
-    print(f"📡 Server: http://localhost:{port}")
+    print(f"📸 Images: {IMAGE_MODE}")
+    print(f"👤 Face Swap: {'ON' if USE_FACE_SWAP else 'OFF'}")
+    print(f"📡 Port: {port}")
     print("="*60 + "\n")
     
     server_address = ('', port)
@@ -577,7 +535,7 @@ def run_server(port=None):
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        print("\n👋 Server stopped!")
+        print("\n👋 Stopped!")
 
 
 if __name__ == '__main__':
