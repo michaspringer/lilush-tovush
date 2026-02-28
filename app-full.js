@@ -742,16 +742,41 @@ function updateSummary() {
         <p><strong>סגנון:</strong> ${styleNames[data.style]}</p>
     `;
 }
-
+// Preview photo
+function previewPhoto() {
+    const input = document.getElementById('childPhoto');
+    const preview = document.getElementById('photoPreview');
+    const img = document.getElementById('previewImg');
+    
+    if (input.files && input.files[0]) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            img.src = e.target.result;
+            preview.style.display = 'block';
+        };
+        reader.readAsDataURL(input.files[0]);
+    }
+}
 // ========================================
 // Story Generation
 // ========================================
 async function generateStory() {
     appState.bookData.customInput = document.getElementById('customInput').value.trim();
     
+    // Get photo if exists
+    const photoInput = document.getElementById('childPhoto');
+    let photoBase64 = null;
+    
+    if (photoInput && photoInput.files && photoInput.files[0]) {
+        photoBase64 = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => resolve(e.target.result);
+            reader.readAsDataURL(photoInput.files[0]);
+        });
+    }
+    
     showScreen('generatingScreen');
     
-    // Progress animation
     const steps = ['progress-story', 'progress-images', 'progress-done'];
     let currentStep = 0;
     
@@ -763,10 +788,15 @@ async function generateStory() {
     }, 2000);
     
     try {
-        const response = await fetch('https://web-production-ec858.up.railway.app/api/generate-story', {
+        const requestData = {
+            ...appState.bookData,
+            childPhoto: photoBase64  // ← הוסף את זה!
+        };
+        
+        const response = await fetch(`${SERVER_CONFIG.url}/api/generate-story`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(appState.bookData)
+            body: JSON.stringify(requestData)
         });
         
         if (!response.ok) throw new Error('Failed to generate story');
@@ -787,4 +817,5 @@ async function generateStory() {
         showScreen('creatorScreen');
     }
 }
+
 
