@@ -217,89 +217,80 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"  ⚠️ Face swap error: {str(e)}")
             return None
             
-        def generate_image_leonardo(self, prompt, character_ref=None):
-        """יוצר תמונה עם Leonardo.AI"""
-        try:
-            import ssl
-            
-            if not LEONARDO_API_KEY:
-                raise Exception('Leonardo API key not configured')
-            
-            print(f"  🎨 Leonardo: {prompt[:60]}...")
-            
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            
-            enhanced_prompt = f"{prompt}, children's book illustration style, colorful, friendly, warm and inviting, storybook art, high quality, consistent character design"
-            
-            generation_data = {
-                "prompt": enhanced_prompt,
-                "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
-                "width": 1024,
-                "height": 1024,
-                "num_images": 1,
-                "guidanceScale": 7,  # ← עקביות
-                "seed": 42  # ← אותו seed = תוצאות דומות!
-            }
-            
-            # אם יש character reference (תמונה ראשונה)
-            if character_ref:
-                generation_data["controlnets"] = [{
-                    "initImageId": character_ref,
-                    "preprocessorId": 67,  # Character Reference
-                    "weight": 0.85
-                }]
-   
-            
-            headers = {
-                'Authorization': f'Bearer {LEONARDO_API_KEY}',
-                'Content-Type': 'application/json',
-                'Accept': 'application/json'
-            }
-            
-            req = urllib.request.Request(
-                'https://cloud.leonardo.ai/api/rest/v1/generations',
-                data=json.dumps(generation_data).encode('utf-8'),
-                headers=headers,
-                method='POST'
-            )
-            
-            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                generation_id = result['sdGenerationJob']['generationId']
-            
-            print(f"  ⏳ Waiting for Leonardo...")
-            
-            for attempt in range(60):
-                time.sleep(1)
+       def generate_image_leonardo(self, prompt):
+            """יוצר תמונה עם Leonardo.AI"""
+            try:
+                import ssl
                 
-                check_req = urllib.request.Request(
-                    f'https://cloud.leonardo.ai/api/rest/v1/generations/{generation_id}',
-                    headers=headers
+                if not LEONARDO_API_KEY:
+                    raise Exception('Leonardo API key not configured')
+                
+                print(f"  🎨 Leonardo: {prompt[:60]}...")
+                
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                
+                enhanced_prompt = f"{prompt}, children's book illustration style, colorful, friendly, warm and inviting, storybook art, high quality, consistent character design"
+                
+                generation_data = {
+                    "prompt": enhanced_prompt,
+                    "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
+                    "width": 1024,
+                    "height": 1024,
+                    "num_images": 1,
+                    "guidanceScale": 7,
+                    "seed": 123456789  # ← seed קבוע לעקביות!
+                }
+                
+                headers = {
+                    'Authorization': f'Bearer {LEONARDO_API_KEY}',
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                }
+                
+                req = urllib.request.Request(
+                    'https://cloud.leonardo.ai/api/rest/v1/generations',
+                    data=json.dumps(generation_data).encode('utf-8'),
+                    headers=headers,
+                    method='POST'
                 )
                 
-                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_response:
-                    check_result = json.loads(check_response.read().decode('utf-8'))
+                with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                    result = json.loads(response.read().decode('utf-8'))
+                    generation_id = result['sdGenerationJob']['generationId']
+                
+                print(f"  ⏳ Waiting for Leonardo...")
+                
+                for attempt in range(60):
+                    time.sleep(1)
                     
-                    if check_result['generations_by_pk']['status'] == 'COMPLETE':
-                        image_url = check_result['generations_by_pk']['generated_images'][0]['url']
+                    check_req = urllib.request.Request(
+                        f'https://cloud.leonardo.ai/api/rest/v1/generations/{generation_id}',
+                        headers=headers
+                    )
+                    
+                    with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_response:
+                        check_result = json.loads(check_response.read().decode('utf-8'))
                         
-                        img_req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
-                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_response:
-                            image_data = img_response.read()
-                        
-                        img_str = base64.b64encode(image_data).decode()
-                        
-                        print(f"  ✅ Image received ({len(image_data)} bytes)")
-                        
-                        return f"data:image/jpeg;base64,{img_str}"
-            
-            raise Exception("Timeout waiting for Leonardo")
-            
-        except Exception as e:
-            print(f"  ⚠️ Leonardo failed: {str(e)}")
-            return None
+                        if check_result['generations_by_pk']['status'] == 'COMPLETE':
+                            image_url = check_result['generations_by_pk']['generated_images'][0]['url']
+                            
+                            img_req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
+                            with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_response:
+                                image_data = img_response.read()
+                            
+                            img_str = base64.b64encode(image_data).decode()
+                            
+                            print(f"  ✅ Image received ({len(image_data)} bytes)")
+                            
+                            return f"data:image/jpeg;base64,{img_str}"
+                
+                raise Exception("Timeout waiting for Leonardo")
+                
+            except Exception as e:
+                print(f"  ⚠️ Leonardo failed: {str(e)}")
+        return None
     
     def generate_image_pollinations(self, prompt):
         """יוצר תמונה עם Pollinations.AI"""
