@@ -109,6 +109,9 @@
 
         // Server configuration
         const SERVER_URL = 'https://web-production-ec858.up.railway.app';
+        const SERVER_CONFIG = {
+            url: SERVER_URL
+        };
 
         // Demo story data (in real app, this comes from API)
         const demoStory = {
