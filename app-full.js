@@ -360,92 +360,40 @@
         }
 
         // PDF Generation
-        async function downloadPDF() {
+       async function downloadPDF() {
+            if (!currentStory) {
+                alert('אין ספר לשמירה');
+                return;
+            }
+            
             const modal = document.getElementById('pdfModal');
             modal.classList.add('active');
-
+            
             try {
-                // Use jsPDF
-                const { jsPDF } = window.jspdf;
-                const doc = new jsPDF({
-                    orientation: 'portrait',
-                    unit: 'mm',
-                    format: 'a4'
+                const response = await fetch(`${SERVER_CONFIG.url}/api/generate-pdf`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(currentStory)
                 });
-
-                const pageWidth = doc.internal.pageSize.getWidth();
-                const pageHeight = doc.internal.pageSize.getHeight();
-                const margin = 20;
-                const contentWidth = pageWidth - (margin * 2);
-
-                // Title page
-                doc.setFontSize(32);
-                doc.setFont(undefined, 'bold');
-                doc.text(`הספר של ${currentStory.childName}`, pageWidth / 2, 50, { align: 'center' });
                 
-                doc.setFontSize(16);
-                doc.setFont(undefined, 'normal');
-                doc.text('סיפור מותאם אישית', pageWidth / 2, 70, { align: 'center' });
-                doc.text('מבית לילוש טובוש', pageWidth / 2, 85, { align: 'center' });
-
-                // Story pages
-                currentStory.pages.forEach((page, index) => {
-                    doc.addPage();
-                    
-                    // Page number
-                    doc.setFontSize(12);
-                    doc.setFont(undefined, 'bold');
-                    doc.text(`עמוד ${index + 1}`, pageWidth - margin, margin);
-                    
-                    // Illustration placeholder
-                    doc.setFillColor(200, 230, 220);
-                    doc.rect(margin, margin + 10, contentWidth, 80, 'F');
-                    doc.setFontSize(10);
-                    doc.setTextColor(100);
-                    doc.text('[מקום לאיור]', pageWidth / 2, margin + 50, { align: 'center' });
-                    doc.setTextColor(0);
-                    
-                    // Text
-                    doc.setFontSize(14);
-                    doc.setFont(undefined, 'normal');
-                    const textY = margin + 100;
-                    
-                    // Split text into lines that fit
-                    const lines = doc.splitTextToSize(page.text, contentWidth);
-                    doc.text(lines, margin, textY);
-                    
-                    // Illustration note
-                    const noteY = textY + (lines.length * 7) + 20;
-                    doc.setFontSize(9);
-                    doc.setTextColor(100);
-                    doc.text('הוראות לאיור:', margin, noteY);
-                    const illustrationLines = doc.splitTextToSize(page.illustration, contentWidth);
-                    doc.text(illustrationLines, margin, noteY + 5);
-                    doc.setTextColor(0);
-                });
-
-                // End page
-                doc.addPage();
-                doc.setFontSize(28);
-                doc.setFont(undefined, 'bold');
-                doc.text('סוף הסיפור', pageWidth / 2, pageHeight / 2, { align: 'center' });
+                if (!response.ok) throw new Error('Failed to generate PDF');
                 
-                doc.setFontSize(14);
-                doc.setFont(undefined, 'normal');
-                doc.text(`${currentStory.childName} היקר/ה,`, pageWidth / 2, (pageHeight / 2) + 20, { align: 'center' });
-                doc.text('זכור/י תמיד: כל חבר הוא מיוחד!', pageWidth / 2, (pageHeight / 2) + 30, { align: 'center' });
-
-                // Save
-                doc.save(`${currentStory.childName}_story.pdf`);
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `lilush_tovush_${currentStory.childName || 'story'}.pdf`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
                 
-                setTimeout(() => {
-                    modal.classList.remove('active');
-                    alert('✅ הקובץ נשמר בהצלחה!');
-                }, 1000);
-
+                modal.classList.remove('active');
+                
             } catch (error) {
                 modal.classList.remove('active');
-                alert('❌ שגיאה ביצירת PDF: ' + error.message);
+                alert('שגיאה ביצירת PDF: ' + error.message);
+                console.error(error);
             }
         }
 
