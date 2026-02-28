@@ -216,8 +216,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             print(f"  ⚠️ Face swap error: {str(e)}")
             return None
-    
-    def generate_image_leonardo(self, prompt):
+            
+        def generate_image_leonardo(self, prompt, character_ref=None):
         """יוצר תמונה עם Leonardo.AI"""
         try:
             import ssl
@@ -231,15 +231,26 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             
-            enhanced_prompt = f"{prompt}, children's book illustration style, colorful, friendly, warm and inviting, storybook art, high quality"
+            enhanced_prompt = f"{prompt}, children's book illustration style, colorful, friendly, warm and inviting, storybook art, high quality, consistent character design"
             
             generation_data = {
                 "prompt": enhanced_prompt,
                 "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
                 "width": 1024,
                 "height": 1024,
-                "num_images": 1
+                "num_images": 1,
+                "guidanceScale": 7,  # ← עקביות
+                "seed": 42  # ← אותו seed = תוצאות דומות!
             }
+            
+            # אם יש character reference (תמונה ראשונה)
+            if character_ref:
+                generation_data["controlnets"] = [{
+                    "initImageId": character_ref,
+                    "preprocessorId": 67,  # Character Reference
+                    "weight": 0.85
+                }]
+   
             
             headers = {
                 'Authorization': f'Bearer {LEONARDO_API_KEY}',
