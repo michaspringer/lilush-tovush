@@ -38,6 +38,13 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         self.send_response(200)
         self.end_headers()
     
+    def do_GET(self):
+        if self.path.startswith('/api/training-status/'):
+            training_id = self.path.split('/')[-1]
+            self.handle_training_status(training_id)
+        else:
+            SimpleHTTPRequestHandler.do_GET(self)
+    
     def do_POST(self):
         if self.path == '/api/generate-story':
             self.handle_generate_story()
@@ -45,6 +52,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.handle_suggest_alternative()
         elif self.path == '/api/generate-pdf':
             self.handle_generate_pdf()
+        elif self.path == '/api/train-model':
+            self.handle_train_model()
+        elif self.path.startswith('/api/training-status/'):
+            training_id = self.path.split('/')[-1]
+            self.handle_training_status(training_id)
         else:
             self.send_error(404)
     
@@ -56,13 +68,20 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             child_name = request_data.get('childName', 'ילד')
             child_photo = request_data.get('childPhoto')
+            ai_model_id = request_data.get('ai_model_id')  # NEW!
             
             print(f"\n📖 Creating story for: {child_name}")
             if child_photo:
                 print("📸 Photo uploaded - will use Face Swap!")
+            if ai_model_id:
+                print(f"🤖 Using trained AI model: {ai_model_id[:20]}...")
             
             print("📝 Step 1: Generating story with Claude...")
             story_data = self.create_story_with_claude(request_data)
+            
+            # Add AI model ID to story data
+            if ai_model_id:
+                story_data['ai_model_id'] = ai_model_id
             
             if IMAGE_MODE != 'none' and story_data.get('pages'):
                 print(f"🎨 Step 2: Generating images ({IMAGE_MODE})...")
@@ -113,19 +132,24 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
     def add_images_to_story(self, story_data, child_photo=None):
         """מוסיף תמונות לסיפור"""
         pages = story_data.get('pages', [])
+        ai_model_id = story_data.get('ai_model_id')  # NEW!
         
         for i, page in enumerate(pages):
             print(f"  🖼️  Image {i+1}/{len(pages)}...")
             
             try:
                 # יצירת תמונה
-                if IMAGE_MODE == 'leonardo':
+                if ai_model_id:
+                    # Use trained AI model!
+                    print(f"  🤖 Using trained model: {ai_model_id[:20]}...")
+                    image_url = self.generate_with_trained_model(page['illustration'], ai_model_id)
+                elif IMAGE_MODE == 'leonardo':
                     image_url = self.generate_image_leonardo(page['illustration'])
                 else:
                     image_url = self.generate_image_pollinations(page['illustration'])
                 
                 # Face Swap אם יש תמונה
-                if image_url and child_photo and USE_FACE_SWAP and REPLICATE_API_TOKEN:
+                if image_url and child_photo and USE_FACE_SWAP and REPLICATE_API_TOKEN and not ai_model_id:
                     print(f"  👤 Face swap...")
                     swapped = self.apply_face_swap(image_url, child_photo)
                     if swapped:
@@ -234,6 +258,84 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             print(f"  ⚠️  Pollinations error: {str(e)}")
             return None
+    
+    def generate_with_trained_model(self, prompt, model_id):
+        """יוצר תמונה עם המודל המאומן!"""
+        try:
+            if not REPLICATE_API_TOKEN:
+                raise Exception('Replicate API token missing')
+            
+            print(f"  🤖 Using trained model...")
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            # Enhanced prompt for children's books
+            full_prompt = f"{prompt}, children's book illustration style, colorful, friendly, warm and inviting, storybook art, high quality"
+            
+            prediction_data = {
+                "version": model_id,
+                "input": {
+                    "prompt": full_prompt,
+                    "num_outputs": 1,
+                    "aspect_ratio": "1:1",
+                    "output_format": "jpg",
+                    "output_quality": 90
+                }
+            }
+            
+            headers = {
+                'Authorization': f'Token {REPLICATE_API_TOKEN}',
+                'Content-Type': 'application/json'
+            }
+            
+            req = urllib.request.Request(
+                'https://api.replicate.com/v1/predictions',
+                data=json.dumps(prediction_data).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                prediction_id = result['id']
+            
+            # Wait for completion
+            for _ in range(60):
+                time.sleep(2)
+                
+                check_req = urllib.request.Request(
+                    f'https://api.replicate.com/v1/predictions/{prediction_id}',
+                    headers=headers
+                )
+                
+                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
+                    check_result = json.loads(check_resp.read().decode('utf-8'))
+                    
+                    if check_result['status'] == 'succeeded':
+                        output_url = check_result['output'][0] if isinstance(check_result['output'], list) else check_result['output']
+                        
+                        # Download image
+                        img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
+                            img_data = img_resp.read()
+                        
+                        img_b64 = base64.b64encode(img_data).decode()
+                        print(f"  ✅ Image with trained model received!")
+                        
+                        return f"data:image/jpeg;base64,{img_b64}"
+                    
+                    elif check_result['status'] == 'failed':
+                        raise Exception(f"Prediction failed: {check_result.get('error')}")
+            
+            raise Exception("Timeout waiting for trained model")
+            
+        except Exception as e:
+            print(f"  ⚠️ Trained model error: {str(e)}")
+            # Fallback to regular generation
+            print(f"  ⚠️ Falling back to Leonardo...")
+            return self.generate_image_leonardo(prompt)
     
     def apply_face_swap(self, target_image_b64, source_face_b64):
         """החלפת פנים עם Replicate"""
@@ -464,8 +566,7 @@ JSON:
             # Cover
             c.setFont(hebrew_font, 32)
             title = fix_hebrew(f"הספר של {child_name}")
-            title_width = c.stringWidth(title, hebrew_font, 32)
-            c.drawString((width - title_width) / 2, height - 100, title)
+            c.drawString((width - c.stringWidth(title, hebrew_font, 32)) / 2, height - 100, title)
             c.showPage()
             
             # Pages
@@ -493,8 +594,7 @@ JSON:
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/pdf')
-            filename = f'lilush_story.pdf'  # ללא שם עברית!
-            self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
+            self.send_header('Content-Disposition', f'attachment; filename="lilush_{child_name}.pdf"')
             self.send_header('Content-Length', len(pdf_data))
             self.end_headers()
             self.wfile.write(pdf_data)
@@ -517,6 +617,177 @@ JSON:
         if self.path.startswith('/api/'):
             return
         SimpleHTTPRequestHandler.log_message(self, format, *args)
+    
+    # ==========================================
+    # 🤖 AI Training Endpoints (NEW!)
+    # ==========================================
+    
+    def handle_train_model(self):
+        """מאמן מודל AI על בסיס תמונות הילד"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            photos = data.get('photos', [])
+            child_name = data.get('child_name', 'child')
+            
+            print(f"\n🤖 Starting AI Training")
+            print(f"📸 Photos: {len(photos)}")
+            print(f"👤 Name: {child_name}")
+            
+            if not REPLICATE_API_TOKEN:
+                raise Exception('Replicate API token not configured')
+            
+            if len(photos) < 5:
+                raise Exception('Need at least 5 photos for training')
+            
+            # Start training
+            training_id = self.start_replicate_training(photos, child_name)
+            
+            if training_id:
+                print(f"✅ Training started: {training_id}")
+                
+                self.send_json_response({
+                    'success': True,
+                    'training_id': training_id,
+                    'message': 'Training started successfully',
+                    'estimated_time': '5-10 minutes'
+                })
+            else:
+                raise Exception('Failed to start training')
+                
+        except Exception as e:
+            print(f"❌ Training error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({'error': str(e)}, status=500)
+    
+    def start_replicate_training(self, photos, child_name):
+        """מתחיל אימון ב-Replicate"""
+        try:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            # Prepare training data
+            training_data = {
+                "destination": f"{child_name}/flux-lora",
+                "input": {
+                    "input_images": photos[0] if len(photos) == 1 else f"data:application/zip;base64,{self.create_zip_from_photos(photos)}",
+                    "steps": 1000,
+                    "lora_rank": 16,
+                    "optimizer": "adamw8bit",
+                    "batch_size": 1,
+                    "resolution": "512,768,1024",
+                    "autocaption": True,
+                    "trigger_word": child_name,
+                    "learning_rate": 0.0004
+                },
+                "model": "ostris/flux-dev-lora-trainer",
+                "trainer_version": "4ffd32160efd92e956d39c5338a9b8fbafca58e03f791f6d8011f3e20e8ea6fa"
+            }
+            
+            headers = {
+                'Authorization': f'Token {REPLICATE_API_TOKEN}',
+                'Content-Type': 'application/json',
+                'Prefer': 'wait'
+            }
+            
+            # POST request
+            req = urllib.request.Request(
+                'https://api.replicate.com/v1/trainings',
+                data=json.dumps(training_data).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                return result['id']
+                
+        except Exception as e:
+            print(f"  ⚠️ Replicate training error: {str(e)}")
+            return None
+    
+    def create_zip_from_photos(self, photos):
+        """יוצר ZIP מתמונות base64"""
+        try:
+            import zipfile
+            from io import BytesIO
+            
+            zip_buffer = BytesIO()
+            
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                for i, photo_b64 in enumerate(photos):
+                    # Remove data:image/... prefix
+                    if ',' in photo_b64:
+                        photo_b64 = photo_b64.split(',')[1]
+                    
+                    photo_data = base64.b64decode(photo_b64)
+                    zip_file.writestr(f'photo_{i+1}.jpg', photo_data)
+            
+            zip_data = zip_buffer.getvalue()
+            return base64.b64encode(zip_data).decode()
+            
+        except Exception as e:
+            print(f"  ⚠️ ZIP creation error: {str(e)}")
+            return None
+    
+    def handle_training_status(self, training_id):
+        """בודק סטטוס של training"""
+        try:
+            if not REPLICATE_API_TOKEN:
+                raise Exception('Replicate API token not configured')
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            headers = {
+                'Authorization': f'Token {REPLICATE_API_TOKEN}',
+                'Content-Type': 'application/json'
+            }
+            
+            req = urllib.request.Request(
+                f'https://api.replicate.com/v1/trainings/{training_id}',
+                headers=headers
+            )
+            
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                
+                status = result.get('status')
+                
+                response_data = {
+                    'status': status,
+                    'id': training_id
+                }
+                
+                if status == 'succeeded':
+                    # Get the model version
+                    model_version = result.get('output', {}).get('version')
+                    if model_version:
+                        response_data['model_id'] = model_version
+                        print(f"✅ Training completed: {model_version}")
+                    
+                elif status == 'failed':
+                    error = result.get('error', 'Unknown error')
+                    response_data['error'] = error
+                    print(f"❌ Training failed: {error}")
+                
+                elif status in ['starting', 'processing']:
+                    # Still in progress
+                    logs = result.get('logs', '')
+                    if logs:
+                        # Extract progress from logs if available
+                        response_data['logs'] = logs[-200:]  # Last 200 chars
+                
+                self.send_json_response(response_data)
+                
+        except Exception as e:
+            print(f"❌ Status check error: {str(e)}")
+            self.send_json_response({'error': str(e)}, status=500)
 
 
 def run_server(port=None):
