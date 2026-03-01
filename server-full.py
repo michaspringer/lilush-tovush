@@ -464,7 +464,8 @@ JSON:
             # Cover
             c.setFont(hebrew_font, 32)
             title = fix_hebrew(f"הספר של {child_name}")
-            c.drawString((width - c.stringWidth(title, hebrew_font, 32)) / 2, height - 100, title)
+            title_width = c.stringWidth(title, hebrew_font, 32)
+            c.drawString((width - title_width) / 2, height - 100, title)
             c.showPage()
             
             # Pages
@@ -492,7 +493,8 @@ JSON:
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/pdf')
-            self.send_header('Content-Disposition', f'attachment; filename="lilush_{child_name}.pdf"')
+            filename = f'lilush_story.pdf'  # ללא שם עברית!
+            self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
             self.send_header('Content-Length', len(pdf_data))
             self.end_headers()
             self.wfile.write(pdf_data)
