@@ -11,24 +11,20 @@ const SERVER_CONFIG = {
 const AITrainingManager = {
     MODEL_KEY: 'lilush_ai_model',
     
-    // שמירת מודל
     saveModel(modelData) {
         localStorage.setItem(this.MODEL_KEY, JSON.stringify(modelData));
         console.log('🤖 AI Model saved:', modelData.model_id);
     },
     
-    // טעינת מודל
     loadModel() {
         const saved = localStorage.getItem(this.MODEL_KEY);
         return saved ? JSON.parse(saved) : null;
     },
     
-    // האם יש מודל
     hasModel() {
         return !!this.loadModel();
     },
     
-    // מחיקת מודל
     deleteModel() {
         localStorage.removeItem(this.MODEL_KEY);
     }
@@ -55,7 +51,7 @@ const StorageManager = {
     
     loadCurrentStory() {
         try {
-            const saved = localStorage.setItem(this.CURRENT_STORY_KEY);
+            const saved = localStorage.getItem(this.CURRENT_STORY_KEY);
             if (saved) {
                 return JSON.parse(saved);
             }
@@ -104,19 +100,39 @@ const StorageManager = {
 };
 
 // ==========================================
-// 🎨 AI Profile Functions (NEW!)
+// 🎯 Main App State
+// ==========================================
+let currentStory = null;
+const appState = {
+    bookData: {
+        childName: '',
+        childAge: '',
+        childGender: '',
+        theme: '',
+        style: '',
+        customInput: ''
+    }
+};
+
+// ==========================================
+// 🎨 AI Profile Functions
 // ==========================================
 
 function showProfileCreation() {
     const existingModel = AITrainingManager.loadModel();
     
     if (existingModel) {
-        if (confirm(`יש לכם כבר פרופיל AI!\nנוצר ב: ${new Date(existingModel.created_at).toLocaleDateString('he-IL')}\n\nרוצים ליצור ספר עם הפרופיל הקיים?`)) {
+        console.log('Found existing model:', existingModel);
+        const createdDate = new Date(existingModel.created_at).toLocaleDateString('he-IL');
+        
+        if (confirm(`יש לכם כבר פרופיל AI! 🤖\n\nנוצר ב: ${createdDate}\nתמונות: ${existingModel.photo_count}\n\nרוצים ליצור ספר עם הפרופיל הקיים?`)) {
             startCreation();
-        } else if (confirm('רוצים ליצור פרופיל חדש? (זה ידרוס את הקיים)')){
+        } else if (confirm('רוצים ליצור פרופיל חדש?\n\n(זה ידרוס את הפרופיל הקיים)')) {
+            AITrainingManager.deleteModel();
             showScreen('profileScreen');
         }
     } else {
+        console.log('No existing model found');
         showScreen('profileScreen');
     }
 }
@@ -146,7 +162,6 @@ function previewTrainingPhotos() {
         return;
     }
     
-    // Show previews
     Array.from(input.files).forEach((file, i) => {
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -183,7 +198,6 @@ async function startTraining() {
     showScreen('trainingScreen');
     
     try {
-        // Convert to base64
         document.getElementById('trainingStatus').textContent = 'מעלה תמונות...';
         document.getElementById('trainingProgressBar').style.width = '10%';
         
@@ -201,7 +215,6 @@ async function startTraining() {
         document.getElementById('trainingProgressBar').style.width = '30%';
         document.getElementById('trainingStatus').textContent = 'שולח לשרת...';
         
-        // Call training API
         const response = await fetch(`${SERVER_CONFIG.url}/api/train-model`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -219,50 +232,55 @@ async function startTraining() {
         
         document.getElementById('training-process').classList.add('active');
         document.getElementById('trainingProgressBar').style.width = '60%';
-        document.getElementById('trainingStatus').textContent = 'מאמן AI... (זה ייקח כ-5-10 דקות)';
+        document.getElementById('trainingStatus').textContent = 'מאמן AI...';
         
-        // Poll for status
         const trainingId = data.training_id;
-        let progress = 60;
+        let attempts = 0;
+        const maxAttempts = 60;
         
-        while (true) {
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Check every 5 seconds
+        while (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            attempts++;
             
             const statusResponse = await fetch(`${SERVER_CONFIG.url}/api/training-status/${trainingId}`);
             const statusData = await statusResponse.json();
+            
+            const progress = 60 + (attempts / maxAttempts) * 35;
+            document.getElementById('trainingProgressBar').style.width = progress + '%';
             
             if (statusData.status === 'succeeded') {
                 document.getElementById('training-done').classList.add('active');
                 document.getElementById('trainingProgressBar').style.width = '100%';
                 document.getElementById('trainingStatus').textContent = 'מוכן! 🎉';
                 
-                // Save model
-                AITrainingManager.saveModel({
+                const modelData = {
                     model_id: statusData.model_id,
                     created_at: new Date().toISOString(),
                     photo_count: photos.length
-                });
+                };
                 
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                AITrainingManager.saveModel(modelData);
+                console.log('🤖 Model saved:', modelData);
                 
-                alert('✅ הפרופיל מוכן!\n\nעכשיו הילד יופיע בכל ספר שתיצרו! 🌟');
-                startCreation(); // במקום showScreen('landingScreen')
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                alert('✅ הפרופיל מוכן!\n\nעכשיו תוכלו ליצור ספרים עם הילד בתמונות! 🌟');
+                
+                startCreation();
                 break;
                 
             } else if (statusData.status === 'failed') {
                 throw new Error('Training failed: ' + (statusData.error || 'Unknown error'));
-                
-            } else {
-                // Still processing
-                progress = Math.min(progress + 5, 95);
-                document.getElementById('trainingProgressBar').style.width = progress + '%';
-                document.getElementById('trainingStatus').textContent = `מאמן AI... ${Math.round(progress)}%`;
             }
+        }
+        
+        if (attempts >= maxAttempts) {
+            throw new Error('Training timeout');
         }
         
     } catch (error) {
         console.error('Training error:', error);
-        alert('❌ שגיאה באימון: ' + error.message + '\n\nאפשר לנסות שוב או ליצור ספר רגיל בלי פרופיל.');
+        alert('❌ שגיאה באימון: ' + error.message + '\n\nאפשר לנסות שוב או ליצור ספר רגיל.');
         showScreen('profileScreen');
     }
 }
@@ -274,26 +292,17 @@ function skipTraining() {
 }
 
 // ==========================================
-// 🎯 Main App Logic
+// 🎯 Navigation & Screens
 // ==========================================
-
-let currentStory = null;
-const appState = {
-    bookData: {
-        childName: '',
-        childAge: '',
-        childGender: '',
-        theme: '',
-        style: '',
-        customInput: ''
-    }
-};
 
 function showScreen(screenId) {
     document.querySelectorAll('.screen').forEach(screen => {
         screen.classList.remove('active');
     });
-    document.getElementById(screenId).classList.add('active');
+    const targetScreen = document.getElementById(screenId);
+    if (targetScreen) {
+        targetScreen.classList.add('active');
+    }
 }
 
 function startCreation() {
@@ -310,67 +319,101 @@ function resetForm() {
         style: '',
         customInput: ''
     };
-    document.getElementById('childName').value = '';
+    
+    const nameInput = document.getElementById('childName');
+    if (nameInput) nameInput.value = '';
+    
     document.querySelectorAll('.age-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.gender-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.theme-card').forEach(card => card.classList.remove('selected'));
     document.querySelectorAll('.style-card').forEach(card => card.classList.remove('selected'));
-    document.getElementById('customInput').value = '';
+    
+    const customInput = document.getElementById('customInput');
+    if (customInput) customInput.value = '';
     
     showFormStep(1);
 }
 
 function showFormStep(step) {
     document.querySelectorAll('.form-step').forEach(s => s.classList.remove('active'));
-    document.getElementById(`step${step}`).classList.add('active');
+    const stepElement = document.getElementById(`step${step}`);
+    if (stepElement) {
+        stepElement.classList.add('active');
+    }
     
     document.querySelectorAll('.progress-step').forEach(s => s.classList.remove('active'));
     for (let i = 1; i <= step; i++) {
-        document.getElementById(`step${i}-indicator`).classList.add('active');
+        const indicator = document.getElementById(`step${i}-indicator`);
+        if (indicator) {
+            indicator.classList.add('active');
+        }
     }
 }
 
+// ==========================================
+// 📝 Form Functions
+// ==========================================
+
 function validateStep1() {
-    const name = document.getElementById('childName').value.trim();
+    const nameInput = document.getElementById('childName');
+    const name = nameInput ? nameInput.value.trim() : '';
     const age = appState.bookData.childAge;
     const gender = appState.bookData.childGender;
     
     const isValid = name && age && gender;
-    document.getElementById('step1-next').disabled = !isValid;
+    const nextBtn = document.getElementById('step1-next');
+    if (nextBtn) {
+        nextBtn.disabled = !isValid;
+    }
     
     if (name) appState.bookData.childName = name;
 }
 
 function selectAge(age) {
     document.querySelectorAll('.age-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
+    if (event && event.target) {
+        event.target.classList.add('active');
+    }
     appState.bookData.childAge = age;
     validateStep1();
 }
 
 function selectGender(gender) {
     document.querySelectorAll('.gender-btn').forEach(btn => btn.classList.remove('active'));
-    event.target.classList.add('active');
+    if (event && event.target) {
+        event.target.classList.add('active');
+    }
     appState.bookData.childGender = gender;
     validateStep1();
 }
 
 function selectTheme(theme) {
     document.querySelectorAll('.theme-card').forEach(card => card.classList.remove('selected'));
-    event.target.closest('.theme-card').classList.add('selected');
+    if (event && event.target) {
+        const card = event.target.closest('.theme-card');
+        if (card) card.classList.add('selected');
+    }
     appState.bookData.theme = theme;
-    document.getElementById('step2-next').disabled = false;
+    const nextBtn = document.getElementById('step2-next');
+    if (nextBtn) nextBtn.disabled = false;
 }
 
 function selectStyle(style) {
     document.querySelectorAll('.style-card').forEach(card => card.classList.remove('selected'));
-    event.target.closest('.style-card').classList.add('selected');
+    if (event && event.target) {
+        const card = event.target.closest('.style-card');
+        if (card) card.classList.add('selected');
+    }
     appState.bookData.style = style;
-    document.getElementById('step3-next').disabled = false;
+    const nextBtn = document.getElementById('step3-next');
+    if (nextBtn) nextBtn.disabled = false;
 }
 
 function nextStep() {
-    const currentStep = document.querySelector('.form-step.active').id.replace('step', '');
+    const currentStepElement = document.querySelector('.form-step.active');
+    if (!currentStepElement) return;
+    
+    const currentStep = currentStepElement.id.replace('step', '');
     const nextStepNum = parseInt(currentStep) + 1;
     
     if (nextStepNum === 4) {
@@ -381,19 +424,28 @@ function nextStep() {
 }
 
 function prevStep() {
-    const currentStep = document.querySelector('.form-step.active').id.replace('step', '');
+    const currentStepElement = document.querySelector('.form-step.active');
+    if (!currentStepElement) return;
+    
+    const currentStep = currentStepElement.id.replace('step', '');
     const prevStepNum = parseInt(currentStep) - 1;
-    showFormStep(prevStepNum);
+    
+    if (prevStepNum >= 1) {
+        showFormStep(prevStepNum);
+    }
 }
 
 function updateSummary() {
     const summary = document.getElementById('summaryContent');
+    if (!summary) return;
+    
     const themeNames = {
         'animals': 'חיות וטבע',
         'family': 'משפחה ואהבה',
         'space': 'חלל וכוכבים',
         'magic': 'קסם ופנטזיה'
     };
+    
     const styleNames = {
         'funny': 'מצחיק ומשעשע',
         'educational': 'חינוכי ומלמד'
@@ -412,8 +464,13 @@ function updateSummary() {
     `;
 }
 
+// ==========================================
+// 📚 Story Generation
+// ==========================================
+
 async function generateStory() {
-    appState.bookData.customInput = document.getElementById('customInput').value.trim();
+    const customInputElement = document.getElementById('customInput');
+    appState.bookData.customInput = customInputElement ? customInputElement.value.trim() : '';
     
     showScreen('generatingScreen');
     
@@ -422,7 +479,10 @@ async function generateStory() {
     
     const progressInterval = setInterval(() => {
         if (currentStep < steps.length) {
-            document.getElementById(steps[currentStep]).classList.add('active');
+            const stepElement = document.getElementById(steps[currentStep]);
+            if (stepElement) {
+                stepElement.classList.add('active');
+            }
             currentStep++;
         }
     }, 2000);
@@ -462,9 +522,16 @@ async function generateStory() {
 
 function displayStory(story) {
     const container = document.getElementById('storyPages');
+    if (!container) return;
+    
     container.innerHTML = '';
     
-    document.getElementById('previewTitle').textContent = `🌈 הספר של ${story.childName} 🌈`;
+    const titleElement = document.getElementById('previewTitle');
+    if (titleElement) {
+        titleElement.textContent = `🌈 הספר של ${story.childName} 🌈`;
+    }
+    
+    if (!story.pages) return;
     
     story.pages.forEach((page, index) => {
         const pageDiv = document.createElement('div');
@@ -514,28 +581,36 @@ function displayStory(story) {
     });
 }
 
+// ==========================================
+// ✏️ Editing Functions
+// ==========================================
+
 function startEdit(pageIndex) {
     const textDiv = document.getElementById(`text-${pageIndex}`);
     const textarea = document.getElementById(`edit-${pageIndex}`);
     const saveBtn = document.getElementById(`save-${pageIndex}`);
     const cancelBtn = document.getElementById(`cancel-${pageIndex}`);
     
-    textDiv.style.display = 'none';
-    textarea.style.display = 'block';
-    saveBtn.style.display = 'inline-block';
-    cancelBtn.style.display = 'inline-block';
-    textarea.focus();
+    if (textDiv) textDiv.style.display = 'none';
+    if (textarea) {
+        textarea.style.display = 'block';
+        textarea.focus();
+    }
+    if (saveBtn) saveBtn.style.display = 'inline-block';
+    if (cancelBtn) cancelBtn.style.display = 'inline-block';
 }
 
 function saveEdit(pageIndex) {
     const textDiv = document.getElementById(`text-${pageIndex}`);
     const textarea = document.getElementById(`edit-${pageIndex}`);
-    const newText = textarea.value.trim();
     
-    if (newText) {
-        currentStory.pages[pageIndex].text = newText;
-        textDiv.textContent = newText;
-        StorageManager.saveCurrentStory(currentStory);
+    if (textarea && currentStory && currentStory.pages[pageIndex]) {
+        const newText = textarea.value.trim();
+        if (newText) {
+            currentStory.pages[pageIndex].text = newText;
+            if (textDiv) textDiv.textContent = newText;
+            StorageManager.saveCurrentStory(currentStory);
+        }
     }
     
     cancelEdit(pageIndex);
@@ -547,15 +622,21 @@ function cancelEdit(pageIndex) {
     const saveBtn = document.getElementById(`save-${pageIndex}`);
     const cancelBtn = document.getElementById(`cancel-${pageIndex}`);
     
-    textarea.value = currentStory.pages[pageIndex].text;
-    textDiv.style.display = 'block';
-    textarea.style.display = 'none';
-    saveBtn.style.display = 'none';
-    cancelBtn.style.display = 'none';
+    if (currentStory && currentStory.pages[pageIndex] && textarea) {
+        textarea.value = currentStory.pages[pageIndex].text;
+    }
+    if (textDiv) textDiv.style.display = 'block';
+    if (textarea) textarea.style.display = 'none';
+    if (saveBtn) saveBtn.style.display = 'none';
+    if (cancelBtn) cancelBtn.style.display = 'none';
 }
 
 async function suggestAlternatives(pageIndex) {
+    if (!currentStory || !currentStory.pages[pageIndex]) return;
+    
     const container = document.getElementById(`alternatives-${pageIndex}`);
+    if (!container) return;
+    
     container.innerHTML = '<div style="padding: 1rem; text-align: center;">⏳ מחפש חלופות...</div>';
     container.style.display = 'block';
     
@@ -590,12 +671,24 @@ async function suggestAlternatives(pageIndex) {
 }
 
 function useAlternative(pageIndex, newText) {
+    if (!currentStory || !currentStory.pages[pageIndex]) return;
+    
     currentStory.pages[pageIndex].text = newText;
-    document.getElementById(`text-${pageIndex}`).textContent = newText;
-    document.getElementById(`edit-${pageIndex}`).value = newText;
-    document.getElementById(`alternatives-${pageIndex}`).style.display = 'none';
+    
+    const textDiv = document.getElementById(`text-${pageIndex}`);
+    const textarea = document.getElementById(`edit-${pageIndex}`);
+    const altContainer = document.getElementById(`alternatives-${pageIndex}`);
+    
+    if (textDiv) textDiv.textContent = newText;
+    if (textarea) textarea.value = newText;
+    if (altContainer) altContainer.style.display = 'none';
+    
     StorageManager.saveCurrentStory(currentStory);
 }
+
+// ==========================================
+// 📄 PDF & Actions
+// ==========================================
 
 async function downloadPDF() {
     if (!currentStory) {
@@ -604,7 +697,7 @@ async function downloadPDF() {
     }
     
     const modal = document.getElementById('pdfModal');
-    modal.classList.add('active');
+    if (modal) modal.classList.add('active');
     
     try {
         const response = await fetch(`${SERVER_CONFIG.url}/api/generate-pdf`, {
@@ -625,10 +718,10 @@ async function downloadPDF() {
         window.URL.revokeObjectURL(url);
         document.body.removeChild(a);
         
-        modal.classList.remove('active');
+        if (modal) modal.classList.remove('active');
         
     } catch (error) {
-        modal.classList.remove('active');
+        if (modal) modal.classList.remove('active');
         alert('שגיאה ביצירת PDF: ' + error.message);
     }
 }
@@ -656,8 +749,14 @@ function startOver() {
     }
 }
 
-// Init
+// ==========================================
+// 🚀 Initialization
+// ==========================================
+
 document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 App loaded');
+    
+    // Check for saved story
     const saved = StorageManager.loadCurrentStory();
     if (saved && confirm('נמצא ספר שמור. להמשיך לעבוד עליו?')) {
         currentStory = saved;
@@ -665,10 +764,17 @@ document.addEventListener('DOMContentLoaded', () => {
         showScreen('previewScreen');
     }
     
+    // Check for AI model
     const aiModel = AITrainingManager.loadModel();
     if (aiModel) {
         console.log('🤖 AI Model loaded:', aiModel.model_id);
     }
     
-    document.getElementById('childName').addEventListener('input', validateStep1);
+    // Setup event listeners
+    const childNameInput = document.getElementById('childName');
+    if (childNameInput) {
+        childNameInput.addEventListener('input', validateStep1);
+    }
+    
+    console.log('✅ App initialized');
 });
