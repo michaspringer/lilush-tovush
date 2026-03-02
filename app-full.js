@@ -246,7 +246,7 @@ async function startTraining() {
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 
                 alert('✅ הפרופיל מוכן!\n\nעכשיו הילד יופיע בכל ספר שתיצרו! 🌟');
-                showScreen('landingScreen');
+                startCreation(); // במקום showScreen('landingScreen')
                 break;
                 
             } else if (statusData.status === 'failed') {
