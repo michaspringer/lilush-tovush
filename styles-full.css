@@ -28,7 +28,19 @@ body {
     position: relative;
     min-height: 100vh;
 }
+.age-btn.active, .gender-btn.active {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+    color: white !important;
+    border-color: #667eea !important;
+    transform: scale(1.05) !important;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4) !important;
+}
 
+.theme-card.selected, .style-card.selected {
+    border: 3px solid #667eea !important;
+    background: linear-gradient(135deg, #f5f7ff 0%, #e8ecff 100%) !important;
+    box-shadow: 0 8px 16px rgba(102, 126, 234, 0.3) !important;
+}
 .screen {
     position: absolute;
     top: 0;
