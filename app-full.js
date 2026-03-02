@@ -118,6 +118,68 @@ const appState = {
 // 🎨 AI Profile Functions
 // ==========================================
 
+let uploadedPhotos = []; // Store uploaded photos globally
+
+function previewPhotosInline() {
+    const input = document.getElementById('childPhotosInline');
+    const preview = document.getElementById('photoPreviewInline');
+    
+    if (!preview) return;
+    
+    preview.innerHTML = '';
+    uploadedPhotos = [];
+    
+    if (!input.files || input.files.length === 0) {
+        return;
+    }
+    
+    if (input.files.length < 5) {
+        preview.innerHTML = '<div style="padding: 1rem; text-align: center; color: #ff6b6b;">⚠️ נא להעלות לפחות 5 תמונות</div>';
+        return;
+    }
+    
+    if (input.files.length > 10) {
+        alert('⚠️ מקסימום 10 תמונות');
+        input.value = '';
+        return;
+    }
+    
+    // Convert to base64 and store
+    const promises = Array.from(input.files).map(file => {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                uploadedPhotos.push(e.target.result);
+                resolve(e.target.result);
+            };
+            reader.readAsDataURL(file);
+        });
+    });
+    
+    Promise.all(promises).then((results) => {
+        results.forEach((src, i) => {
+            const div = document.createElement('div');
+            div.style.cssText = 'position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);';
+            
+            const img = document.createElement('img');
+            img.src = src;
+            img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+            
+            const badge = document.createElement('div');
+            badge.textContent = i + 1;
+            badge.style.cssText = 'position: absolute; top: 3px; right: 3px; background: #667eea; color: white; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: bold;';
+            
+            div.appendChild(img);
+            div.appendChild(badge);
+            preview.appendChild(div);
+        });
+        
+        preview.innerHTML += `<div style="grid-column: 1/-1; text-align: center; padding: 0.5rem; color: #667eea; font-weight: bold;">✅ ${uploadedPhotos.length} תמונות מוכנות!</div>`;
+        
+        console.log(`📸 Uploaded ${uploadedPhotos.length} photos`);
+    });
+}
+
 function showProfileCreation() {
     const existingModel = AITrainingManager.loadModel();
     
@@ -472,6 +534,13 @@ async function generateStory() {
     const customInputElement = document.getElementById('customInput');
     appState.bookData.customInput = customInputElement ? customInputElement.value.trim() : '';
     
+    // Check if we need to train first
+    if (uploadedPhotos.length >= 5 && !AITrainingManager.hasModel()) {
+        if (confirm(`יש לכם ${uploadedPhotos.length} תמונות!\n\nרוצים לאמן פרופיל AI קודם?\n(זה ייקח דקה אחת ואז הילד יופיע בתמונות)`)) {
+            await trainModelFromPhotos();
+        }
+    }
+    
     showScreen('generatingScreen');
     
     const steps = ['progress-story', 'progress-images', 'progress-done'];
@@ -494,6 +563,8 @@ async function generateStory() {
             ...appState.bookData,
             ai_model_id: aiModel ? aiModel.model_id : null
         };
+        
+        console.log('📤 Sending story request with:', requestData);
         
         const response = await fetch(`${SERVER_CONFIG.url}/api/generate-story`, {
             method: 'POST',
@@ -518,6 +589,55 @@ async function generateStory() {
         alert('שגיאה ביצירת הסיפור: ' + error.message);
         showScreen('creatorScreen');
     }
+}
+
+async function trainModelFromPhotos() {
+    return new Promise(async (resolve, reject) => {
+        try {
+            const response = await fetch(`${SERVER_CONFIG.url}/api/train-model`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    photos: uploadedPhotos,
+                    child_name: appState.bookData.childName || 'child_' + Date.now()
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Training failed');
+            }
+            
+            // Quick training (mock)
+            const trainingId = data.training_id;
+            
+            // Wait a bit for mock training
+            await new Promise(res => setTimeout(res, 1000));
+            
+            const statusResponse = await fetch(`${SERVER_CONFIG.url}/api/training-status/${trainingId}`);
+            const statusData = await statusResponse.json();
+            
+            if (statusData.status === 'succeeded') {
+                const modelData = {
+                    model_id: statusData.model_id,
+                    created_at: new Date().toISOString(),
+                    photo_count: uploadedPhotos.length,
+                    child_name: appState.bookData.childName
+                };
+                
+                AITrainingManager.saveModel(modelData);
+                console.log('🤖 Quick training completed:', modelData);
+                resolve();
+            } else {
+                reject(new Error('Training failed'));
+            }
+            
+        } catch (error) {
+            console.error('Training error:', error);
+            reject(error);
+        }
+    });
 }
 
 function displayStory(story) {
