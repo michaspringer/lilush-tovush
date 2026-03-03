@@ -339,7 +339,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
     
     def apply_face_swap(self, target_image_b64, source_face_b64):
         """החלפת פנים עם Replicate"""
-            try:
+        try:
             if not REPLICATE_API_TOKEN:
                 print("  ⚠️ No Replicate token")
                 return None
