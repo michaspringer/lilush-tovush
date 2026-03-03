@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-לילוש טובוש - שרת מלא
+לילוש טובוש - 1שרת מלא
 Leonardo + Face Swap + PDF
 """
 
