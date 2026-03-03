@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-לילוש טובוש - 1שרת מלא
+לילוש טובוש - שרת מלא
 Leonardo + Face Swap + PDF
 """
 
@@ -336,15 +336,12 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # Fallback to regular generation
             print(f"  ⚠️ Falling back to Leonardo...")
             return self.generate_image_leonardo(prompt)
-            
+    
     def apply_face_swap(self, target_image_b64, source_face_b64):
         """החלפת פנים עם Replicate"""
         try:
             if not REPLICATE_API_TOKEN:
-                print("  ⚠️ No Replicate token")
                 return None
-            
-            print(f"  🔄 Starting face swap...")
             
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
@@ -374,11 +371,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 result = json.loads(response.read().decode('utf-8'))
                 pred_id = result['id']
             
-            print(f"  ⏳ Waiting for face swap (prediction: {pred_id})...")
-            
             # Wait for result
-            for attempt in range(60):
-                time.sleep(2)
+            for _ in range(60):
+                time.sleep(1)
                 
                 check_req = urllib.request.Request(
                     f'https://api.replicate.com/v1/predictions/{pred_id}',
@@ -388,34 +383,26 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
                     check_result = json.loads(check_resp.read().decode('utf-8'))
                     
-                    status = check_result['status']
-                    
-                    if status == 'succeeded':
+                    if check_result['status'] == 'succeeded':
                         output_url = check_result['output']
                         
-                        # Download swapped image
+                        # Download
                         img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
                         with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
                             img_data = img_resp.read()
                         
                         img_b64 = base64.b64encode(img_data).decode()
-                        print(f"  ✅ Face swap succeeded!")
                         return f"data:image/jpeg;base64,{img_b64}"
                     
-                    elif status == 'failed':
-                        error = check_result.get('error', 'Unknown error')
-                        print(f"  ❌ Face swap failed: {error}")
+                    elif check_result['status'] == 'failed':
                         return None
             
-            print(f"  ⏱️ Face swap timeout")
             return None
             
         except Exception as e:
             print(f"  ⚠️  Face swap error: {str(e)}")
-            import traceback
-            traceback.print_exc()
             return None
- 
+    
     def build_story_prompt(self, data):
         """בונה prompt ל-Claude"""
         theme_names = {
