@@ -587,7 +587,7 @@ async function generateStory() {
         
         const requestData = {
             ...appState.bookData,
-            ai_model_id: aiModel ? aiModel.model_id : null,
+            ai_model_id: null,
             childPhoto: uploadedPhotos.length > 0 ? uploadedPhotos[0] : null  // ← הוספה!
         };
         
