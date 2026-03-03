@@ -339,10 +339,25 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
     
     def apply_face_swap(self, target_image_b64, source_face_b64):
         """החלפת פנים עם Replicate"""
-        try:
+            try:
             if not REPLICATE_API_TOKEN:
+                print("  ⚠️ No Replicate token")
                 return None
             
+            print(f"  🔄 Starting face swap...")
+            
+            # CRITICAL FIX: Ensure proper format
+            # Replicate expects data URIs with proper format
+            if target_image_b64 and not target_image_b64.startswith('data:'):
+                target_image_b64 = f"data:image/jpeg;base64,{target_image_b64}"
+            
+            if source_face_b64 and not source_face_b64.startswith('data:'):
+                source_face_b64 = f"data:image/jpeg;base64,{source_face_b64}"
+            
+            # Add small delay to avoid rate limit
+            import time
+            time.sleep(1)
+                       
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
