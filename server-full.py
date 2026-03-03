@@ -130,26 +130,46 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             return story_data
     
     def add_images_to_story(self, story_data, child_photo=None):
-        """מוסיף תמונות לסיפור"""
+        """מוסיף תמונות לסיפור עם Character Reference"""
         pages = story_data.get('pages', [])
-        ai_model_id = story_data.get('ai_model_id')  # NEW!
+        first_image_id = None  # Will store the first image for character reference
         
         for i, page in enumerate(pages):
             print(f"  🖼️  Image {i+1}/{len(pages)}...")
             
             try:
-                # יצירת תמונה
-                if ai_model_id:
-                    # Use trained AI model!
-                    print(f"  🤖 Using trained model: {ai_model_id[:20]}...")
-                    image_url = self.generate_with_trained_model(page['illustration'], ai_model_id)
-                elif IMAGE_MODE == 'leonardo':
-                    image_url = self.generate_image_leonardo(page['illustration'])
+                # יצירת תמונה עם Character Reference
+                if IMAGE_MODE == 'leonardo':
+                    # First image - generate normally
+                    if i == 0:
+                        image_url = self.generate_image_leonardo(page['illustration'])
+                        # Extract generation ID for character reference
+                        if image_url:
+                            first_image_id = self.extract_generation_id(image_url)
+                            print(f"  ✅ First image created, ID: {first_image_id}")
+                    else:
+                        # Subsequent images - use character reference
+                        image_url = self.generate_image_leonardo(
+                            page['illustration'], 
+                            character_reference=first_image_id
+                        )
                 else:
                     image_url = self.generate_image_pollinations(page['illustration'])
                 
-                # Face Swap אם יש תמונה
-                if image_url and child_photo and USE_FACE_SWAP and REPLICATE_API_TOKEN and not ai_model_id:
+                page['imageUrl'] = image_url
+                
+            except Exception as e:
+                print(f"  ⚠️  Failed: {str(e)}")
+                page['imageUrl'] = None
+        
+        return story_data
+    
+    def extract_generation_id(self, image_b64):
+        """מחלץ generation ID מהתמונה שנוצרה"""
+        # For now, we'll store the image data itself
+        # Leonardo API would return a generation ID we can use
+        # This is a simplified version
+        return image_b64
                     print(f"  👤 Face swap...")
                     swapped = self.apply_face_swap(image_url, child_photo)
                     if swapped:
@@ -341,23 +361,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         """החלפת פנים עם Replicate"""
         try:
             if not REPLICATE_API_TOKEN:
-                print("  ⚠️ No Replicate token")
                 return None
             
-            print(f"  🔄 Starting face swap...")
-            
-            # CRITICAL FIX: Ensure proper format
-            # Replicate expects data URIs with proper format
-            if target_image_b64 and not target_image_b64.startswith('data:'):
-                target_image_b64 = f"data:image/jpeg;base64,{target_image_b64}"
-            
-            if source_face_b64 and not source_face_b64.startswith('data:'):
-                source_face_b64 = f"data:image/jpeg;base64,{source_face_b64}"
-            
-            # Add small delay to avoid rate limit
-            import time
-            time.sleep(1)
-                       
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
