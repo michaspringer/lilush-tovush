@@ -31,6 +31,32 @@ const AITrainingManager = {
 };
 
 // ==========================================
+// 👤 Child Profile Manager
+// ==========================================
+const ChildProfileManager = {
+    PROFILE_KEY: 'lilush_child_profile',
+    
+    saveProfile(profile) {
+        localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile));
+        console.log('👤 Profile saved:', profile.childName);
+    },
+    
+    loadProfile() {
+        const saved = localStorage.getItem(this.PROFILE_KEY);
+        return saved ? JSON.parse(saved) : null;
+    },
+    
+    hasProfile() {
+        return !!this.loadProfile();
+    },
+    
+    deleteProfile() {
+        localStorage.removeItem(this.PROFILE_KEY);
+        AITrainingManager.deleteModel();
+    }
+};
+
+// ==========================================
 // 💾 LocalStorage Manager  
 // ==========================================
 const StorageManager = {
@@ -529,9 +555,17 @@ function updateSummary() {
 // ==========================================
 // 📚 Story Generation
 // ==========================================
+
 async function generateStory() {
     const customInputElement = document.getElementById('customInput');
     appState.bookData.customInput = customInputElement ? customInputElement.value.trim() : '';
+    
+    // Check if we need to train first
+    if (uploadedPhotos.length >= 5 && !AITrainingManager.hasModel()) {
+        if (confirm(`יש לכם ${uploadedPhotos.length} תמונות!\n\nרוצים לאמן פרופיל AI קודם?\n(זה ייקח דקה אחת ואז הילד יופיע בתמונות)`)) {
+            await trainModelFromPhotos();
+        }
+    }
     
     showScreen('generatingScreen');
     
@@ -549,13 +583,17 @@ async function generateStory() {
     }, 2000);
     
     try {
+        const aiModel = AITrainingManager.loadModel();
+        
         const requestData = {
             ...appState.bookData,
-            childPhoto: uploadedPhotos.length > 0 ? uploadedPhotos[0] : null  // ← התמונה!
+            ai_model_id: aiModel ? aiModel.model_id : null,
+            childPhoto: uploadedPhotos.length > 0 ? uploadedPhotos[0] : null  // ← הוספה!
         };
         
         console.log('📤 Sending story request');
         console.log('📸 With photo:', uploadedPhotos.length > 0 ? 'YES ✅' : 'NO ❌');
+        console.log('🤖 With AI model:', aiModel ? 'YES ✅' : 'NO ❌');
         
         const response = await fetch(`${SERVER_CONFIG.url}/api/generate-story`, {
             method: 'POST',
@@ -571,7 +609,7 @@ async function generateStory() {
         currentStory = data.story;
         currentStory.childName = appState.bookData.childName;
         
-        // Save profile
+        // Save profile with photos
         if (uploadedPhotos.length > 0) {
             ChildProfileManager.saveProfile({
                 childName: appState.bookData.childName,
@@ -592,6 +630,56 @@ async function generateStory() {
         showScreen('creatorScreen');
     }
 }
+
+async function trainModelFromPhotos() {
+    return new Promise(async (resolve, reject) => {
+        try {
+            const response = await fetch(`${SERVER_CONFIG.url}/api/train-model`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    photos: uploadedPhotos,
+                    child_name: appState.bookData.childName || 'child_' + Date.now()
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Training failed');
+            }
+            
+            // Quick training (mock)
+            const trainingId = data.training_id;
+            
+            // Wait a bit for mock training
+            await new Promise(res => setTimeout(res, 1000));
+            
+            const statusResponse = await fetch(`${SERVER_CONFIG.url}/api/training-status/${trainingId}`);
+            const statusData = await statusResponse.json();
+            
+            if (statusData.status === 'succeeded') {
+                const modelData = {
+                    model_id: statusData.model_id,
+                    created_at: new Date().toISOString(),
+                    photo_count: uploadedPhotos.length,
+                    child_name: appState.bookData.childName
+                };
+                
+                AITrainingManager.saveModel(modelData);
+                console.log('🤖 Quick training completed:', modelData);
+                resolve();
+            } else {
+                reject(new Error('Training failed'));
+            }
+            
+        } catch (error) {
+            console.error('Training error:', error);
+            reject(error);
+        }
+    });
+}
+
 function displayStory(story) {
     const container = document.getElementById('storyPages');
     if (!container) return;
