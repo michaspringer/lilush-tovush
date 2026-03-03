@@ -338,83 +338,83 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             return self.generate_image_leonardo(prompt)
             
     def apply_face_swap(self, target_image_b64, source_face_b64):
-    """החלפת פנים עם Replicate"""
-    try:
-        if not REPLICATE_API_TOKEN:
-            print("  ⚠️ No Replicate token")
-            return None
-        
-        print(f"  🔄 Starting face swap...")
-        
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        
-        swap_data = {
-            "version": "278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
-            "input": {
-                "target_image": target_image_b64,
-                "swap_image": source_face_b64
-            }
-        }
-        
-        headers = {
-            'Authorization': f'Token {REPLICATE_API_TOKEN}',
-            'Content-Type': 'application/json'
-        }
-        
-        req = urllib.request.Request(
-            'https://api.replicate.com/v1/predictions',
-            data=json.dumps(swap_data).encode('utf-8'),
-            headers=headers,
-            method='POST'
-        )
-        
-        with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            pred_id = result['id']
-        
-        print(f"  ⏳ Waiting for face swap (prediction: {pred_id})...")
-        
-        # Wait for result
-        for attempt in range(60):
-            time.sleep(2)
+        """החלפת פנים עם Replicate"""
+        try:
+            if not REPLICATE_API_TOKEN:
+                print("  ⚠️ No Replicate token")
+                return None
             
-            check_req = urllib.request.Request(
-                f'https://api.replicate.com/v1/predictions/{pred_id}',
-                headers=headers
+            print(f"  🔄 Starting face swap...")
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            swap_data = {
+                "version": "278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
+                "input": {
+                    "target_image": target_image_b64,
+                    "swap_image": source_face_b64
+                }
+            }
+            
+            headers = {
+                'Authorization': f'Token {REPLICATE_API_TOKEN}',
+                'Content-Type': 'application/json'
+            }
+            
+            req = urllib.request.Request(
+                'https://api.replicate.com/v1/predictions',
+                data=json.dumps(swap_data).encode('utf-8'),
+                headers=headers,
+                method='POST'
             )
             
-            with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
-                check_result = json.loads(check_resp.read().decode('utf-8'))
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                pred_id = result['id']
+            
+            print(f"  ⏳ Waiting for face swap (prediction: {pred_id})...")
+            
+            # Wait for result
+            for attempt in range(60):
+                time.sleep(2)
                 
-                status = check_result['status']
+                check_req = urllib.request.Request(
+                    f'https://api.replicate.com/v1/predictions/{pred_id}',
+                    headers=headers
+                )
                 
-                if status == 'succeeded':
-                    output_url = check_result['output']
+                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
+                    check_result = json.loads(check_resp.read().decode('utf-8'))
                     
-                    # Download swapped image
-                    img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
-                    with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
-                        img_data = img_resp.read()
+                    status = check_result['status']
                     
-                    img_b64 = base64.b64encode(img_data).decode()
-                    print(f"  ✅ Face swap succeeded!")
-                    return f"data:image/jpeg;base64,{img_b64}"
-                
-                elif status == 'failed':
-                    error = check_result.get('error', 'Unknown error')
-                    print(f"  ❌ Face swap failed: {error}")
-                    return None
-        
-        print(f"  ⏱️ Face swap timeout")
-        return None
-        
-    except Exception as e:
-        print(f"  ⚠️  Face swap error: {str(e)}")
-        import traceback
-        traceback.print_exc()
-        return None
+                    if status == 'succeeded':
+                        output_url = check_result['output']
+                        
+                        # Download swapped image
+                        img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
+                            img_data = img_resp.read()
+                        
+                        img_b64 = base64.b64encode(img_data).decode()
+                        print(f"  ✅ Face swap succeeded!")
+                        return f"data:image/jpeg;base64,{img_b64}"
+                    
+                    elif status == 'failed':
+                        error = check_result.get('error', 'Unknown error')
+                        print(f"  ❌ Face swap failed: {error}")
+                        return None
+            
+            print(f"  ⏱️ Face swap timeout")
+            return None
+            
+        except Exception as e:
+            print(f"  ⚠️  Face swap error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
  
     def build_story_prompt(self, data):
         """בונה prompt ל-Claude"""
