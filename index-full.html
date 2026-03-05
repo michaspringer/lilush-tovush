@@ -87,26 +87,52 @@
                     </div>
                     
                     <div class="form-group" style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #f5f7ff 0%, #e8ecff 100%); border-radius: 15px; border: 2px dashed #667eea;">
-                        <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: bold; color: #667eea;">
+                        <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: bold; color: #667eea; margin-bottom: 1rem;">
                             <span>🌟</span>
-                            <span>רוצים שהילד יופיע בתמונות? (אופציונלי)</span>
+                            <span>רוצים שהילד יופיע בתמונות?</span>
                         </label>
-                        <p style="font-size: 0.9rem; color: #666; margin: 0.5rem 0 1rem 0;">
-                            העלו 5-10 תמונות של הילד ונשתמש ב-AI כדי להוסיף אותו לאיורים!
-                        </p>
-                        <input type="file" 
-                               id="childPhotosInline" 
-                               accept="image/jpeg,image/png,image/jpg" 
-                               multiple 
-                               onchange="previewPhotosInline()"
-                               style="display: none;">
-                        <label for="childPhotosInline" class="upload-inline-label" style="display: block; padding: 1rem; background: white; border: 2px solid #667eea; border-radius: 10px; text-align: center; cursor: pointer; transition: all 0.3s;">
-                            <div style="font-size: 2rem; margin-bottom: 0.5rem;">📸</div>
-                            <div style="font-weight: bold; color: #667eea;">לחצו להעלאת תמונות</div>
-                            <div style="font-size: 0.8rem; color: #666; margin-top: 0.3rem;">5-10 תמונות ברורות</div>
-                        </label>
-                        <div id="photoPreviewInline" style="margin-top: 1rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 0.5rem;">
-                            <!-- Photos preview -->
+                        
+                        <!-- Choice Buttons -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
+                            <button type="button" class="photo-option-btn" id="optionGeneric" onclick="selectPhotoOption('generic')" style="padding: 1.5rem; border: 3px solid #ddd; border-radius: 15px; background: white; cursor: pointer; transition: all 0.3s; text-align: center;">
+                                <div style="font-size: 3rem; margin-bottom: 0.5rem;">🎨</div>
+                                <div style="font-weight: bold; font-size: 1.1rem; color: #333; margin-bottom: 0.5rem;">ספר רגיל</div>
+                                <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">דמות גנרית יפה</div>
+                                <div style="background: #e8f5e9; color: #2e7d32; padding: 0.5rem; border-radius: 8px; font-size: 0.9rem; font-weight: bold;">מהיר • ₪149</div>
+                            </button>
+                            
+                            <button type="button" class="photo-option-btn" id="optionReal" onclick="selectPhotoOption('real')" style="padding: 1.5rem; border: 3px solid #ddd; border-radius: 15px; background: white; cursor: pointer; transition: all 0.3s; text-align: center;">
+                                <div style="font-size: 3rem; margin-bottom: 0.5rem;">✨</div>
+                                <div style="font-weight: bold; font-size: 1.1rem; color: #333; margin-bottom: 0.5rem;">הילד האמיתי!</div>
+                                <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">הילד שלכם בתמונות</div>
+                                <div style="background: #fff3e0; color: #e65100; padding: 0.5rem; border-radius: 8px; font-size: 0.9rem; font-weight: bold;">פרימיום • ₪349</div>
+                            </button>
+                        </div>
+                        
+                        <!-- Upload Section (shows only if "real" selected) -->
+                        <div id="photoUploadSection" style="display: none;">
+                            <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">
+                                📸 העלו 5-10 תמונות ברורות של הילד. ה-AI ילמד את הפנים ויוסיף אותם לכל תמונה!
+                            </p>
+                            <input type="file" 
+                                   id="childPhotosInline" 
+                                   accept="image/jpeg,image/png,image/jpg" 
+                                   multiple 
+                                   onchange="previewPhotosInline()"
+                                   style="display: none;">
+                            <label for="childPhotosInline" class="upload-inline-label" style="display: block; padding: 1rem; background: white; border: 2px solid #667eea; border-radius: 10px; text-align: center; cursor: pointer; transition: all 0.3s;">
+                                <div style="font-size: 2rem; margin-bottom: 0.5rem;">📸</div>
+                                <div style="font-weight: bold; color: #667eea;">לחצו להעלאת תמונות</div>
+                                <div style="font-size: 0.8rem; color: #666; margin-top: 0.3rem;">5-10 תמונות ברורות של הילד</div>
+                            </label>
+                            <div id="photoPreviewInline" style="margin-top: 1rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 0.5rem;">
+                                <!-- Photos preview -->
+                            </div>
+                        </div>
+                        
+                        <!-- Info Box -->
+                        <div id="optionInfoBox" style="margin-top: 1rem; padding: 1rem; background: white; border-radius: 10px; display: none;">
+                            <!-- Will be filled by JS -->
                         </div>
                     </div>
                     
@@ -229,71 +255,6 @@
                 </div>
             </div>
         </div>
-        <!-- Screen: Profile Preview -->
-        <div class="screen profile-preview-screen" id="profilePreviewScreen">
-            <div class="container">
-                <h1 style="text-align: center; color: #667eea; margin-bottom: 2rem;">
-                    👤 הפרופיל של <span id="previewChildName"></span>
-                </h1>
-                
-                <div style="background: linear-gradient(135deg, #f5f7ff 0%, #e8ecff 100%); padding: 2rem; border-radius: 20px; margin-bottom: 2rem;">
-                    <!-- Main Photo -->
-                    <div style="text-align: center; margin-bottom: 2rem;">
-                        <img id="profilePhotoImg" src="" alt="תמונת פרופיל" style="width: 200px; height: 200px; border-radius: 50%; object-fit: cover; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3); border: 4px solid white;">
-                        <div id="photoCount" style="margin-top: 1rem; color: #667eea; font-weight: bold; font-size: 1.1rem;"></div>
-                    </div>
-                    
-                    <!-- Info Cards -->
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1rem; margin-bottom: 2rem;">
-                        <div style="background: white; padding: 1.5rem; border-radius: 15px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                            <div style="font-size: 2rem; margin-bottom: 0.5rem;">👤</div>
-                            <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.3rem;">שם</div>
-                            <div id="previewName" style="font-size: 1.2rem; font-weight: bold; color: #333;"></div>
-                        </div>
-                        
-                        <div style="background: white; padding: 1.5rem; border-radius: 15px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                            <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎂</div>
-                            <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.3rem;">גיל</div>
-                            <div id="previewAge" style="font-size: 1.2rem; font-weight: bold; color: #333;"></div>
-                        </div>
-                        
-                        <div style="background: white; padding: 1.5rem; border-radius: 15px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                            <div style="font-size: 2rem; margin-bottom: 0.5rem;" id="previewGenderIcon"></div>
-                            <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.3rem;">מגדר</div>
-                            <div id="previewGender" style="font-size: 1.2rem; font-weight: bold; color: #333;"></div>
-                        </div>
-                        
-                        <div style="background: white; padding: 1.5rem; border-radius: 15px; text-align: center; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                            <div style="font-size: 2rem; margin-bottom: 0.5rem;">📅</div>
-                            <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.3rem;">נוצר</div>
-                            <div id="previewDate" style="font-size: 1.2rem; font-weight: bold; color: #333;"></div>
-                        </div>
-                    </div>
-                    
-                    <!-- Photo Gallery -->
-                    <div>
-                        <h3 style="color: #667eea; margin-bottom: 1rem; text-align: center;">📸 כל התמונות</h3>
-                        <div id="photoGallery" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 1rem;">
-                            <!-- Photos will be added here -->
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Action Buttons -->
-                <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
-                    <button class="btn btn-success" onclick="createStoryWithProfile()" style="font-size: 1.2rem; padding: 1.2rem 3rem;">
-                        📚 צור ספר עם הפרופיל הזה
-                    </button>
-                    <button class="btn btn-secondary" onclick="updateProfile()">
-                        🔄 עדכן פרופיל
-                    </button>
-                    <button class="btn btn-secondary" onclick="deleteProfileConfirm()" style="background: #dc3545;">
-                        🗑️ מחק פרופיל
-                    </button>
-                </div>
-            </div>
-        </div>
-
 
         <!-- Screen: AI Profile Creation (NEW!) -->
         <div class="screen profile-screen" id="profileScreen">
@@ -432,4 +393,3 @@
     <script src="app-full.js"></script>
 </body>
 </html>
-
