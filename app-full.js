@@ -145,6 +145,70 @@ const appState = {
 // ==========================================
 
 let uploadedPhotos = []; // Store uploaded photos globally
+let photoOption = 'generic'; // 'generic' or 'real'
+
+function selectPhotoOption(option) {
+    photoOption = option;
+    
+    // Update button styles
+    document.querySelectorAll('.photo-option-btn').forEach(btn => {
+        btn.style.border = '3px solid #ddd';
+        btn.style.background = 'white';
+        btn.style.transform = 'scale(1)';
+    });
+    
+    const selectedBtn = document.getElementById(option === 'generic' ? 'optionGeneric' : 'optionReal');
+    selectedBtn.style.border = '3px solid #667eea';
+    selectedBtn.style.background = 'linear-gradient(135deg, #f5f7ff 0%, #e8ecff 100%)';
+    selectedBtn.style.transform = 'scale(1.02)';
+    
+    // Show/hide upload section
+    const uploadSection = document.getElementById('photoUploadSection');
+    const infoBox = document.getElementById('optionInfoBox');
+    
+    if (option === 'real') {
+        uploadSection.style.display = 'block';
+        infoBox.style.display = 'block';
+        infoBox.innerHTML = `
+            <div style="display: flex; align-items: start; gap: 1rem;">
+                <div style="font-size: 2rem;">💡</div>
+                <div>
+                    <div style="font-weight: bold; color: #667eea; margin-bottom: 0.5rem;">איך זה עובד?</div>
+                    <div style="font-size: 0.9rem; color: #666; line-height: 1.6;">
+                        1. העלו 5-10 תמונות ברורות של הילד<br>
+                        2. ה-AI ילמד את הפנים של הילד (10 דקות)<br>
+                        3. הילד יופיע בכל תמונה בספר!<br>
+                        <br>
+                        <strong>💰 עלות:</strong> ₪349 לספר הראשון (כולל אימון AI)<br>
+                        <strong>🎁 ספרים נוספים:</strong> רק ₪149 (בלי אימון מחדש!)
+                    </div>
+                </div>
+            </div>
+        `;
+    } else {
+        uploadSection.style.display = 'none';
+        uploadedPhotos = [];
+        document.getElementById('photoPreviewInline').innerHTML = '';
+        infoBox.style.display = 'block';
+        infoBox.innerHTML = `
+            <div style="display: flex; align-items: start; gap: 1rem;">
+                <div style="font-size: 2rem;">✨</div>
+                <div>
+                    <div style="font-weight: bold; color: #667eea; margin-bottom: 0.5rem;">ספר עם דמות יפה ועקבית</div>
+                    <div style="font-size: 0.9rem; color: #666; line-height: 1.6;">
+                        נשתמש ב-AI כדי ליצור דמות יפה ועקבית שתופיע בכל התמונות.<br>
+                        הדמות לא תהיה הילד שלכם, אבל תהיה חמודה ועקבית!<br>
+                        <br>
+                        <strong>💰 עלות:</strong> ₪149 בלבד<br>
+                        <strong>⚡ זמן:</strong> 2-3 דקות
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    console.log('📸 Photo option selected:', option);
+}
 
 function previewPhotosInline() {
     const input = document.getElementById('childPhotosInline');
@@ -207,13 +271,20 @@ function previewPhotosInline() {
 }
 
 function showProfileCreation() {
-    const existingProfile = ChildProfileManager.loadProfile();
+    const existingModel = AITrainingManager.loadModel();
     
-    if (existingProfile) {
-        console.log('📸 Found existing profile, showing preview');
-        showProfilePreview();
+    if (existingModel) {
+        console.log('Found existing model:', existingModel);
+        const createdDate = new Date(existingModel.created_at).toLocaleDateString('he-IL');
+        
+        if (confirm(`יש לכם כבר פרופיל AI! 🤖\n\nנוצר ב: ${createdDate}\nתמונות: ${existingModel.photo_count}\n\nרוצים ליצור ספר עם הפרופיל הקיים?`)) {
+            startCreation();
+        } else if (confirm('רוצים ליצור פרופיל חדש?\n\n(זה ידרוס את הפרופיל הקיים)')) {
+            AITrainingManager.deleteModel();
+            showScreen('profileScreen');
+        }
     } else {
-        console.log('📸 No profile found, showing creation screen');
+        console.log('No existing model found');
         showScreen('profileScreen');
     }
 }
@@ -580,7 +651,7 @@ async function generateStory() {
         
         const requestData = {
             ...appState.bookData,
-            ai_model_id: null,
+            ai_model_id: aiModel ? aiModel.model_id : null,
             childPhoto: uploadedPhotos.length > 0 ? uploadedPhotos[0] : null  // ← הוספה!
         };
         
@@ -905,99 +976,6 @@ function startOver() {
 // ==========================================
 // 🚀 Initialization
 // ==========================================
-// ==========================================
-// 👤 Profile Preview Functions
-// ==========================================
-
-function showProfilePreview() {
-    const profile = ChildProfileManager.loadProfile();
-    
-    if (!profile) {
-        alert('אין פרופיל שמור!');
-        showScreen('landingScreen');
-        return;
-    }
-    
-    console.log('📸 Showing profile:', profile);
-    
-    // Display name
-    document.getElementById('previewChildName').textContent = profile.childName;
-    document.getElementById('previewName').textContent = profile.childName;
-    
-    // Display age
-    document.getElementById('previewAge').textContent = profile.childAge;
-    
-    // Display gender
-    const genderText = profile.childGender === 'boy' ? 'בן' : 'בת';
-    const genderIcon = profile.childGender === 'boy' ? '👦' : '👧';
-    document.getElementById('previewGender').textContent = genderText;
-    document.getElementById('previewGenderIcon').textContent = genderIcon;
-    
-    // Display date
-    const date = new Date(profile.createdAt).toLocaleDateString('he-IL');
-    document.getElementById('previewDate').textContent = date;
-    
-    // Display photos
-    if (profile.photos && profile.photos.length > 0) {
-        // Main photo
-        document.getElementById('profilePhotoImg').src = profile.photos[0];
-        document.getElementById('photoCount').textContent = `${profile.photos.length} תמונות`;
-        
-        // Gallery
-        const gallery = document.getElementById('photoGallery');
-        gallery.innerHTML = '';
-        
-        profile.photos.forEach((photo, i) => {
-            const div = document.createElement('div');
-            div.style.cssText = 'position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1); cursor: pointer; transition: transform 0.2s;';
-            div.onmouseover = () => div.style.transform = 'scale(1.05)';
-            div.onmouseout = () => div.style.transform = 'scale(1)';
-            div.onclick = () => {
-                document.getElementById('profilePhotoImg').src = photo;
-            };
-            
-            const img = document.createElement('img');
-            img.src = photo;
-            img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
-            
-            const badge = document.createElement('div');
-            badge.textContent = i + 1;
-            badge.style.cssText = 'position: absolute; top: 5px; right: 5px; background: #667eea; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;';
-            
-            div.appendChild(img);
-            div.appendChild(badge);
-            gallery.appendChild(div);
-        });
-    }
-    
-    showScreen('profilePreviewScreen');
-}
-
-function createStoryWithProfile() {
-    const profile = ChildProfileManager.loadProfile();
-    if (profile && profile.photos) {
-        uploadedPhotos = profile.photos;
-        console.log('📸 Loaded photos from profile:', uploadedPhotos.length);
-    }
-    startCreation();
-}
-
-function updateProfile() {
-    if (confirm('רוצה לעדכן את הפרופיל?\n\nזה ידרוס את הפרופיל הקיים.')) {
-        ChildProfileManager.deleteProfile();
-        uploadedPhotos = [];
-        showScreen('profileScreen');
-    }
-}
-
-function deleteProfileConfirm() {
-    if (confirm('האם אתה בטוח שרוצה למחוק את הפרופיל?\n\nפעולה זו לא ניתנת לביטול!')) {
-        ChildProfileManager.deleteProfile();
-        uploadedPhotos = [];
-        alert('✅ הפרופיל נמחק!');
-        showScreen('landingScreen');
-    }
-}
 
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 App loaded');
