@@ -428,14 +428,15 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             'educational': 'חינוכי'
         }
         
+        # For testing: 1 page only!
         pages_by_age = {
-            '0-2': '4-5',
-            '3-5': '6-8',
-            '6-8': '8-10',
-            '9-12': '10-12'
+            '0-2': '1',
+            '3-5': '1',
+            '6-8': '1',
+            '9-12': '1'
         }
         
-        pages = pages_by_age.get(data.get('childAge', '3-5'), '6-8')
+        pages = pages_by_age.get(data.get('childAge', '3-5'), '1')
         theme = theme_names.get(data.get('theme', ''), 'הרפתקאות')
         style = style_names.get(data.get('style', ''), 'מצחיק')
         
@@ -677,24 +678,65 @@ JSON:
     def start_replicate_training(self, photos, child_name):
         """מתחיל אימון ב-Replicate - גרסה פשוטה"""
         try:
-            # For now, we'll use a simpler approach
-            # Instead of training, we'll just save the photos and use them with face swap
-            # Real training is complex and expensive - this is MVP
+            if not REPLICATE_API_TOKEN:
+                raise Exception('No Replicate token')
             
-            print(f"  💡 Simplified approach: saving photos for later use")
+            print(f"  🚀 REAL Replicate Training starting...")
+            print(f"  📸 Photos: {len(photos)}")
             
-            # Generate a unique model ID
-            import hashlib
-            model_id = hashlib.md5(f"{child_name}_{time.time()}".encode()).hexdigest()
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
             
-            # Return a mock training ID that we'll use to track this "model"
-            # In production, you'd actually call Replicate training API
-            # But that requires proper setup and costs $10 per training
+            # Create ZIP from photos
+            zip_b64 = self.create_zip_from_photos(photos)
+            if not zip_b64:
+                raise Exception('Failed to create ZIP')
             
-            return f"mock_training_{model_id}"
+            # Replicate Training API
+            training_data = {
+                "destination": f"{child_name}/flux-lora",
+                "input": {
+                    "input_images": f"data:application/zip;base64,{zip_b64}",
+                    "steps": 1000,
+                    "lora_rank": 16,
+                    "optimizer": "adamw8bit",
+                    "batch_size": 1,
+                    "autocaption": True,
+                    "trigger_word": child_name,
+                    "learning_rate": 0.0004
+                },
+                "model": "ostris/flux-dev-lora-trainer",
+                "trainer_version": "4ffd32160efd92e956d39c5338a9b8fbafca58e03f791f6d8011f3e20e8ea6fa"
+            }
+            
+            headers = {
+                'Authorization': f'Token {REPLICATE_API_TOKEN}',
+                'Content-Type': 'application/json'
+            }
+            
+            req = urllib.request.Request(
+                'https://api.replicate.com/v1/trainings',
+                data=json.dumps(training_data).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            print(f"  📤 Sending training request to Replicate...")
+            
+            with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                training_id = result['id']
+            
+            print(f"  ✅ Training started: {training_id}")
+            print(f"  ⏱️  This will take ~10 minutes...")
+            
+            return training_id
                 
         except Exception as e:
-            print(f"  ⚠️ Training setup error: {str(e)}")
+            print(f"  ❌ Training error: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def create_zip_from_photos(self, photos):
