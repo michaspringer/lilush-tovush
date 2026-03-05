@@ -170,33 +170,24 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         # Leonardo API would return a generation ID we can use
         # This is a simplified version
         return image_b64
-                    print(f"  👤 Face swap...")
-                    swapped = self.apply_face_swap(image_url, child_photo)
-                    if swapped:
-                        image_url = swapped
-                        print(f"  ✅ Face swap done!")
-                
-                page['imageUrl'] = image_url
-                
-            except Exception as e:
-                print(f"  ⚠️  Failed: {str(e)}")
-                page['imageUrl'] = None
-        
-        return story_data
     
-    def generate_image_leonardo(self, prompt):
+    def generate_image_leonardo(self, prompt, character_reference=None):
         """יוצר תמונה עם Leonardo"""
         try:
             if not LEONARDO_API_KEY:
                 raise Exception('Leonardo API key missing')
             
-            print(f"  🎨 Leonardo...")
+            if character_reference:
+                print(f"  🎨 Leonardo (with character reference)...")
+            else:
+                print(f"  🎨 Leonardo...")
             
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             
-            full_prompt = f"{prompt}, children's book illustration, colorful, friendly, storybook art, high quality"
+            # Enhanced prompt for consistency
+            full_prompt = f"{prompt}, children's book illustration, simple clean style, soft pastel colors, consistent character design, same character throughout, gentle friendly face, minimalist background, high quality, storybook art"
             
             gen_data = {
                 "prompt": full_prompt,
