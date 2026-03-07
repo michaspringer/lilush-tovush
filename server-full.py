@@ -13,6 +13,9 @@ import base64
 import os
 import time
 import ssl
+import os
+print("📁 Current directory:", os.getcwd())
+print("📁 Files:", os.listdir('.'))
 
 # ========================================
 # 🔑 API Keys
