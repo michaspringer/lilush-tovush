@@ -223,16 +223,14 @@ function previewPhotosInline() {
         return;
     }
     
-    if (input.files.length < 5) {
-        preview.innerHTML = '<div style="padding: 1rem; text-align: center; color: #ff6b6b;">⚠️ נא להעלות לפחות 5 תמונות</div>';
-        return;
-    }
-    
+    // For InstantID - 1 photo is enough!
     if (input.files.length > 10) {
         alert('⚠️ מקסימום 10 תמונות');
         input.value = '';
         return;
     }
+    
+    console.log(`📸 Processing ${input.files.length} photo(s)...`);
     
     // Convert to base64 and store
     const promises = Array.from(input.files).map(file => {
@@ -264,9 +262,10 @@ function previewPhotosInline() {
             preview.appendChild(div);
         });
         
-        preview.innerHTML += `<div style="grid-column: 1/-1; text-align: center; padding: 0.5rem; color: #667eea; font-weight: bold;">✅ ${uploadedPhotos.length} תמונות מוכנות!</div>`;
+        preview.innerHTML += `<div style="grid-column: 1/-1; text-align: center; padding: 0.5rem; color: #667eea; font-weight: bold;">✅ ${uploadedPhotos.length} תמונות מוכנות לשימוש!</div>`;
         
-        console.log(`📸 Uploaded ${uploadedPhotos.length} photos`);
+        console.log(`✅ Uploaded ${uploadedPhotos.length} photos successfully`);
+    });
     });
 }
 
@@ -649,11 +648,18 @@ async function generateStory() {
     try {
         const aiModel = AITrainingManager.loadModel();
         
+        console.log('📸 uploadedPhotos:', uploadedPhotos);
+        console.log('📸 uploadedPhotos.length:', uploadedPhotos.length);
+        
         const requestData = {
             ...appState.bookData,
-            ai_model_id: aiModel ? aiModel.model_id : null,
-            childPhoto: uploadedPhotos.length > 0 ? uploadedPhotos[0] : null  // ← הוספה!
+            ai_model_id: null,  // Force null for now
+            childPhoto: uploadedPhotos.length > 0 ? uploadedPhotos[0] : null
         };
+        
+        console.log('📤 Sending story request');
+        console.log('📸 With photo:', uploadedPhotos.length > 0 ? 'YES ✅' : 'NO ❌');
+        console.log('🤖 With AI model:', aiModel ? 'YES ✅' : 'NO ❌');
         
         console.log('📤 Sending story request');
         console.log('📸 With photo:', uploadedPhotos.length > 0 ? 'YES ✅' : 'NO ❌');
