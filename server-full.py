@@ -72,7 +72,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             print(f"\n📖 Creating story for: {child_name}")
             if child_photo:
-                print("📸 Photo uploaded - will use Face Swap!")
+                print("📸 Photo uploaded - will use InstantID!")
             if ai_model_id:
                 print(f"🤖 Using trained AI model: {ai_model_id[:20]}...")
             
@@ -130,31 +130,29 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             return story_data
     
     def add_images_to_story(self, story_data, child_photo=None):
-        """מוסיף תמונות לסיפור עם Character Reference"""
+        """מוסיף תמונות לסיפור עם InstantID"""
         pages = story_data.get('pages', [])
-        first_image_id = None  # Will store the first image for character reference
+        
+        print(f"  🎨 Creating {len(pages)} images...")
+        if child_photo:
+            print(f"  👤 Will use InstantID to add child's face!")
         
         for i, page in enumerate(pages):
             print(f"  🖼️  Image {i+1}/{len(pages)}...")
             
             try:
-                # יצירת תמונה עם Character Reference
-                if IMAGE_MODE == 'leonardo':
-                    # First image - generate normally
-                    if i == 0:
-                        image_url = self.generate_image_leonardo(page['illustration'])
-                        # Extract generation ID for character reference
-                        if image_url:
-                            first_image_id = self.extract_generation_id(image_url)
-                            print(f"  ✅ First image created, ID: {first_image_id}")
+                # Generate base image with Leonardo
+                image_url = self.generate_image_leonardo(page['illustration'])
+                
+                # Apply InstantID if we have a child photo
+                if image_url and child_photo and REPLICATE_API_TOKEN:
+                    print(f"  👤 Applying InstantID...")
+                    face_swapped = self.apply_instant_id(image_url, child_photo)
+                    if face_swapped:
+                        image_url = face_swapped
+                        print(f"  ✅ Child added to image!")
                     else:
-                        # Subsequent images - use character reference
-                        image_url = self.generate_image_leonardo(
-                            page['illustration'], 
-                            character_reference=first_image_id
-                        )
-                else:
-                    image_url = self.generate_image_pollinations(page['illustration'])
+                        print(f"  ⚠️ InstantID failed, using original")
                 
                 page['imageUrl'] = image_url
                 
@@ -164,12 +162,100 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         
         return story_data
     
-    def extract_generation_id(self, image_b64):
-        """מחלץ generation ID מהתמונה שנוצרה"""
-        # For now, we'll store the image data itself
-        # Leonardo API would return a generation ID we can use
-        # This is a simplified version
-        return image_b64
+    def apply_instant_id(self, target_image_b64, face_image_b64):
+        """מוסיף פנים של ילד לתמונה עם InstantID"""
+        try:
+            if not REPLICATE_API_TOKEN:
+                print("  ⚠️ No Replicate token")
+                return None
+            
+            print(f"  🔄 Starting InstantID...")
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            # InstantID expects data URIs
+            if not target_image_b64.startswith('data:'):
+                target_image_b64 = f"data:image/jpeg;base64,{target_image_b64}"
+            
+            if not face_image_b64.startswith('data:'):
+                face_image_b64 = f"data:image/jpeg;base64,{face_image_b64}"
+            
+            instant_id_data = {
+                "input": {
+                    "image": target_image_b64,
+                    "face_image": face_image_b64,
+                    "prompt": "high quality children's book illustration, colorful, friendly, detailed face",
+                    "negative_prompt": "ugly, distorted, low quality, blurry, bad anatomy, scary",
+                    "num_steps": 20,
+                    "guidance_scale": 5.0,
+                    "ip_adapter_scale": 0.8,
+                    "seed": 42
+                }
+            }
+            
+            headers = {
+                'Authorization': f'Token {REPLICATE_API_TOKEN}',
+                'Content-Type': 'application/json'
+            }
+            
+            # Use the correct InstantID model
+            req = urllib.request.Request(
+                'https://api.replicate.com/v1/models/zsxkib/instant-id/predictions',
+                data=json.dumps(instant_id_data).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                pred_id = result['id']
+            
+            print(f"  ⏳ Waiting for InstantID (prediction: {pred_id})...")
+            
+            # Wait for completion
+            for attempt in range(60):
+                time.sleep(2)
+                
+                check_req = urllib.request.Request(
+                    f'https://api.replicate.com/v1/predictions/{pred_id}',
+                    headers=headers
+                )
+                
+                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
+                    check_result = json.loads(check_resp.read().decode('utf-8'))
+                    
+                    status = check_result['status']
+                    
+                    if status == 'succeeded':
+                        output_url = check_result['output']
+                        
+                        # Download result
+                        if isinstance(output_url, list) and len(output_url) > 0:
+                            output_url = output_url[0]
+                        
+                        img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
+                            img_data = img_resp.read()
+                        
+                        img_b64 = base64.b64encode(img_data).decode()
+                        print(f"  ✅ InstantID succeeded!")
+                        return f"data:image/jpeg;base64,{img_b64}"
+                    
+                    elif status == 'failed':
+                        error = check_result.get('error', 'Unknown error')
+                        print(f"  ❌ InstantID failed: {error}")
+                        return None
+            
+            print(f"  ⏱️ InstantID timeout")
+            return None
+            
+        except Exception as e:
+            print(f"  ⚠️ InstantID error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def generate_image_leonardo(self, prompt, character_reference=None):
         """יוצר תמונה עם Leonardo"""
@@ -693,25 +779,25 @@ JSON:
             if not zip_b64:
                 raise Exception('Failed to create ZIP')
             
-            # Replicate Training API
+            # Simplified Training - try without specific version first
+            print(f"  🔍 Checking available training options...")
+            
+            # Try simple prediction first to test
             training_data = {
-                "destination": f"{child_name}/flux-lora",
                 "input": {
                     "input_images": f"data:application/zip;base64,{zip_b64}",
-                    "steps": 1000,
-                    "lora_rank": 16,
-                    "optimizer": "adamw8bit",
-                    "batch_size": 1,
-                    "autocaption": True,
+                    "steps": 500,
                     "trigger_word": child_name
-                },
-                "version": "ostris/flux-dev-lora-trainer:4ffd32160efd92e956d39c5338a9b8fbafca58e03f791f6d8011f3e20e8ea6fa"
+                }
             }
             
             headers = {
                 'Authorization': f'Token {REPLICATE_API_TOKEN}',
                 'Content-Type': 'application/json'
             }
+            
+            # Try the trainings endpoint
+            training_url = 'https://api.replicate.com/v1/models/ostris/flux-dev-lora-trainer/versions/4a78013f38e8c316fb9bdb7b8b7f81c0059fc7e127e60f03c90fd639b3e6408c/trainings'
             
             req = urllib.request.Request(
                 'https://api.replicate.com/v1/trainings',
