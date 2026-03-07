@@ -703,11 +703,9 @@ JSON:
                     "optimizer": "adamw8bit",
                     "batch_size": 1,
                     "autocaption": True,
-                    "trigger_word": child_name,
-                    "learning_rate": 0.0004
+                    "trigger_word": child_name
                 },
-                "model": "ostris/flux-dev-lora-trainer",
-                "trainer_version": "4ffd32160efd92e956d39c5338a9b8fbafca58e03f791f6d8011f3e20e8ea6fa"
+                "version": "ostris/flux-dev-lora-trainer:4ffd32160efd92e956d39c5338a9b8fbafca58e03f791f6d8011f3e20e8ea6fa"
             }
             
             headers = {
