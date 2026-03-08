@@ -13,9 +13,6 @@ import base64
 import os
 import time
 import ssl
-import os
-print("📁 Current directory:", os.getcwd())
-print("📁 Files:", os.listdir('.'))
 
 # ========================================
 # 🔑 API Keys
@@ -45,8 +42,36 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         if self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
+        elif self.path == '/' or self.path == '/index-full.html':
+            # Serve index-full.html
+            self.serve_file('index-full.html', 'text/html')
+        elif self.path == '/app-full.js':
+            self.serve_file('app-full.js', 'application/javascript')
+        elif self.path == '/styles-full.css':
+            self.serve_file('styles-full.css', 'text/css')
         else:
-            SimpleHTTPRequestHandler.do_GET(self)
+            # Try default handler
+            try:
+                SimpleHTTPRequestHandler.do_GET(self)
+            except:
+                self.send_error(404)
+    
+    def serve_file(self, filename, content_type):
+        """Serve a static file"""
+        try:
+            with open(filename, 'rb') as f:
+                content = f.read()
+            
+            self.send_response(200)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+        except FileNotFoundError:
+            self.send_error(404)
+        except Exception as e:
+            print(f"Error serving {filename}: {e}")
+            self.send_error(500)
     
     def do_POST(self):
         if self.path == '/api/generate-story':
