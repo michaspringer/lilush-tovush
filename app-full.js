@@ -791,6 +791,9 @@ function displayStory(story) {
                 <button class="btn-small btn-suggest" onclick="suggestAlternatives(${index})">
                     💡 הצע חלופה
                 </button>
+                <button class="btn-small btn-regenerate-image" onclick="showImageEditPopup(${index})" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                    🎨 שנה תמונה
+                </button>
                 <button class="btn-small btn-save" id="save-${index}" style="display: none;" onclick="saveEdit(${index})">
                     ✓ שמור
                 </button>
@@ -1000,5 +1003,147 @@ document.addEventListener('DOMContentLoaded', () => {
         childNameInput.addEventListener('input', validateStep1);
     }
     
+});
+
+// ==========================================
+// 🎨 Image Editing Functions
+// ==========================================
+
+function showImageEditPopup(pageIndex) {
+    const page = currentStory.pages[pageIndex];
+    
+    // Create modal HTML
+    const modalHTML = `
+        <div class="modal-overlay" id="imageEditModal" onclick="closeImageEditPopup(event)">
+            <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 500px; background: white; padding: 2rem; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2);">
+                <h2 style="color: #667eea; margin-bottom: 1rem; font-size: 1.5rem;">🎨 שינוי תמונה</h2>
+                
+                <p style="color: #666; margin-bottom: 1rem; font-size: 0.9rem;">
+                    תאר במילים מה תרצה לראות בתמונה:
+                </p>
+                
+                <textarea id="imagePromptInput" 
+                    placeholder="למשל: הילד במגרש משחקים עם כדור, שמש בשמיים, עצים ברקע..." 
+                    style="width: 100%; min-height: 100px; padding: 0.75rem; border: 2px solid #e0e0e0; border-radius: 10px; font-family: inherit; font-size: 0.9rem; resize: vertical; direction: rtl;"
+                ></textarea>
+                
+                <p style="color: #999; font-size: 0.8rem; margin-top: 0.5rem; margin-bottom: 1.5rem;">
+                    💡 השאר ריק כדי ליצור תמונה חדשה באופן אוטומטי
+                </p>
+                
+                <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+                    <button onclick="closeImageEditPopup()" 
+                        style="padding: 0.75rem 1.5rem; background: #f5f5f5; border: none; border-radius: 10px; cursor: pointer; font-weight: 600;">
+                        ביטול
+                    </button>
+                    <button onclick="regenerateImage(${pageIndex})" 
+                        style="padding: 0.75rem 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: 600;">
+                        🎨 צור תמונה חדשה
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Focus on textarea
+    setTimeout(() => {
+        const input = document.getElementById('imagePromptInput');
+        if (input) input.focus();
+    }, 100);
+}
+
+function closeImageEditPopup(event) {
+    const modal = document.getElementById('imageEditModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+async function regenerateImage(pageIndex) {
+    const userPrompt = document.getElementById('imagePromptInput').value.trim();
+    const page = currentStory.pages[pageIndex];
+    
+    // Close modal
+    closeImageEditPopup();
+    
+    // Show loading
+    showLoadingOverlay('מייצר תמונה חדשה... ⏳');
+    
+    try {
+        const response = await fetch(`${SERVER_CONFIG.url}/api/regenerate-image`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                page_text: page.illustration,
+                user_prompt: userPrompt,
+                child_photo: uploadedPhotos.length > 0 ? uploadedPhotos[0] : null
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.imageUrl) {
+            // Update the image
+            page.imageUrl = data.imageUrl;
+            
+            // Update the display
+            const imgElement = document.querySelector(`#page-${pageIndex} .page-image`);
+            if (imgElement) {
+                imgElement.src = data.imageUrl;
+            }
+            
+            // Save to storage
+            StorageManager.saveCurrentStory(currentStory);
+            
+            showSuccessMessage('✅ תמונה חדשה נוצרה בהצלחה!');
+        } else {
+            throw new Error(data.error || 'Failed to regenerate image');
+        }
+        
+    } catch (error) {
+        console.error('Image regeneration error:', error);
+        alert('שגיאה ביצירת תמונה חדשה: ' + error.message);
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+function showLoadingOverlay(message) {
+    const overlayHTML = `
+        <div id="loadingOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;">
+            <div style="background: white; padding: 2rem 3rem; border-radius: 20px; text-align: center;">
+                <div style="font-size: 2rem; margin-bottom: 1rem;">🎨</div>
+                <div style="font-size: 1.1rem; color: #333; font-weight: 600;">${message}</div>
+                <div style="margin-top: 1rem; color: #666; font-size: 0.9rem;">זה ייקח כ-15 שניות...</div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', overlayHTML);
+}
+
+function hideLoadingOverlay() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.remove();
+}
+
+function showSuccessMessage(message) {
+    const msgHTML = `
+        <div id="successMessage" style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1rem 2rem; border-radius: 50px; z-index: 10001; box-shadow: 0 5px 20px rgba(0,0,0,0.2); font-weight: 600;">
+            ${message}
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', msgHTML);
+    
+    setTimeout(() => {
+        const msg = document.getElementById('successMessage');
+        if (msg) {
+            msg.style.transition = 'opacity 0.5s';
+            msg.style.opacity = '0';
+            setTimeout(() => msg.remove(), 500);
+        }
+    }, 3000);
+}
     console.log('✅ App initialized');
 });
