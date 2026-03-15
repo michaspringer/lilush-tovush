@@ -210,11 +210,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # Set API key
             os.environ["FAL_KEY"] = FAL_KEY
             
-            # Submit to Fal.ai
+            # Submit to Fal.ai - correct parameter names
             handler = fal_client.submit(
                 "fal-ai/face-swap",
                 arguments={
-                    "image_url": target_image_b64,
+                    "base_image_url": target_image_b64,  # ← תיקון!
                     "swap_image_url": face_image_b64
                 }
             )
