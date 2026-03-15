@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 לילוש טובוש - שרת מלא
-Leonardo + Face Swap + PDF
+Leonardo + Fal.ai Face Swap + PDF
 """
 
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -20,8 +20,16 @@ import ssl
 CLAUDE_API_KEY = os.environ.get('CLAUDE_API_KEY', 'YOUR_CLAUDE_KEY_HERE')
 LEONARDO_API_KEY = os.environ.get('LEONARDO_API_KEY', '')
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN', '')
+FAL_KEY = os.environ.get('FAL_KEY', '')
 IMAGE_MODE = os.environ.get('IMAGE_MODE', 'leonardo')
-USE_FACE_SWAP = os.environ.get('USE_FACE_SWAP', 'true').lower() == 'true'
+
+# Try to import fal_client
+try:
+    import fal_client
+    HAS_FAL = True
+except ImportError:
+    HAS_FAL = False
+    print("⚠️ fal_client not installed - face swap disabled")
 # ========================================
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
@@ -158,12 +166,12 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             return story_data
     
     def add_images_to_story(self, story_data, child_photo=None):
-        """מוסיף תמונות לסיפור עם InstantID"""
+        """מוסיף תמונות לסיפור עם Fal.ai Face Swap"""
         pages = story_data.get('pages', [])
         
         print(f"  🎨 Creating {len(pages)} images...")
-        if child_photo:
-            print(f"  👤 Will use InstantID to add child's face!")
+        if child_photo and FAL_KEY and HAS_FAL:
+            print(f"  👤 Will use Fal.ai to add child's face!")
         
         for i, page in enumerate(pages):
             print(f"  🖼️  Image {i+1}/{len(pages)}...")
@@ -172,15 +180,15 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 # Generate base image with Leonardo
                 image_url = self.generate_image_leonardo(page['illustration'])
                 
-                # Apply InstantID if we have a child photo
-                if image_url and child_photo and REPLICATE_API_TOKEN:
-                    print(f"  👤 Applying InstantID...")
-                    face_swapped = self.apply_instant_id(image_url, child_photo)
+                # Apply Fal.ai face swap if available
+                if image_url and child_photo and FAL_KEY and HAS_FAL:
+                    print(f"  👤 Applying Fal.ai face swap...")
+                    face_swapped = self.apply_fal_face_swap(image_url, child_photo)
                     if face_swapped:
                         image_url = face_swapped
                         print(f"  ✅ Child added to image!")
                     else:
-                        print(f"  ⚠️ InstantID failed, using original")
+                        print(f"  ⚠️ Face swap failed, using original")
                 
                 page['imageUrl'] = image_url
                 
@@ -189,6 +197,60 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 page['imageUrl'] = None
         
         return story_data
+    
+    def apply_fal_face_swap(self, target_image_b64, face_image_b64):
+        """Face swap with Fal.ai"""
+        try:
+            if not FAL_KEY or not HAS_FAL:
+                print("  ⚠️ Fal.ai not configured")
+                return None
+            
+            print(f"  🎭 Starting Fal.ai face swap...")
+            
+            # Set API key
+            os.environ["FAL_KEY"] = FAL_KEY
+            
+            # Submit to Fal.ai
+            handler = fal_client.submit(
+                "fal-ai/face-swap",
+                arguments={
+                    "image_url": target_image_b64,
+                    "swap_image_url": face_image_b64
+                }
+            )
+            
+            print(f"  ⏳ Waiting for Fal.ai...")
+            
+            result = handler.get()
+            
+            if result and 'image' in result:
+                output_url = result['image']['url']
+                
+                # Download result
+                req = urllib.request.Request(
+                    output_url,
+                    headers={'User-Agent': 'Mozilla/5.0'}
+                )
+                
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                
+                with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                    img_data = response.read()
+                
+                img_b64 = base64.b64encode(img_data).decode()
+                print(f"  ✅ Fal.ai face swap succeeded!")
+                return f"data:image/jpeg;base64,{img_b64}"
+            
+            print(f"  ⚠️ Fal.ai: No output")
+            return None
+            
+        except Exception as e:
+            print(f"  ⚠️ Fal.ai error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def apply_instant_id(self, target_image_b64, face_image_b64):
         """Face swap with working Replicate model"""
