@@ -191,6 +191,91 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         return story_data
     
     def apply_instant_id(self, target_image_b64, face_image_b64):
+        """Face swap with working Replicate model"""
+        try:
+            if not REPLICATE_API_TOKEN:
+                print("  ⚠️ No Replicate token")
+                return None
+            
+            print(f"  🎭 Starting Face Swap...")
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            # Ensure data URIs
+            if not target_image_b64.startswith('data:'):
+                target_image_b64 = f"data:image/jpeg;base64,{target_image_b64}"
+            
+            if not face_image_b64.startswith('data:'):
+                face_image_b64 = f"data:image/jpeg;base64,{face_image_b64}"
+            
+            # Use simpler face swap - just swap the prediction endpoint
+            swap_data = {
+                "input": {
+                    "target_image": target_image_b64,
+                    "swap_image": face_image_b64
+                }
+            }
+            
+            headers = {
+                'Authorization': f'Token {REPLICATE_API_TOKEN}',
+                'Content-Type': 'application/json'
+            }
+            
+            # Try lucataco/faceswap - more reliable
+            req = urllib.request.Request(
+                'https://api.replicate.com/v1/models/lucataco/faceswap/predictions',
+                data=json.dumps(swap_data).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                pred_id = result['id']
+            
+            print(f"  ⏳ Face swap processing... ({pred_id})")
+            
+            # Poll for result
+            for attempt in range(60):
+                time.sleep(2)
+                
+                check_req = urllib.request.Request(
+                    f'https://api.replicate.com/v1/predictions/{pred_id}',
+                    headers=headers
+                )
+                
+                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
+                    check_result = json.loads(check_resp.read().decode('utf-8'))
+                    
+                    status = check_result['status']
+                    
+                    if status == 'succeeded':
+                        output_url = check_result['output']
+                        
+                        # Download
+                        img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
+                            img_data = img_resp.read()
+                        
+                        img_b64 = base64.b64encode(img_data).decode()
+                        print(f"  ✅ Face swap succeeded!")
+                        return f"data:image/jpeg;base64,{img_b64}"
+                    
+                    elif status == 'failed':
+                        error = check_result.get('error', 'Unknown')
+                        print(f"  ❌ Face swap failed: {error}")
+                        return None
+            
+            print(f"  ⏱️ Face swap timeout")
+            return None
+            
+        except Exception as e:
+            print(f"  ⚠️ Face swap error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
         """מוסיף פנים של ילד לתמונה עם InstantID"""
         try:
             if not REPLICATE_API_TOKEN:
