@@ -90,6 +90,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.handle_generate_pdf()
         elif self.path == '/api/train-model':
             self.handle_train_model()
+        elif self.path == '/api/regenerate-image':  # ← NEW!
+            self.handle_regenerate_image()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -447,16 +449,22 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             
-            # Enhanced prompt for consistency
-            full_prompt = f"{prompt}, children's book illustration, simple clean style, soft pastel colors, consistent character design, same character throughout, gentle friendly face, minimalist background, high quality, storybook art"
+            # Enhanced prompt for consistency and quality
+            full_prompt = f"{prompt}, children's book illustration, vibrant colors, detailed expressive face, clear facial features, professional storybook art, high quality, warm friendly atmosphere, soft lighting, 4k quality"
+            
+            negative_prompt = "blurry, distorted, ugly, scary, deformed face, multiple faces, low quality, bad anatomy, duplicate, extra limbs, dark, gloomy, realistic photo"
             
             gen_data = {
                 "prompt": full_prompt,
+                "negative_prompt": negative_prompt,
                 "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
                 "width": 1024,
                 "height": 1024,
                 "num_images": 1,
-                "seed": 123456789
+                "seed": 123456789,
+                "num_inference_steps": 35,  # ← more steps = better quality
+                "guidance_scale": 8,  # ← stronger prompt adherence
+                "presetStyle": "ILLUSTRATION"
             }
             
             headers = {
@@ -782,6 +790,49 @@ JSON:
                 })
                 
         except Exception as e:
+            self.send_json_response({'error': str(e)}, status=500)
+    
+    def handle_regenerate_image(self):
+        """מייצר תמונה מחדש עם הנחיות מהמשתמש"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            page_text = data.get('page_text', '')
+            user_prompt = data.get('user_prompt', '').strip()
+            child_photo = data.get('child_photo')
+            
+            print(f"\n🎨 Regenerating image...")
+            if user_prompt:
+                print(f"  👤 User request: {user_prompt[:50]}...")
+            
+            # Combine user prompt with original text
+            if user_prompt:
+                final_prompt = f"{user_prompt}, {page_text}"
+            else:
+                final_prompt = page_text
+            
+            # Generate image
+            image_url = self.generate_image_leonardo(final_prompt)
+            
+            # Apply face swap if photo available
+            if image_url and child_photo and FAL_KEY and HAS_FAL:
+                print(f"  👤 Applying Fal.ai face swap...")
+                face_swapped = self.apply_fal_face_swap(image_url, child_photo)
+                if face_swapped:
+                    image_url = face_swapped
+                    print(f"  ✅ Child added to image!")
+            
+            self.send_json_response({
+                'success': True,
+                'imageUrl': image_url
+            })
+            
+        except Exception as e:
+            print(f"  ❌ Error: {str(e)}")
+            import traceback
+            traceback.print_exc()
             self.send_json_response({'error': str(e)}, status=500)
     
     def handle_generate_pdf(self):
