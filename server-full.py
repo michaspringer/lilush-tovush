@@ -1101,7 +1101,7 @@ def run_server(port=None):
     print("🚀 לילוש טובוש")
     print("="*60)
     print(f"📸 Images: {IMAGE_MODE}")
-    print(f"👤 Face Swap: {'ON' if USE_FACE_SWAP else 'OFF'}")
+    print(f"👤 Face Swap: {'ON' if FAL_KEY and HAS_FAL else 'OFF'}")
     print(f"📡 Port: {port}")
     print("="*60 + "\n")
     
