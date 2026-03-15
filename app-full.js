@@ -266,7 +266,6 @@ function previewPhotosInline() {
         
         console.log(`✅ Uploaded ${uploadedPhotos.length} photos successfully`);
     });
-    });
 }
 
 function showProfileCreation() {
