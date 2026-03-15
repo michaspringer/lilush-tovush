@@ -3,3 +3,5 @@ python-bidi==0.4.2
 arabic-reshaper==3.0.0
 requests==2.31.0
 Pillow==10.0.0
+anthropic
+fal-client
