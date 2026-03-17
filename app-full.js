@@ -672,6 +672,7 @@ async function generateStory() {
         
         currentStory = data.story;
         currentStory.childName = appState.bookData.childName;
+        currentStory.childPhotos = uploadedPhotos.length > 0 ? [...uploadedPhotos] : [];  // ← שמור תמונות!
         
         // Save profile with photos
         if (uploadedPhotos.length > 0) {
@@ -1065,6 +1066,13 @@ async function regenerateImage(pageIndex) {
     const userPrompt = document.getElementById('imagePromptInput').value.trim();
     const page = currentStory.pages[pageIndex];
     
+    // Get child photo from story or uploaded photos
+    const childPhoto = (currentStory.childPhotos && currentStory.childPhotos.length > 0) 
+        ? currentStory.childPhotos[0] 
+        : (uploadedPhotos.length > 0 ? uploadedPhotos[0] : null);
+    
+    console.log('🎭 Regenerating with child photo:', childPhoto ? 'YES ✅' : 'NO ❌');
+    
     // Close modal
     closeImageEditPopup();
     
@@ -1078,7 +1086,7 @@ async function regenerateImage(pageIndex) {
             body: JSON.stringify({
                 page_text: page.illustration,
                 user_prompt: userPrompt,
-                child_photo: uploadedPhotos.length > 0 ? uploadedPhotos[0] : null
+                child_photo: childPhoto
             })
         });
         
