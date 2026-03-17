@@ -494,21 +494,21 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             if any(ord(c) > 127 for c in prompt):  # Contains non-ASCII (Hebrew)
                 prompt = self.translate_to_english(prompt)
             
-            # Enhanced prompt - optimized for face detection while keeping illustration style
-            full_prompt = f"{prompt}, modern children's book illustration, detailed realistic face with clear features, expressive eyes, recognizable facial structure, vibrant colors, friendly atmosphere, professional storybook art, high quality digital illustration"
+            # Simple, clean prompt that works well with face swap
+            full_prompt = f"{prompt}, children's book illustration, simple style, cartoon face with clear features, big expressive eyes, friendly character, colorful, bright, clean background, professional children's book art"
             
-            negative_prompt = "abstract face, simple cartoon face, blurry face, hidden face, no face, distorted, deformed, ugly, scary, low quality, bad anatomy"
+            negative_prompt = "realistic face, photorealistic, complex details, blurry, distorted, scary, dark, gloomy, low quality"
             
             gen_data = {
                 "prompt": full_prompt,
                 "negative_prompt": negative_prompt,
-                "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",  # ← Back to working model
+                "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
                 "width": 1024,
                 "height": 1024,
                 "num_images": 1,
                 "seed": 123456789,
-                "num_inference_steps": 40,  # ← More steps for detail
-                "guidance_scale": 8.5,
+                "num_inference_steps": 25,  # ← Less steps = simpler face
+                "guidance_scale": 7,  # ← Lower = more creative, simpler
                 "presetStyle": "ILLUSTRATION"
             }
             
