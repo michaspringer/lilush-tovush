@@ -274,6 +274,9 @@ function previewPhotosInline() {
         
         console.log(`✅ Uploaded ${uploadedPhotos.length} photos successfully`);
         console.log(`📸 Preview displayed with ${results.length} images`);
+        
+        // Re-validate to enable "Next" button
+        validateStep1();
     });
 }
 
@@ -518,14 +521,40 @@ function validateStep1() {
     const name = nameInput ? nameInput.value.trim() : '';
     const age = appState.bookData.childAge;
     const gender = appState.bookData.childGender;
+    const photoOption = appState.bookData.photoOption;
     
-    const isValid = name && age && gender;
+    // Basic validation
+    let isValid = name && age && gender;
+    
+    // If "real" option selected, require at least 1 photo
+    if (photoOption === 'real' && uploadedPhotos.length === 0) {
+        isValid = false;
+    }
+    
     const nextBtn = document.getElementById('step1-next');
     if (nextBtn) {
         nextBtn.disabled = !isValid;
+        
+        // Visual feedback
+        if (isValid) {
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'pointer';
+        } else {
+            nextBtn.style.opacity = '0.5';
+            nextBtn.style.cursor = 'not-allowed';
+        }
     }
     
     if (name) appState.bookData.childName = name;
+    
+    console.log('📋 Validation:', {
+        name: !!name,
+        age: !!age,
+        gender: !!gender,
+        photoOption,
+        photos: uploadedPhotos.length,
+        isValid
+    });
 }
 
 function selectAge(age) {
