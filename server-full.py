@@ -449,22 +449,23 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             
-            # Enhanced prompt for consistency and quality
-            full_prompt = f"{prompt}, children's book illustration, vibrant colors, detailed expressive face, clear facial features, professional storybook art, high quality, warm friendly atmosphere, soft lighting, 4k quality"
+            # Enhanced prompt - semi-realistic for better face detection
+            full_prompt = f"{prompt}, semi-realistic children's illustration, clear detailed human face with realistic features, expressive eyes, detailed facial structure, vibrant colors, storybook art style, professional quality, warm atmosphere"
             
-            negative_prompt = "blurry, distorted, ugly, scary, deformed face, multiple faces, low quality, bad anatomy, duplicate, extra limbs, dark, gloomy, realistic photo"
+            negative_prompt = "abstract face, cartoon face, blurry, distorted, deformed, ugly, scary, low quality, bad anatomy, no face, hidden face"
             
             gen_data = {
                 "prompt": full_prompt,
                 "negative_prompt": negative_prompt,
-                "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
+                "modelId": "1e60896f-3c26-4296-8ecc-53e2afecc132",  # ← Leonardo Kino XL (more realistic)
                 "width": 1024,
                 "height": 1024,
                 "num_images": 1,
                 "seed": 123456789,
-                "num_inference_steps": 35,  # ← more steps = better quality
-                "guidance_scale": 8,  # ← stronger prompt adherence
-                "presetStyle": "ILLUSTRATION"
+                "num_inference_steps": 35,
+                "guidance_scale": 8,
+                "photoReal": True,  # ← Enable photo-realism
+                "presetStyle": "CINEMATIC"
             }
             
             headers = {
