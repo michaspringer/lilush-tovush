@@ -245,9 +245,13 @@ function previewPhotosInline() {
     });
     
     Promise.all(promises).then((results) => {
+        // Clear and show preview container
+        preview.innerHTML = '';
+        preview.style.display = 'grid';
+        
         results.forEach((src, i) => {
             const div = document.createElement('div');
-            div.style.cssText = 'position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);';
+            div.style.cssText = 'position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 3px solid #667eea;';
             
             const img = document.createElement('img');
             img.src = src;
@@ -255,16 +259,21 @@ function previewPhotosInline() {
             
             const badge = document.createElement('div');
             badge.textContent = i + 1;
-            badge.style.cssText = 'position: absolute; top: 3px; right: 3px; background: #667eea; color: white; width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: bold;';
+            badge.style.cssText = 'position: absolute; top: 8px; right: 8px; background: #667eea; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.3);';
             
             div.appendChild(img);
             div.appendChild(badge);
             preview.appendChild(div);
         });
         
-        preview.innerHTML += `<div style="grid-column: 1/-1; text-align: center; padding: 0.5rem; color: #667eea; font-weight: bold;">✅ ${uploadedPhotos.length} תמונות מוכנות לשימוש!</div>`;
+        // Add success message
+        const successMsg = document.createElement('div');
+        successMsg.style.cssText = 'grid-column: 1/-1; text-align: center; padding: 1rem; color: white; font-weight: bold; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-top: 0.5rem; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);';
+        successMsg.innerHTML = `✅ ${uploadedPhotos.length} תמונות מוכנות!`;
+        preview.appendChild(successMsg);
         
         console.log(`✅ Uploaded ${uploadedPhotos.length} photos successfully`);
+        console.log(`📸 Preview displayed with ${results.length} images`);
     });
 }
 
