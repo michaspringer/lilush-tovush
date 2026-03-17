@@ -449,23 +449,22 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
             
-            # Enhanced prompt - semi-realistic for better face detection
-            full_prompt = f"{prompt}, semi-realistic children's illustration, clear detailed human face with realistic features, expressive eyes, detailed facial structure, vibrant colors, storybook art style, professional quality, warm atmosphere"
+            # Enhanced prompt - optimized for face detection while keeping illustration style
+            full_prompt = f"{prompt}, modern children's book illustration, detailed realistic face with clear features, expressive eyes, recognizable facial structure, vibrant colors, friendly atmosphere, professional storybook art, high quality digital illustration"
             
-            negative_prompt = "abstract face, cartoon face, blurry, distorted, deformed, ugly, scary, low quality, bad anatomy, no face, hidden face"
+            negative_prompt = "abstract face, simple cartoon face, blurry face, hidden face, no face, distorted, deformed, ugly, scary, low quality, bad anatomy"
             
             gen_data = {
                 "prompt": full_prompt,
                 "negative_prompt": negative_prompt,
-                "modelId": "1e60896f-3c26-4296-8ecc-53e2afecc132",  # ← Leonardo Kino XL (more realistic)
+                "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",  # ← Back to working model
                 "width": 1024,
                 "height": 1024,
                 "num_images": 1,
                 "seed": 123456789,
-                "num_inference_steps": 35,
-                "guidance_scale": 8,
-                "photoReal": True,  # ← Enable photo-realism
-                "presetStyle": "CINEMATIC"
+                "num_inference_steps": 40,  # ← More steps for detail
+                "guidance_scale": 8.5,
+                "presetStyle": "ILLUSTRATION"
             }
             
             headers = {
@@ -724,14 +723,19 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             prompt += f"פרטים: {data['customInput']}\n"
         
         prompt += """
-חשוב: תאר דמויות באופן עקבי!
-- אותו כלב בכל העמודים: "small brown fluffy dog"
-- אותה חתולה: "white cat with blue eyes"
+חשוב מאוד!
+1. הטקסט (text) בעברית בלבד!
+2. תיאור התמונה (illustration) גם בעברית!
+3. תאר דמויות באופן עקבי בכל העמודים
+4. דוגמה: "ילד בן 4 עם שיער קצר וחום לובש חולצה כחולה..."
 
-JSON:
+פורמט JSON:
 {
   "pages": [
-    {"text": "...", "illustration": "A 4 year old child..."}
+    {
+      "text": "הטקסט בעברית כאן...",
+      "illustration": "ילד בן 4 עם שיער קצר חום עומד בגן חיות צבעוני..."
+    }
   ]
 }
 """
