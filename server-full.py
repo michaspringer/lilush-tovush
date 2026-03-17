@@ -434,6 +434,47 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             traceback.print_exc()
             return None
     
+    def translate_to_english(self, hebrew_text):
+        """תרגום תיאור תמונה מעברית לאנגלית"""
+        try:
+            if not CLAUDE_API_KEY:
+                return hebrew_text  # Fallback
+            
+            prompt = f"""תרגם את התיאור הבא לאנגלית בצורה מדויקת ומפורטת:
+
+"{hebrew_text}"
+
+תן רק את התרגום באנגלית, ללא הסברים."""
+            
+            claude_request = {
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 300,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'x-api-key': CLAUDE_API_KEY,
+                'anthropic-version': '2023-06-01'
+            }
+            
+            req = urllib.request.Request(
+                CLAUDE_API_URL,
+                data=json.dumps(claude_request).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response_data = json.loads(response.read().decode('utf-8'))
+                english_text = response_data['content'][0]['text'].strip()
+                print(f"  🌐 Translated: {english_text[:50]}...")
+                return english_text
+                
+        except Exception as e:
+            print(f"  ⚠️ Translation failed: {str(e)}, using original")
+            return hebrew_text
+    
     def generate_image_leonardo(self, prompt, character_reference=None):
         """יוצר תמונה עם Leonardo"""
         try:
@@ -448,6 +489,10 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
+            
+            # Translate Hebrew to English if needed
+            if any(ord(c) > 127 for c in prompt):  # Contains non-ASCII (Hebrew)
+                prompt = self.translate_to_english(prompt)
             
             # Enhanced prompt - optimized for face detection while keeping illustration style
             full_prompt = f"{prompt}, modern children's book illustration, detailed realistic face with clear features, expressive eyes, recognizable facial structure, vibrant colors, friendly atmosphere, professional storybook art, high quality digital illustration"
@@ -818,16 +863,25 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             else:
                 final_prompt = page_text
             
+            print(f"  📝 Final prompt: {final_prompt[:100]}...")
+            
             # Generate image
             image_url = self.generate_image_leonardo(final_prompt)
             
+            if not image_url:
+                raise Exception("Leonardo failed to generate image")
+            
             # Apply face swap if photo available
-            if image_url and child_photo and FAL_KEY and HAS_FAL:
+            if child_photo and FAL_KEY and HAS_FAL:
                 print(f"  👤 Applying Fal.ai face swap...")
                 face_swapped = self.apply_fal_face_swap(image_url, child_photo)
                 if face_swapped:
                     image_url = face_swapped
                     print(f"  ✅ Child added to image!")
+                else:
+                    print(f"  ⚠️ Face swap failed, using original image")
+            
+            print(f"  ✅ Image regenerated successfully!")
             
             self.send_json_response({
                 'success': True,
@@ -835,10 +889,14 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             })
             
         except Exception as e:
-            print(f"  ❌ Error: {str(e)}")
+            error_msg = str(e)
+            print(f"  ❌ Regeneration error: {error_msg}")
             import traceback
             traceback.print_exc()
-            self.send_json_response({'error': str(e)}, status=500)
+            self.send_json_response({
+                'success': False,
+                'error': error_msg
+            }, status=500)
     
     def handle_generate_pdf(self):
         """יוצר PDF"""
