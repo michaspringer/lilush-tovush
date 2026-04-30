@@ -168,10 +168,10 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             return story_data
     
     def add_images_to_story(self, story_data, child_photo=None):
-        """מוסיף תמונות לסיפור עם Fal.ai Face Swap"""
+        """מוסיף תמונות לסיפור עם FLUX + Fal.ai Face Swap"""
         pages = story_data.get('pages', [])
         
-        print(f"  🎨 Creating {len(pages)} images...")
+        print(f"  🎨 Creating {len(pages)} images with FLUX...")
         if child_photo and FAL_KEY and HAS_FAL:
             print(f"  👤 Will use Fal.ai to add child's face!")
         
@@ -179,8 +179,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"  🖼️  Image {i+1}/{len(pages)}...")
             
             try:
-                # Generate base image with Leonardo
-                image_url = self.generate_image_leonardo(page['illustration'])
+                # Generate base image with FLUX (upgraded!)
+                image_url = self.generate_image_flux(page['illustration'])
                 
                 # Apply Fal.ai face swap if available
                 if image_url and child_photo and FAL_KEY and HAS_FAL:
@@ -475,6 +475,71 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"  ⚠️ Translation failed: {str(e)}, using original")
             return hebrew_text
     
+    def generate_image_flux(self, prompt):
+        """יצירת תמונה עם FLUX - איכות מעולה!"""
+        try:
+            if not FAL_KEY or not HAS_FAL:
+                raise Exception('Fal.ai not configured')
+            
+            print(f"  🎨 FLUX...")
+            
+            # Translate Hebrew to English if needed
+            if any(ord(c) > 127 for c in prompt):
+                prompt = self.translate_to_english(prompt)
+            
+            # FLUX prompt - simple and effective
+            full_prompt = f"{prompt}, children's book illustration style, colorful, friendly, warm, detailed, high quality"
+            
+            print(f"  📝 Prompt: {full_prompt[:80]}...")
+            
+            # Set API key
+            os.environ["FAL_KEY"] = FAL_KEY
+            
+            # Submit to FLUX
+            handler = fal_client.submit(
+                "fal-ai/flux/dev",
+                arguments={
+                    "prompt": full_prompt,
+                    "image_size": "landscape_4_3",
+                    "num_inference_steps": 28,
+                    "guidance_scale": 3.5,
+                    "num_images": 1,
+                    "enable_safety_checker": False
+                }
+            )
+            
+            print(f"  ⏳ Waiting for FLUX...")
+            
+            result = handler.get()
+            
+            if result and 'images' in result and len(result['images']) > 0:
+                output_url = result['images'][0]['url']
+                
+                # Download image
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                
+                req = urllib.request.Request(
+                    output_url,
+                    headers={'User-Agent': 'Mozilla/5.0'}
+                )
+                
+                with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                    img_data = response.read()
+                
+                img_b64 = base64.b64encode(img_data).decode()
+                print(f"  ✅ FLUX done! ({len(img_data)} bytes)")
+                return f"data:image/jpeg;base64,{img_b64}"
+            
+            raise Exception("No output from FLUX")
+            
+        except Exception as e:
+            print(f"  ⚠️ FLUX error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
     def generate_image_leonardo(self, prompt, character_reference=None):
         """יוצר תמונה עם Leonardo"""
         try:
@@ -494,10 +559,10 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             if any(ord(c) > 127 for c in prompt):  # Contains non-ASCII (Hebrew)
                 prompt = self.translate_to_english(prompt)
             
-            # Simple, clean prompt that works well with face swap
-            full_prompt = f"{prompt}, children's book illustration, simple style, cartoon face with clear features, big expressive eyes, friendly character, colorful, bright, clean background, professional children's book art"
+            # Balanced prompt - clear facial features for face swap while maintaining illustration style
+            full_prompt = f"{prompt}, illustrated children's book style, character with clear visible face and distinct facial features, expressive friendly eyes, recognizable human-like face, colorful vibrant illustration, warm and inviting, professional children's book art, digital illustration"
             
-            negative_prompt = "realistic face, photorealistic, complex details, blurry, distorted, scary, dark, gloomy, low quality"
+            negative_prompt = "no face, hidden face, side view, back view, abstract, overly simplified, stick figure, blurry, distorted, scary, dark, photorealistic, realistic photo"
             
             gen_data = {
                 "prompt": full_prompt,
@@ -507,8 +572,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 "height": 1024,
                 "num_images": 1,
                 "seed": 123456789,
-                "num_inference_steps": 25,  # ← Less steps = simpler face
-                "guidance_scale": 7,  # ← Lower = more creative, simpler
+                "num_inference_steps": 30,  # ← Balanced detail
+                "guidance_scale": 7.5,  # ← Balanced adherence
                 "presetStyle": "ILLUSTRATION"
             }
             
@@ -865,8 +930,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             print(f"  📝 Final prompt: {final_prompt[:100]}...")
             
-            # Generate image
-            image_url = self.generate_image_leonardo(final_prompt)
+            # Generate image with FLUX
+            image_url = self.generate_image_flux(final_prompt)
             
             if not image_url:
                 raise Exception("Leonardo failed to generate image")
