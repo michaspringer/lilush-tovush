@@ -509,12 +509,12 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             return hebrew_text
     
     def generate_image_flux_with_face(self, prompt, child_photo=None):
-        """יצירת תמונה עם FLUX + IP-Adapter - הילד מצוייר באיור!"""
+        """יצירת תמונה עם FLUX + Pulid - הילד מצוייר באיור!"""
         try:
             if not FAL_KEY or not HAS_FAL:
                 raise Exception('Fal.ai not configured')
             
-            print(f"  🎨 FLUX + IP-Adapter...")
+            print(f"  🎨 FLUX + Pulid...")
             
             # Translate Hebrew to English if needed
             if any(ord(c) > 127 for c in prompt):
@@ -523,40 +523,35 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # Enhanced prompt for single child
             full_prompt = f"A single child, {prompt}, children's book illustration style, colorful, friendly, warm, high quality, professional illustration"
             
-            negative_prompt = "multiple children, many people, crowd, side view, back view, profile view, hidden face, blurry, low quality"
+            negative_prompt = "multiple children, many people, crowd, side view, back view, profile view, hidden face, blurry, low quality, adult, old person"
             
             print(f"  📝 Prompt: {full_prompt[:80]}...")
             
             # Set API key
             os.environ["FAL_KEY"] = FAL_KEY
             
-            # Use FLUX with IP-Adapter if child photo provided
+            # Use Pulid-FLUX if child photo provided
             if child_photo:
-                print(f"  👤 Using child's face as reference...")
+                print(f"  👤 Using child's face as reference with Pulid...")
                 
                 try:
-                    # Try FLUX-Pro with IP-Adapter
+                    # Pulid-FLUX - better face preservation
                     handler = fal_client.submit(
-                        "fal-ai/flux-pro/v1.1-ultra",
+                        "fal-ai/pulid-flux",
                         arguments={
                             "prompt": full_prompt,
-                            "image_size": {
-                                "width": 1024,
-                                "height": 768
-                            },
-                            "num_inference_steps": 28,
-                            "guidance_scale": 3.5,
+                            "reference_images": [{"image_url": child_photo}],
+                            "image_size": "landscape_4_3",
+                            "num_inference_steps": 20,
+                            "guidance_scale": 4.0,
                             "num_images": 1,
-                            "safety_tolerance": "2",
-                            "prompt_upsampling": True,
-                            "reference_images": [{
-                                "image_url": child_photo,
-                                "weight": 0.7  # How much to follow the face
-                            }]
+                            "enable_safety_checker": False,
+                            "negative_prompt": negative_prompt,
+                            "id_weight": 0.8  # How much to preserve face identity
                         }
                     )
                     
-                    print(f"  ⏳ Waiting for FLUX-Pro + IP-Adapter...")
+                    print(f"  ⏳ Waiting for Pulid-FLUX...")
                     
                     result = handler.get()
                     
@@ -577,11 +572,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                             img_data = response.read()
                         
                         img_b64 = base64.b64encode(img_data).decode()
-                        print(f"  ✅ FLUX-Pro + IP-Adapter done! Child drawn in illustration style!")
+                        print(f"  ✅ Pulid-FLUX done! Child's face preserved in illustration!")
                         return f"data:image/jpeg;base64,{img_b64}"
                 
                 except Exception as e:
-                    print(f"  ⚠️ FLUX-Pro failed: {str(e)}, trying regular FLUX...")
+                    print(f"  ⚠️ Pulid-FLUX failed: {str(e)}, trying regular FLUX...")
             
             # Fallback: Regular FLUX without face reference
             handler = fal_client.submit(
