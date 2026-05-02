@@ -90,8 +90,10 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.handle_generate_pdf()
         elif self.path == '/api/train-model':
             self.handle_train_model()
-        elif self.path == '/api/regenerate-image':  # ← NEW!
+        elif self.path == '/api/regenerate-image':
             self.handle_regenerate_image()
+        elif self.path == '/api/test-face-swap':  # ← NEW!
+            self.handle_test_face_swap()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -196,7 +198,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         return story_data
     
     def apply_fal_face_swap(self, target_image_b64, face_image_b64):
-        """Face swap with Fal.ai - try InsightFace first, fallback to regular"""
+        """Face swap with Fal.ai - simple and working"""
         try:
             if not FAL_KEY or not HAS_FAL:
                 print("  ⚠️ Fal.ai not configured")
@@ -207,45 +209,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # Set API key
             os.environ["FAL_KEY"] = FAL_KEY
             
-            # Try InsightFace first (better for illustrations)
-            try:
-                print(f"  🔬 Trying InsightFace...")
-                handler = fal_client.submit(
-                    "fal-ai/face-swap-insightface",  # More robust for illustrations
-                    arguments={
-                        "image_url": target_image_b64,
-                        "face_url": face_image_b64
-                    }
-                )
-                
-                print(f"  ⏳ Waiting for InsightFace...")
-                result = handler.get()
-                
-                if result and 'image' in result:
-                    output_url = result['image']['url']
-                    
-                    # Download
-                    ctx = ssl.create_default_context()
-                    ctx.check_hostname = False
-                    ctx.verify_mode = ssl.CERT_NONE
-                    
-                    req = urllib.request.Request(
-                        output_url,
-                        headers={'User-Agent': 'Mozilla/5.0'}
-                    )
-                    
-                    with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
-                        img_data = response.read()
-                    
-                    img_b64 = base64.b64encode(img_data).decode()
-                    print(f"  ✅ InsightFace face swap succeeded!")
-                    return f"data:image/jpeg;base64,{img_b64}"
-                    
-            except Exception as insight_error:
-                print(f"  ⚠️ InsightFace failed: {str(insight_error)}")
-                print(f"  🔄 Falling back to regular face-swap...")
-            
-            # Fallback to regular face-swap
+            # Use simple face-swap
             handler = fal_client.submit(
                 "fal-ai/face-swap",
                 arguments={
@@ -1050,6 +1014,50 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             error_msg = str(e)
             print(f"  ❌ Regeneration error: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': error_msg
+            }, status=500)
+    
+    def handle_test_face_swap(self):
+        """בודק face swap עם תמונת בדיקה - מהיר!"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            child_photo = data.get('child_photo')
+            child_name = data.get('child_name', 'ילד')
+            
+            if not child_photo:
+                raise Exception('No child photo provided')
+            
+            print(f"\n🧪 Testing face swap for {child_name}...")
+            
+            # Test prompt - simple scene
+            test_prompt = f"A cheerful child in a colorful playground, playing happily, sunny day"
+            
+            print(f"  📝 Test prompt: {test_prompt}")
+            
+            # Generate test image with FLUX
+            image_url = self.generate_image_flux_with_face(test_prompt, child_photo)
+            
+            if not image_url:
+                raise Exception("Failed to generate test image")
+            
+            print(f"  ✅ Test complete!")
+            
+            self.send_json_response({
+                'success': True,
+                'imageUrl': image_url,
+                'message': 'Test image generated successfully!'
+            })
+            
+        except Exception as e:
+            error_msg = str(e)
+            print(f"  ❌ Test error: {error_msg}")
             import traceback
             traceback.print_exc()
             self.send_json_response({
