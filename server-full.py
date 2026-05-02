@@ -168,29 +168,24 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             return story_data
     
     def add_images_to_story(self, story_data, child_photo=None):
-        """מוסיף תמונות לסיפור עם FLUX + Fal.ai Face Swap"""
+        """מוסיף תמונות לסיפור עם FLUX + IP-Adapter"""
         pages = story_data.get('pages', [])
         
-        print(f"  🎨 Creating {len(pages)} images with FLUX...")
-        if child_photo and FAL_KEY and HAS_FAL:
-            print(f"  👤 Will use Fal.ai to add child's face!")
+        if child_photo:
+            print(f"  🎨 Creating {len(pages)} images with FLUX + IP-Adapter...")
+            print(f"  👤 Child will be drawn in illustration style!")
+        else:
+            print(f"  🎨 Creating {len(pages)} images with FLUX...")
         
         for i, page in enumerate(pages):
             print(f"  🖼️  Image {i+1}/{len(pages)}...")
             
             try:
-                # Generate base image with FLUX (upgraded!)
-                image_url = self.generate_image_flux(page['illustration'])
-                
-                # Apply Fal.ai face swap if available
-                if image_url and child_photo and FAL_KEY and HAS_FAL:
-                    print(f"  👤 Applying Fal.ai face swap...")
-                    face_swapped = self.apply_fal_face_swap(image_url, child_photo)
-                    if face_swapped:
-                        image_url = face_swapped
-                        print(f"  ✅ Child added to image!")
-                    else:
-                        print(f"  ⚠️ Face swap failed, using original")
+                # Generate with IP-Adapter (child's face as reference)
+                image_url = self.generate_image_flux_with_face(
+                    page['illustration'],
+                    child_photo
+                )
                 
                 page['imageUrl'] = image_url
                 
@@ -201,7 +196,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         return story_data
     
     def apply_fal_face_swap(self, target_image_b64, face_image_b64):
-        """Face swap with Fal.ai"""
+        """Face swap with Fal.ai - try InsightFace first, fallback to regular"""
         try:
             if not FAL_KEY or not HAS_FAL:
                 print("  ⚠️ Fal.ai not configured")
@@ -212,11 +207,49 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # Set API key
             os.environ["FAL_KEY"] = FAL_KEY
             
-            # Submit to Fal.ai - correct parameter names
+            # Try InsightFace first (better for illustrations)
+            try:
+                print(f"  🔬 Trying InsightFace...")
+                handler = fal_client.submit(
+                    "fal-ai/face-swap-insightface",  # More robust for illustrations
+                    arguments={
+                        "image_url": target_image_b64,
+                        "face_url": face_image_b64
+                    }
+                )
+                
+                print(f"  ⏳ Waiting for InsightFace...")
+                result = handler.get()
+                
+                if result and 'image' in result:
+                    output_url = result['image']['url']
+                    
+                    # Download
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    
+                    req = urllib.request.Request(
+                        output_url,
+                        headers={'User-Agent': 'Mozilla/5.0'}
+                    )
+                    
+                    with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                        img_data = response.read()
+                    
+                    img_b64 = base64.b64encode(img_data).decode()
+                    print(f"  ✅ InsightFace face swap succeeded!")
+                    return f"data:image/jpeg;base64,{img_b64}"
+                    
+            except Exception as insight_error:
+                print(f"  ⚠️ InsightFace failed: {str(insight_error)}")
+                print(f"  🔄 Falling back to regular face-swap...")
+            
+            # Fallback to regular face-swap
             handler = fal_client.submit(
                 "fal-ai/face-swap",
                 arguments={
-                    "base_image_url": target_image_b64,  # ← תיקון!
+                    "base_image_url": target_image_b64,
                     "swap_image_url": face_image_b64
                 }
             )
@@ -475,27 +508,82 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"  ⚠️ Translation failed: {str(e)}, using original")
             return hebrew_text
     
-    def generate_image_flux(self, prompt):
-        """יצירת תמונה עם FLUX - איכות מעולה!"""
+    def generate_image_flux_with_face(self, prompt, child_photo=None):
+        """יצירת תמונה עם FLUX + IP-Adapter - הילד מצוייר באיור!"""
         try:
             if not FAL_KEY or not HAS_FAL:
                 raise Exception('Fal.ai not configured')
             
-            print(f"  🎨 FLUX...")
+            print(f"  🎨 FLUX + IP-Adapter...")
             
             # Translate Hebrew to English if needed
             if any(ord(c) > 127 for c in prompt):
                 prompt = self.translate_to_english(prompt)
             
-            # FLUX prompt - simple and effective
-            full_prompt = f"{prompt}, children's book illustration style, colorful, friendly, warm, detailed, high quality"
+            # Enhanced prompt for single child
+            full_prompt = f"A single child, {prompt}, children's book illustration style, colorful, friendly, warm, high quality, professional illustration"
+            
+            negative_prompt = "multiple children, many people, crowd, side view, back view, profile view, hidden face, blurry, low quality"
             
             print(f"  📝 Prompt: {full_prompt[:80]}...")
             
             # Set API key
             os.environ["FAL_KEY"] = FAL_KEY
             
-            # Submit to FLUX
+            # Use FLUX with IP-Adapter if child photo provided
+            if child_photo:
+                print(f"  👤 Using child's face as reference...")
+                
+                try:
+                    # Try FLUX-Pro with IP-Adapter
+                    handler = fal_client.submit(
+                        "fal-ai/flux-pro/v1.1-ultra",
+                        arguments={
+                            "prompt": full_prompt,
+                            "image_size": {
+                                "width": 1024,
+                                "height": 768
+                            },
+                            "num_inference_steps": 28,
+                            "guidance_scale": 3.5,
+                            "num_images": 1,
+                            "safety_tolerance": "2",
+                            "prompt_upsampling": True,
+                            "reference_images": [{
+                                "image_url": child_photo,
+                                "weight": 0.7  # How much to follow the face
+                            }]
+                        }
+                    )
+                    
+                    print(f"  ⏳ Waiting for FLUX-Pro + IP-Adapter...")
+                    
+                    result = handler.get()
+                    
+                    if result and 'images' in result and len(result['images']) > 0:
+                        output_url = result['images'][0]['url']
+                        
+                        # Download
+                        ctx = ssl.create_default_context()
+                        ctx.check_hostname = False
+                        ctx.verify_mode = ssl.CERT_NONE
+                        
+                        req = urllib.request.Request(
+                            output_url,
+                            headers={'User-Agent': 'Mozilla/5.0'}
+                        )
+                        
+                        with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                            img_data = response.read()
+                        
+                        img_b64 = base64.b64encode(img_data).decode()
+                        print(f"  ✅ FLUX-Pro + IP-Adapter done! Child drawn in illustration style!")
+                        return f"data:image/jpeg;base64,{img_b64}"
+                
+                except Exception as e:
+                    print(f"  ⚠️ FLUX-Pro failed: {str(e)}, trying regular FLUX...")
+            
+            # Fallback: Regular FLUX without face reference
             handler = fal_client.submit(
                 "fal-ai/flux/dev",
                 arguments={
@@ -515,7 +603,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             if result and 'images' in result and len(result['images']) > 0:
                 output_url = result['images'][0]['url']
                 
-                # Download image
+                # Download
                 ctx = ssl.create_default_context()
                 ctx.check_hostname = False
                 ctx.verify_mode = ssl.CERT_NONE
@@ -930,8 +1018,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             print(f"  📝 Final prompt: {final_prompt[:100]}...")
             
-            # Generate image with FLUX
-            image_url = self.generate_image_flux(final_prompt)
+            # Generate image with FLUX + IP-Adapter
+            image_url = self.generate_image_flux_with_face(final_prompt, child_photo)
             
             if not image_url:
                 raise Exception("Leonardo failed to generate image")
