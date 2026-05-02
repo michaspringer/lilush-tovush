@@ -509,74 +509,85 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             return hebrew_text
     
     def generate_image_flux_with_face(self, prompt, child_photo=None):
-        """יצירת תמונה עם FLUX + Pulid - הילד מצוייר באיור!"""
+        """יצירת תמונה עם FLUX + Face Swap"""
         try:
             if not FAL_KEY or not HAS_FAL:
                 raise Exception('Fal.ai not configured')
             
-            print(f"  🎨 FLUX + Pulid...")
+            print(f"  🎨 FLUX...")
             
             # Translate Hebrew to English if needed
             if any(ord(c) > 127 for c in prompt):
                 prompt = self.translate_to_english(prompt)
             
-            # Enhanced prompt for single child
-            full_prompt = f"A single child, {prompt}, children's book illustration style, colorful, friendly, warm, high quality, professional illustration"
+            # FLUX prompt - emphasize clear frontal face
+            full_prompt = f"{prompt}, children's book illustration style, front-facing character with clear visible face, looking at camera, detailed facial features, friendly expression, colorful, warm, high quality"
             
-            negative_prompt = "multiple children, many people, crowd, side view, back view, profile view, hidden face, blurry, low quality, adult, old person"
+            negative_prompt = "side view, back view, profile view, hidden face, no face, blurry face, abstract face, multiple people"
             
             print(f"  📝 Prompt: {full_prompt[:80]}...")
             
             # Set API key
             os.environ["FAL_KEY"] = FAL_KEY
             
-            # Use Pulid-FLUX if child photo provided
-            if child_photo:
-                print(f"  👤 Using child's face as reference with Pulid...")
+            # Generate with FLUX
+            handler = fal_client.submit(
+                "fal-ai/flux/dev",
+                arguments={
+                    "prompt": full_prompt,
+                    "image_size": "landscape_4_3",
+                    "num_inference_steps": 28,
+                    "guidance_scale": 3.5,
+                    "num_images": 1,
+                    "enable_safety_checker": False,
+                    "negative_prompt": negative_prompt
+                }
+            )
+            
+            print(f"  ⏳ Waiting for FLUX...")
+            
+            result = handler.get()
+            
+            if result and 'images' in result and len(result['images']) > 0:
+                output_url = result['images'][0]['url']
                 
-                try:
-                    # Pulid-FLUX - better face preservation
-                    handler = fal_client.submit(
-                        "fal-ai/pulid-flux",
-                        arguments={
-                            "prompt": full_prompt,
-                            "reference_images": [{"image_url": child_photo}],
-                            "image_size": "landscape_4_3",
-                            "num_inference_steps": 20,
-                            "guidance_scale": 4.0,
-                            "num_images": 1,
-                            "enable_safety_checker": False,
-                            "negative_prompt": negative_prompt,
-                            "id_weight": 0.8  # How much to preserve face identity
-                        }
-                    )
-                    
-                    print(f"  ⏳ Waiting for Pulid-FLUX...")
-                    
-                    result = handler.get()
-                    
-                    if result and 'images' in result and len(result['images']) > 0:
-                        output_url = result['images'][0]['url']
-                        
-                        # Download
-                        ctx = ssl.create_default_context()
-                        ctx.check_hostname = False
-                        ctx.verify_mode = ssl.CERT_NONE
-                        
-                        req = urllib.request.Request(
-                            output_url,
-                            headers={'User-Agent': 'Mozilla/5.0'}
-                        )
-                        
-                        with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
-                            img_data = response.read()
-                        
-                        img_b64 = base64.b64encode(img_data).decode()
-                        print(f"  ✅ Pulid-FLUX done! Child's face preserved in illustration!")
-                        return f"data:image/jpeg;base64,{img_b64}"
+                # Download
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
                 
-                except Exception as e:
-                    print(f"  ⚠️ Pulid-FLUX failed: {str(e)}, trying regular FLUX...")
+                req = urllib.request.Request(
+                    output_url,
+                    headers={'User-Agent': 'Mozilla/5.0'}
+                )
+                
+                with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                    img_data = response.read()
+                
+                img_b64 = base64.b64encode(img_data).decode()
+                image_data = f"data:image/jpeg;base64,{img_b64}"
+                
+                print(f"  ✅ FLUX done! ({len(img_data)} bytes)")
+                
+                # Apply face swap if child photo provided
+                if child_photo:
+                    print(f"  👤 Applying InsightFace face swap...")
+                    face_swapped = self.apply_fal_face_swap(image_data, child_photo)
+                    if face_swapped:
+                        print(f"  ✅ Child's face added to image!")
+                        return face_swapped
+                    else:
+                        print(f"  ⚠️ Face swap failed, using original FLUX image")
+                
+                return image_data
+            
+            raise Exception("No output from FLUX")
+            
+        except Exception as e:
+            print(f"  ⚠️ FLUX error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
             
             # Fallback: Regular FLUX without face reference
             handler = fal_client.submit(
