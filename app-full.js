@@ -272,6 +272,15 @@ function previewPhotosInline() {
         successMsg.innerHTML = `✅ ${uploadedPhotos.length} תמונות מוכנות!`;
         preview.appendChild(successMsg);
         
+        // Add test button
+        const testBtn = document.createElement('button');
+        testBtn.style.cssText = 'grid-column: 1/-1; padding: 0.75rem 1.5rem; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 0.95rem; box-shadow: 0 4px 12px rgba(245, 87, 108, 0.4); transition: transform 0.2s;';
+        testBtn.innerHTML = '🧪 בדוק המרה לאיור (15 שניות)';
+        testBtn.onmouseover = () => testBtn.style.transform = 'scale(1.05)';
+        testBtn.onmouseout = () => testBtn.style.transform = 'scale(1)';
+        testBtn.onclick = testFaceSwap;
+        preview.appendChild(testBtn);
+        
         console.log(`✅ Uploaded ${uploadedPhotos.length} photos successfully`);
         console.log(`📸 Preview displayed with ${results.length} images`);
         
@@ -1196,3 +1205,69 @@ function showSuccessMessage(message) {
 // App initialization complete
 // ==========================================
 console.log('✅ App initialized successfully');
+
+// ==========================================
+// 🧪 Test Face Swap Function
+// ==========================================
+
+async function testFaceSwap() {
+    if (uploadedPhotos.length === 0) {
+        alert('אנא העלה תמונה קודם');
+        return;
+    }
+    
+    const childName = document.getElementById('childName').value.trim() || 'הילד';
+    
+    // Show loading
+    const preview = document.getElementById('photoPreviewInline');
+    const loadingDiv = document.createElement('div');
+    loadingDiv.id = 'testLoading';
+    loadingDiv.style.cssText = 'grid-column: 1/-1; text-align: center; padding: 1.5rem; background: white; border-radius: 10px; margin-top: 0.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
+    loadingDiv.innerHTML = `
+        <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎨</div>
+        <div style="font-weight: bold; color: #667eea; margin-bottom: 0.5rem;">יוצר תמונת בדיקה...</div>
+        <div style="font-size: 0.9rem; color: #666;">זה ייקח כ-15 שניות</div>
+    `;
+    preview.appendChild(loadingDiv);
+    
+    try {
+        const response = await fetch(`${SERVER_CONFIG.url}/api/test-face-swap`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                child_photo: uploadedPhotos[0],
+                child_name: childName
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.imageUrl) {
+            // Remove loading
+            loadingDiv.remove();
+            
+            // Show result
+            const resultDiv = document.createElement('div');
+            resultDiv.style.cssText = 'grid-column: 1/-1; background: white; border-radius: 10px; padding: 1rem; margin-top: 0.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
+            resultDiv.innerHTML = `
+                <div style="font-weight: bold; color: #667eea; margin-bottom: 0.75rem; text-align: center;">✅ תמונת בדיקה:</div>
+                <img src="${data.imageUrl}" style="width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
+                <div style="margin-top: 0.75rem; text-align: center; font-size: 0.9rem; color: #666;">
+                    האם ${childName} מזוהה בתמונה? אם כן, אפשר להמשיך ליצור ספר!
+                </div>
+                <button onclick="this.parentElement.remove()" style="width: 100%; margin-top: 0.75rem; padding: 0.5rem; background: #f5f5f5; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                    סגור
+                </button>
+            `;
+            preview.appendChild(resultDiv);
+            
+        } else {
+            throw new Error(data.error || 'Failed to test face swap');
+        }
+        
+    } catch (error) {
+        console.error('Test error:', error);
+        loadingDiv.remove();
+        alert('שגיאה בבדיקה: ' + error.message);
+    }
+}
