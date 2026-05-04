@@ -23,6 +23,23 @@ REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN', '')
 FAL_KEY = os.environ.get('FAL_KEY', '')
 IMAGE_MODE = os.environ.get('IMAGE_MODE', 'leonardo')
 
+# Cloudinary for LoRA training
+CLOUDINARY_URL = os.environ.get('CLOUDINARY_URL', '')
+CLOUDINARY_CLOUD_NAME = os.environ.get('CLOUDINARY_CLOUD_NAME', '')
+CLOUDINARY_API_KEY = os.environ.get('CLOUDINARY_API_KEY', '')
+CLOUDINARY_API_SECRET = os.environ.get('CLOUDINARY_API_SECRET', '')
+
+# Parse CLOUDINARY_URL if provided
+if CLOUDINARY_URL and not CLOUDINARY_CLOUD_NAME:
+    # Format: cloudinary://api_key:api_secret@cloud_name
+    import re
+    match = re.match(r'cloudinary://([^:]+):([^@]+)@(.+)', CLOUDINARY_URL)
+    if match:
+        CLOUDINARY_API_KEY = match.group(1)
+        CLOUDINARY_API_SECRET = match.group(2)
+        CLOUDINARY_CLOUD_NAME = match.group(3)
+        print(f"✅ Cloudinary configured from CLOUDINARY_URL: {CLOUDINARY_CLOUD_NAME}")
+
 # Try to import fal_client
 try:
     import fal_client
@@ -30,6 +47,16 @@ try:
 except ImportError:
     HAS_FAL = False
     print("⚠️ fal_client not installed - face swap disabled")
+
+# Try to import replicate
+try:
+    import replicate
+    HAS_REPLICATE = True
+    if REPLICATE_API_TOKEN:
+        os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_TOKEN
+except ImportError:
+    HAS_REPLICATE = False
+    print("⚠️ replicate not installed - LoRA training disabled")
 # ========================================
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
@@ -92,8 +119,13 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.handle_train_model()
         elif self.path == '/api/regenerate-image':
             self.handle_regenerate_image()
-        elif self.path == '/api/test-face-swap':  # ← NEW!
+        elif self.path == '/api/test-face-swap':
             self.handle_test_face_swap()
+        elif self.path == '/api/start-lora-training':  # ← NEW!
+            self.handle_start_lora_training()
+        elif self.path.startswith('/api/lora-status/'):  # ← NEW!
+            training_id = self.path.split('/')[-1]
+            self.handle_lora_status(training_id)
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -1063,6 +1095,152 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.send_json_response({
                 'success': False,
                 'error': error_msg
+            }, status=500)
+    
+    def handle_start_lora_training(self):
+        """מתחיל אימון LoRA עם Cloudinary + Replicate"""
+        try:
+            if not HAS_REPLICATE or not REPLICATE_API_TOKEN:
+                raise Exception('Replicate not configured')
+            
+            if not CLOUDINARY_CLOUD_NAME or not CLOUDINARY_API_KEY:
+                raise Exception('Cloudinary not configured')
+            
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            child_photos = data.get('child_photos', [])
+            child_name = data.get('child_name', '').strip()
+            
+            if not child_name:
+                raise Exception('Child name required')
+            
+            if len(child_photos) < 5:
+                raise Exception(f'Need at least 5 photos, got {len(child_photos)}')
+            
+            print(f"\n🎓 Starting LoRA training for {child_name}...")
+            print(f"  📸 Photos: {len(child_photos)}")
+            
+            # Configure Cloudinary
+            import cloudinary
+            import cloudinary.uploader
+            
+            cloudinary.config(
+                cloud_name=CLOUDINARY_CLOUD_NAME,
+                api_key=CLOUDINARY_API_KEY,
+                api_secret=CLOUDINARY_API_SECRET
+            )
+            
+            # Create trigger word
+            trigger_word = f"{child_name.lower().replace(' ', '_')}_kid"
+            
+            # Create ZIP
+            import tempfile
+            import zipfile
+            
+            temp_dir = tempfile.mkdtemp()
+            zip_path = os.path.join(temp_dir, 'training_images.zip')
+            
+            print(f"  💾 Creating ZIP...")
+            
+            with zipfile.ZipFile(zip_path, 'w') as zipf:
+                for i, photo_b64 in enumerate(child_photos):
+                    # Remove data:image prefix
+                    if ',' in photo_b64:
+                        photo_b64 = photo_b64.split(',')[1]
+                    
+                    photo_data = base64.b64decode(photo_b64)
+                    
+                    # Save temp file
+                    photo_filename = f"image_{i+1}.jpg"
+                    photo_path = os.path.join(temp_dir, photo_filename)
+                    
+                    with open(photo_path, 'wb') as f:
+                        f.write(photo_data)
+                    
+                    zipf.write(photo_path, photo_filename)
+            
+            print(f"  📦 ZIP: {os.path.getsize(zip_path)} bytes")
+            
+            # Upload to Cloudinary
+            print(f"  ☁️  Uploading to Cloudinary...")
+            upload_result = cloudinary.uploader.upload(
+                zip_path,
+                resource_type="raw",
+                folder="lora_training",
+                public_id=f"{child_name.lower()}_{int(time.time())}"
+            )
+            
+            zip_url = upload_result['secure_url']
+            print(f"  ✅ Uploaded: {zip_url}")
+            
+            # Start Replicate training
+            print(f"  🎓 Starting Replicate training...")
+            
+            training = replicate.trainings.create(
+                version="ostris/flux-dev-lora-trainer:e440909d3512c31646ee2e0c7d6f6f4923224863a6a10c494606e79fb5844497",
+                input={
+                    "input_images": zip_url,
+                    "trigger_word": trigger_word,
+                    "steps": 1000,
+                    "learning_rate": 0.0004,
+                    "resolution": "512,768,1024"
+                },
+                destination=f"{REPLICATE_API_TOKEN.split('_')[1] if '_' in REPLICATE_API_TOKEN else 'user'}/{child_name.lower()}-lora"
+            )
+            
+            print(f"  ✅ Training started: {training.id}")
+            
+            self.send_json_response({
+                'success': True,
+                'training_id': training.id,
+                'trigger_word': trigger_word,
+                'estimated_time': 600
+            })
+            
+        except Exception as e:
+            error_msg = str(e)
+            print(f"  ❌ Training error: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': error_msg
+            }, status=500)
+    
+    def handle_lora_status(self, training_id):
+        """בודק סטטוס אימון LoRA"""
+        try:
+            if not HAS_REPLICATE:
+                raise Exception('Replicate not configured')
+            
+            print(f"  🔍 Checking LoRA training: {training_id}")
+            
+            training = replicate.trainings.get(training_id)
+            
+            response = {
+                'training_id': training_id,
+                'status': training.status
+            }
+            
+            if training.status == 'succeeded':
+                response['lora_url'] = training.output.get('weights')
+                response['version'] = training.output.get('version')
+                print(f"  ✅ Training completed!")
+            elif training.status == 'failed':
+                response['error'] = training.error
+                print(f"  ❌ Training failed: {training.error}")
+            else:
+                print(f"  ⏳ Status: {training.status}")
+            
+            self.send_json_response(response)
+            
+        except Exception as e:
+            print(f"  ❌ Status error: {str(e)}")
+            self.send_json_response({
+                'status': 'error',
+                'error': str(e)
             }, status=500)
     
     def handle_generate_pdf(self):
