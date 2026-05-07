@@ -527,46 +527,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # Set API key
             os.environ["FAL_KEY"] = FAL_KEY
             
-            # Use InstantID if child photo provided and Replicate available
-            if child_photo and HAS_REPLICATE and REPLICATE_API_TOKEN:
-                print(f"  👤 Using InstantID for face consistency...")
-                
-                try:
-                    output = replicate.run(
-                        "zsxkib/instant-id:d3e00714e4d753576757ba80eebe007dd1fdb44c964086d8a96d395b609cf1d6",
-                        input={
-                            "image": child_photo,
-                            "prompt": full_prompt,
-                            "negative_prompt": negative_prompt,
-                            "num_inference_steps": 30,
-                            "guidance_scale": 5.0,
-                            "ip_adapter_scale": 0.8,
-                            "controlnet_conditioning_scale": 0.8
-                        }
-                    )
-                    
-                    if output and len(output) > 0:
-                        image_url = output[0]
-                        
-                        # Download
-                        ctx = ssl.create_default_context()
-                        ctx.check_hostname = False
-                        ctx.verify_mode = ssl.CERT_NONE
-                        
-                        req = urllib.request.Request(
-                            image_url,
-                            headers={'User-Agent': 'Mozilla/5.0'}
-                        )
-                        
-                        with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
-                            img_data = response.read()
-                        
-                        img_b64 = base64.b64encode(img_data).decode()
-                        print(f"  ✅ InstantID succeeded! Child drawn in illustration style!")
-                        return f"data:image/jpeg;base64,{img_b64}"
-                    
-                except Exception as e:
-                    print(f"  ⚠️ InstantID failed: {str(e)}, falling back to FLUX + Face Swap...")
+            # Note: InstantID requires specific Replicate model access
+            # For now, using FLUX + Face Swap as reliable fallback
+            # TODO: Get proper InstantID model access from Replicate
             
             # Fallback: FLUX + Face Swap
             handler = fal_client.submit(
