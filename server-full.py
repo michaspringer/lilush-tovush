@@ -100,6 +100,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         if self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
+        elif self.path.startswith('/api/lora-status/'):
+            training_id = self.path.split('/')[-1]
+            self.handle_lora_status(training_id)
         elif self.path == '/' or self.path == '/index-full.html':
             # Serve index-full.html
             self.serve_file('index-full.html', 'text/html')
@@ -144,11 +147,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.handle_regenerate_image()
         elif self.path == '/api/test-face-swap':
             self.handle_test_face_swap()
-        elif self.path == '/api/start-lora-training':  # ← NEW!
+        elif self.path == '/api/start-lora-training':
             self.handle_start_lora_training()
-        elif self.path.startswith('/api/lora-status/'):  # ← NEW!
-            training_id = self.path.split('/')[-1]
-            self.handle_lora_status(training_id)
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
