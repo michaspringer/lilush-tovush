@@ -701,19 +701,23 @@ async function generateStory() {
         console.log('📸 uploadedPhotos:', uploadedPhotos);
         console.log('📸 uploadedPhotos.length:', uploadedPhotos.length);
         
+        // 🎯 חפש אם יש LoRA מאומן עבור הילד הזה
+        const childLora = findLoraForChild(appState.bookData.childName);
+        
         const requestData = {
             ...appState.bookData,
             ai_model_id: null,  // Force null for now
-            childPhoto: uploadedPhotos.length > 0 ? uploadedPhotos[0] : null
+            childPhoto: uploadedPhotos.length > 0 ? uploadedPhotos[0] : null,
+            // 🎓 אם יש LoRA - שלח אותו לשרת!
+            lora_url: childLora ? childLora.lora_url : null,
+            trigger_word: childLora ? childLora.trigger_word : null,
+            use_lora: !!childLora
         };
         
         console.log('📤 Sending story request');
         console.log('📸 With photo:', uploadedPhotos.length > 0 ? 'YES ✅' : 'NO ❌');
         console.log('🤖 With AI model:', aiModel ? 'YES ✅' : 'NO ❌');
-        
-        console.log('📤 Sending story request');
-        console.log('📸 With photo:', uploadedPhotos.length > 0 ? 'YES ✅' : 'NO ❌');
-        console.log('🤖 With AI model:', aiModel ? 'YES ✅' : 'NO ❌');
+        console.log('🎓 With LoRA:', childLora ? `YES ✅ (${childLora.trigger_word})` : 'NO ❌');
         
         const response = await fetch(`${SERVER_CONFIG.url}/api/generate-story`, {
             method: 'POST',
@@ -1403,9 +1407,61 @@ async function pollLoraStatus(trainingId, childName, triggerWord) {
     }, 5000); // Check every 5 seconds
 }
 
+// ==========================================
+// 🎓 LoRA Manager - שמירה וטעינה של LoRA models
+// ==========================================
 function saveLoraModel(model) {
+    // שמור ברשימה של כל המודלים (לפי ילד)
     const models = JSON.parse(localStorage.getItem('lora_models') || '[]');
-    models.push(model);
+    
+    // אם יש כבר מודל לאותו ילד - החלף אותו (לא יוצר כפילויות)
+    const existingIdx = models.findIndex(m => m.child_name === model.child_name);
+    if (existingIdx >= 0) {
+        models[existingIdx] = model;
+        console.log('🔄 Updated existing LoRA for:', model.child_name);
+    } else {
+        models.push(model);
+        console.log('💾 New LoRA saved for:', model.child_name);
+    }
+    
     localStorage.setItem('lora_models', JSON.stringify(models));
-    console.log('LoRA model saved:', model);
+    
+    // שמור גם ב-AITrainingManager לתאימות עם הקוד הקיים
+    AITrainingManager.saveModel({
+        model_id: model.lora_url,           // ה-URL של ה-LoRA
+        trigger_word: model.trigger_word,    // ה-trigger word
+        lora_url: model.lora_url,            // copy
+        child_name: model.child_name,
+        is_lora: true,                        // דגל שזה LoRA אמיתי
+        created_at: model.created_at
+    });
+    
+    console.log('✅ LoRA model fully saved:', model);
+}
+
+function findLoraForChild(childName) {
+    /**
+     * מחפש LoRA מאומן עבור ילד לפי שם.
+     * מחזיר null אם אין.
+     */
+    if (!childName) return null;
+    const models = JSON.parse(localStorage.getItem('lora_models') || '[]');
+    const found = models.find(m => m.child_name === childName);
+    if (found) {
+        console.log(`🎯 Found LoRA for ${childName}:`, found.trigger_word);
+    }
+    return found || null;
+}
+
+function getAllLoraModels() {
+    /** מחזיר רשימת כל המודלים המאומנים */
+    return JSON.parse(localStorage.getItem('lora_models') || '[]');
+}
+
+function deleteLoraModel(childName) {
+    /** מוחק מודל LoRA של ילד מסוים */
+    const models = JSON.parse(localStorage.getItem('lora_models') || '[]');
+    const filtered = models.filter(m => m.child_name !== childName);
+    localStorage.setItem('lora_models', JSON.stringify(filtered));
+    console.log(`🗑️ Deleted LoRA for: ${childName}`);
 }
