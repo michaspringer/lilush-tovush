@@ -1,1273 +1,1690 @@
-// ==========================================
-// 🌐 Server Configuration
-// ==========================================
-const SERVER_CONFIG = {
-    url: 'https://web-production-ec858.up.railway.app'
-};
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Children's Book Generator - Full Server
+Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
+"""
 
-// ==========================================
-// 🤖 AI Training Manager
-// ==========================================
-const AITrainingManager = {
-    MODEL_KEY: 'lilush_ai_model',
-    
-    saveModel(modelData) {
-        localStorage.setItem(this.MODEL_KEY, JSON.stringify(modelData));
-        console.log('🤖 AI Model saved:', modelData.model_id);
-    },
-    
-    loadModel() {
-        const saved = localStorage.getItem(this.MODEL_KEY);
-        return saved ? JSON.parse(saved) : null;
-    },
-    
-    hasModel() {
-        return !!this.loadModel();
-    },
-    
-    deleteModel() {
-        localStorage.removeItem(this.MODEL_KEY);
-    }
-};
+from http.server import HTTPServer, SimpleHTTPRequestHandler
+import json
+import urllib.request
+import urllib.error
+from io import BytesIO
+import base64
+import os
+import time
+import ssl
 
-// ==========================================
-// 👤 Child Profile Manager
-// ==========================================
-const ChildProfileManager = {
-    PROFILE_KEY: 'lilush_child_profile',
-    
-    saveProfile(profile) {
-        localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile));
-        console.log('👤 Profile saved:', profile.childName);
-    },
-    
-    loadProfile() {
-        const saved = localStorage.getItem(this.PROFILE_KEY);
-        return saved ? JSON.parse(saved) : null;
-    },
-    
-    hasProfile() {
-        return !!this.loadProfile();
-    },
-    
-    deleteProfile() {
-        localStorage.removeItem(this.PROFILE_KEY);
-        AITrainingManager.deleteModel();
-    }
-};
+# ========================================
+# API Keys
+# ========================================
+CLAUDE_API_KEY = os.environ.get('CLAUDE_API_KEY', 'YOUR_CLAUDE_KEY_HERE')
+LEONARDO_API_KEY = os.environ.get('LEONARDO_API_KEY', '')
+REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN', '')
+FAL_KEY = os.environ.get('FAL_KEY', '')
+IMAGE_MODE = os.environ.get('IMAGE_MODE', 'leonardo')
 
-// ==========================================
-// 💾 LocalStorage Manager  
-// ==========================================
-const StorageManager = {
-    CURRENT_STORY_KEY: 'lilush_current_story',
-    HISTORY_KEY: 'lilush_story_history',
-    
-    saveCurrentStory(story) {
-        try {
-            localStorage.setItem(this.CURRENT_STORY_KEY, JSON.stringify(story));
-            this.updateLastSaved();
-            console.log('💾 נשמר אוטומטית');
-            return true;
-        } catch (e) {
-            console.error('❌ שגיאה בשמירה:', e);
-            return false;
-        }
-    },
-    
-    loadCurrentStory() {
-        try {
-            const saved = localStorage.getItem(this.CURRENT_STORY_KEY);
-            if (saved) {
-                return JSON.parse(saved);
-            }
-        } catch (e) {
-            console.error('❌ שגיאה בטעינה:', e);
-        }
-        return null;
-    },
-    
-    saveToHistory(story) {
-        try {
-            let history = this.getHistory();
-            const storyWithMeta = {
-                ...story,
-                id: Date.now(),
-                savedAt: new Date().toISOString()
-            };
-            history.unshift(storyWithMeta);
-            history = history.slice(0, 10);
-            localStorage.setItem(this.HISTORY_KEY, JSON.stringify(history));
-            console.log('📚 נשמר להיסטוריה');
-            return true;
-        } catch (e) {
-            console.error('❌ שגיאה בשמירה להיסטוריה:', e);
-            return false;
-        }
-    },
-    
-    getHistory() {
-        try {
-            const saved = localStorage.getItem(this.HISTORY_KEY);
-            return saved ? JSON.parse(saved) : [];
-        } catch (e) {
-            console.error('❌ שגיאה בטעינת היסטוריה:', e);
-            return [];
-        }
-    },
-    
-    updateLastSaved() {
-        const indicator = document.getElementById('lastSavedIndicator');
-        if (indicator) {
-            const now = new Date().toLocaleTimeString('he-IL');
-            indicator.textContent = `נשמר אוטומטית ב-${now}`;
-        }
-    }
-};
+# Cloudinary for LoRA training
+CLOUDINARY_URL = os.environ.get('CLOUDINARY_URL', '')
+CLOUDINARY_CLOUD_NAME = os.environ.get('CLOUDINARY_CLOUD_NAME', '')
+CLOUDINARY_API_KEY = os.environ.get('CLOUDINARY_API_KEY', '')
+CLOUDINARY_API_SECRET = os.environ.get('CLOUDINARY_API_SECRET', '')
 
-// ==========================================
-// 🎯 Main App State
-// ==========================================
-let currentStory = null;
-const appState = {
-    bookData: {
-        childName: '',
-        childAge: '',
-        childGender: '',
-        theme: '',
-        style: '',
-        customInput: ''
-    }
-};
+# Parse CLOUDINARY_URL if provided
+if CLOUDINARY_URL and not CLOUDINARY_CLOUD_NAME:
+    # Format: cloudinary://api_key:api_secret@cloud_name
+    import re
+    match = re.match(r'cloudinary://([^:]+):([^@]+)@(.+)', CLOUDINARY_URL)
+    if match:
+        CLOUDINARY_API_KEY = match.group(1)
+        CLOUDINARY_API_SECRET = match.group(2)
+        CLOUDINARY_CLOUD_NAME = match.group(3)
+        print(f"✅ Cloudinary configured from CLOUDINARY_URL: {CLOUDINARY_CLOUD_NAME}")
 
-// ==========================================
-// 🎨 AI Profile Functions
-// ==========================================
+# Try to import fal_client
+try:
+    import fal_client
+    HAS_FAL = True
+except ImportError:
+    HAS_FAL = False
+    print("⚠️ fal_client not installed - face swap disabled")
 
-let uploadedPhotos = []; // Store uploaded photos globally
-let photoOption = 'generic'; // 'generic' or 'real'
+# Try to import replicate
+try:
+    import replicate
+    HAS_REPLICATE = True
+    if REPLICATE_API_TOKEN:
+        os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_TOKEN
+except ImportError:
+    HAS_REPLICATE = False
+    print("⚠️ replicate not installed - LoRA training disabled")
+# ========================================
 
-function selectPhotoOption(option) {
-    photoOption = option;
-    
-    // Update button styles
-    document.querySelectorAll('.photo-option-btn').forEach(btn => {
-        btn.style.border = '3px solid #ddd';
-        btn.style.background = 'white';
-        btn.style.transform = 'scale(1)';
-    });
-    
-    const selectedBtn = document.getElementById(option === 'generic' ? 'optionGeneric' : 'optionReal');
-    selectedBtn.style.border = '3px solid #667eea';
-    selectedBtn.style.background = 'linear-gradient(135deg, #f5f7ff 0%, #e8ecff 100%)';
-    selectedBtn.style.transform = 'scale(1.02)';
-    
-    // Show/hide upload section
-    const uploadSection = document.getElementById('photoUploadSection');
-    const infoBox = document.getElementById('optionInfoBox');
-    
-    if (option === 'real') {
-        uploadSection.style.display = 'block';
-        infoBox.style.display = 'block';
-        infoBox.innerHTML = `
-            <div style="display: flex; align-items: start; gap: 1rem;">
-                <div style="font-size: 2rem;">💡</div>
-                <div>
-                    <div style="font-weight: bold; color: #667eea; margin-bottom: 0.5rem;">איך זה עובד?</div>
-                    <div style="font-size: 0.9rem; color: #666; line-height: 1.6;">
-                        1. העלו 5-10 תמונות ברורות של הילד<br>
-                        2. ה-AI ילמד את הפנים של הילד (10 דקות)<br>
-                        3. הילד יופיע בכל תמונה בספר!<br>
-                        <br>
-                        <strong>💰 עלות:</strong> ₪349 לספר הראשון (כולל אימון AI)<br>
-                        <strong>🎁 ספרים נוספים:</strong> רק ₪149 (בלי אימון מחדש!)
-                    </div>
-                </div>
-            </div>
-        `;
-    } else {
-        uploadSection.style.display = 'none';
-        uploadedPhotos = [];
-        document.getElementById('photoPreviewInline').innerHTML = '';
-        infoBox.style.display = 'block';
-        infoBox.innerHTML = `
-            <div style="display: flex; align-items: start; gap: 1rem;">
-                <div style="font-size: 2rem;">✨</div>
-                <div>
-                    <div style="font-weight: bold; color: #667eea; margin-bottom: 0.5rem;">ספר עם דמות יפה ועקבית</div>
-                    <div style="font-size: 0.9rem; color: #666; line-height: 1.6;">
-                        נשתמש ב-AI כדי ליצור דמות יפה ועקבית שתופיע בכל התמונות.<br>
-                        הדמות לא תהיה הילד שלכם, אבל תהיה חמודה ועקבית!<br>
-                        <br>
-                        <strong>💰 עלות:</strong> ₪149 בלבד<br>
-                        <strong>⚡ זמן:</strong> 2-3 דקות
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-    
-    console.log('📸 Photo option selected:', option);
-}
+CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
-function previewPhotosInline() {
-    const input = document.getElementById('childPhotosInline');
-    const preview = document.getElementById('photoPreviewInline');
+class CORSRequestHandler(SimpleHTTPRequestHandler):
     
-    if (!preview) return;
+    def end_headers(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        SimpleHTTPRequestHandler.end_headers(self)
     
-    preview.innerHTML = '';
-    uploadedPhotos = [];
+    def do_OPTIONS(self):
+        self.send_response(200)
+        self.end_headers()
     
-    if (!input.files || input.files.length === 0) {
-        return;
-    }
+    def do_GET(self):
+        if self.path.startswith('/api/training-status/'):
+            training_id = self.path.split('/')[-1]
+            self.handle_training_status(training_id)
+        elif self.path == '/' or self.path == '/index-full.html':
+            # Serve index-full.html
+            self.serve_file('index-full.html', 'text/html')
+        elif self.path == '/app-full.js':
+            self.serve_file('app-full.js', 'application/javascript')
+        elif self.path == '/styles-full.css':
+            self.serve_file('styles-full.css', 'text/css')
+        else:
+            # Try default handler
+            try:
+                SimpleHTTPRequestHandler.do_GET(self)
+            except:
+                self.send_error(404)
     
-    // For InstantID - 1 photo is enough!
-    if (input.files.length > 10) {
-        alert('⚠️ מקסימום 10 תמונות');
-        input.value = '';
-        return;
-    }
-    
-    console.log(`📸 Processing ${input.files.length} photo(s)...`);
-    
-    // Convert to base64 and store
-    const promises = Array.from(input.files).map(file => {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                uploadedPhotos.push(e.target.result);
-                resolve(e.target.result);
-            };
-            reader.readAsDataURL(file);
-        });
-    });
-    
-    Promise.all(promises).then((results) => {
-        // Clear and show preview container
-        preview.innerHTML = '';
-        preview.style.display = 'grid';
-        
-        results.forEach((src, i) => {
-            const div = document.createElement('div');
-            div.style.cssText = 'position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 3px solid #667eea;';
+    def serve_file(self, filename, content_type):
+        """Serve a static file"""
+        try:
+            with open(filename, 'rb') as f:
+                content = f.read()
             
-            const img = document.createElement('img');
-            img.src = src;
-            img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+            self.send_response(200)
+            self.send_header('Content-Type', content_type)
+            self.send_header('Content-Length', str(len(content)))
+            self.end_headers()
+            self.wfile.write(content)
+        except FileNotFoundError:
+            self.send_error(404)
+        except Exception as e:
+            print(f"Error serving {filename}: {e}")
+            self.send_error(500)
+    
+    def do_POST(self):
+        if self.path == '/api/generate-story':
+            self.handle_generate_story()
+        elif self.path == '/api/suggest-alternative':
+            self.handle_suggest_alternative()
+        elif self.path == '/api/generate-pdf':
+            self.handle_generate_pdf()
+        elif self.path == '/api/train-model':
+            self.handle_train_model()
+        elif self.path == '/api/regenerate-image':
+            self.handle_regenerate_image()
+        elif self.path == '/api/test-face-swap':
+            self.handle_test_face_swap()
+        elif self.path == '/api/start-lora-training':  # ← NEW!
+            self.handle_start_lora_training()
+        elif self.path.startswith('/api/lora-status/'):  # ← NEW!
+            training_id = self.path.split('/')[-1]
+            self.handle_lora_status(training_id)
+        elif self.path.startswith('/api/training-status/'):
+            training_id = self.path.split('/')[-1]
+            self.handle_training_status(training_id)
+        else:
+            self.send_error(404)
+    
+    def handle_generate_story(self):
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            request_data = json.loads(post_data.decode('utf-8'))
             
-            const badge = document.createElement('div');
-            badge.textContent = i + 1;
-            badge.style.cssText = 'position: absolute; top: 8px; right: 8px; background: #667eea; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.3);';
+            child_name = request_data.get('childName', 'ילד')
+            child_photo = request_data.get('childPhoto')
+            ai_model_id = request_data.get('ai_model_id')  # NEW!
             
-            div.appendChild(img);
-            div.appendChild(badge);
-            preview.appendChild(div);
-        });
-        
-        // Add success message
-        const successMsg = document.createElement('div');
-        successMsg.style.cssText = 'grid-column: 1/-1; text-align: center; padding: 1rem; color: white; font-weight: bold; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-top: 0.5rem; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);';
-        successMsg.innerHTML = `✅ ${uploadedPhotos.length} תמונות מוכנות!`;
-        preview.appendChild(successMsg);
-        
-        // Add test button
-        const testBtn = document.createElement('button');
-        testBtn.style.cssText = 'grid-column: 1/-1; padding: 0.75rem 1.5rem; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 0.95rem; box-shadow: 0 4px 12px rgba(245, 87, 108, 0.4); transition: transform 0.2s;';
-        testBtn.innerHTML = '🧪 בדוק המרה לאיור (15 שניות)';
-        testBtn.onmouseover = () => testBtn.style.transform = 'scale(1.05)';
-        testBtn.onmouseout = () => testBtn.style.transform = 'scale(1)';
-        testBtn.onclick = testFaceSwap;
-        preview.appendChild(testBtn);
-        
-        console.log(`✅ Uploaded ${uploadedPhotos.length} photos successfully`);
-        console.log(`📸 Preview displayed with ${results.length} images`);
-        
-        // Re-validate to enable "Next" button
-        validateStep1();
-    });
-}
-
-function showProfileCreation() {
-    const existingModel = AITrainingManager.loadModel();
-    
-    if (existingModel) {
-        console.log('Found existing model:', existingModel);
-        const createdDate = new Date(existingModel.created_at).toLocaleDateString('he-IL');
-        
-        if (confirm(`יש לכם כבר פרופיל AI! 🤖\n\nנוצר ב: ${createdDate}\nתמונות: ${existingModel.photo_count}\n\nרוצים ליצור ספר עם הפרופיל הקיים?`)) {
-            startCreation();
-        } else if (confirm('רוצים ליצור פרופיל חדש?\n\n(זה ידרוס את הפרופיל הקיים)')) {
-            AITrainingManager.deleteModel();
-            showScreen('profileScreen');
-        }
-    } else {
-        console.log('No existing model found');
-        showScreen('profileScreen');
-    }
-}
-
-function previewTrainingPhotos() {
-    const input = document.getElementById('trainingPhotos');
-    const grid = document.getElementById('photoPreviewGrid');
-    const btn = document.getElementById('startTrainingBtn');
-    
-    grid.innerHTML = '';
-    
-    if (!input.files || input.files.length === 0) {
-        btn.disabled = true;
-        return;
-    }
-    
-    if (input.files.length < 5) {
-        alert('⚠️ נא להעלות לפחות 5 תמונות לתוצאות טובות');
-        btn.disabled = true;
-        return;
-    }
-    
-    if (input.files.length > 10) {
-        alert('⚠️ מקסימום 10 תמונות');
-        input.value = '';
-        btn.disabled = true;
-        return;
-    }
-    
-    Array.from(input.files).forEach((file, i) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const div = document.createElement('div');
-            div.style.cssText = 'position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);';
+            print(f"\n📖 Creating story for: {child_name}")
+            if child_photo:
+                print("📸 Photo uploaded - will use InstantID!")
+            if ai_model_id:
+                print(f"🤖 Using trained AI model: {ai_model_id[:20]}...")
             
-            const img = document.createElement('img');
-            img.src = e.target.result;
-            img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+            print("📝 Step 1: Generating story with Claude...")
+            story_data = self.create_story_with_claude(request_data)
             
-            const badge = document.createElement('div');
-            badge.textContent = i + 1;
-            badge.style.cssText = 'position: absolute; top: 5px; right: 5px; background: #667eea; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;';
+            # Add AI model ID to story data
+            if ai_model_id:
+                story_data['ai_model_id'] = ai_model_id
             
-            div.appendChild(img);
-            div.appendChild(badge);
-            grid.appendChild(div);
-        };
-        reader.readAsDataURL(file);
-    });
-    
-    btn.disabled = false;
-}
-
-async function startTraining() {
-    const input = document.getElementById('trainingPhotos');
-    const files = input.files;
-    
-    if (!files || files.length < 5) {
-        alert('נא להעלות לפחות 5 תמונות');
-        return;
-    }
-    
-    showScreen('trainingScreen');
-    
-    try {
-        document.getElementById('trainingStatus').textContent = 'מעלה תמונות...';
-        document.getElementById('trainingProgressBar').style.width = '10%';
-        
-        const photos = await Promise.all(
-            Array.from(files).map(file => {
-                return new Promise((resolve) => {
-                    const reader = new FileReader();
-                    reader.onload = (e) => resolve(e.target.result);
-                    reader.readAsDataURL(file);
-                });
+            if IMAGE_MODE != 'none' and story_data.get('pages'):
+                print(f"🎨 Step 2: Generating images ({IMAGE_MODE})...")
+                story_data = self.add_images_to_story(story_data, child_photo)
+            
+            print("✅ Story complete!")
+            self.send_json_response({
+                'success': True,
+                'story': story_data
             })
-        );
+            
+        except Exception as e:
+            print(f"❌ Error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({'error': str(e)}, status=500)
+    
+    def create_story_with_claude(self, data):
+        """יוצר סיפור עם Claude"""
+        prompt = self.build_story_prompt(data)
         
-        document.getElementById('training-upload').classList.add('active');
-        document.getElementById('trainingProgressBar').style.width = '30%';
-        document.getElementById('trainingStatus').textContent = 'שולח לשרת...';
-        
-        const response = await fetch(`${SERVER_CONFIG.url}/api/train-model`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                photos: photos,
-                child_name: 'child_' + Date.now()
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-            throw new Error(data.error || 'Training failed');
+        claude_request = {
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 2000,
+            "messages": [{"role": "user", "content": prompt}]
         }
         
-        document.getElementById('training-process').classList.add('active');
-        document.getElementById('trainingProgressBar').style.width = '60%';
-        document.getElementById('trainingStatus').textContent = 'מאמן AI...';
+        headers = {
+            'Content-Type': 'application/json',
+            'x-api-key': CLAUDE_API_KEY,
+            'anthropic-version': '2023-06-01'
+        }
         
-        const trainingId = data.training_id;
-        let attempts = 0;
-        const maxAttempts = 60;
+        req = urllib.request.Request(
+            CLAUDE_API_URL,
+            data=json.dumps(claude_request).encode('utf-8'),
+            headers=headers,
+            method='POST'
+        )
         
-        while (attempts < maxAttempts) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            attempts++;
+        with urllib.request.urlopen(req, timeout=60) as response:
+            response_data = json.loads(response.read().decode('utf-8'))
+            content = response_data['content'][0]['text']
+            clean_content = content.replace('```json', '').replace('```', '').strip()
+            story_data = json.loads(clean_content)
+            return story_data
+    
+    def add_images_to_story(self, story_data, child_photo=None):
+        """מוסיף תמונות לסיפור עם FLUX + IP-Adapter"""
+        pages = story_data.get('pages', [])
+        
+        if child_photo:
+            print(f"  🎨 Creating {len(pages)} images with FLUX + IP-Adapter...")
+            print(f"  👤 Child will be drawn in illustration style!")
+        else:
+            print(f"  🎨 Creating {len(pages)} images with FLUX...")
+        
+        for i, page in enumerate(pages):
+            print(f"  🖼️  Image {i+1}/{len(pages)}...")
             
-            const statusResponse = await fetch(`${SERVER_CONFIG.url}/api/training-status/${trainingId}`);
-            const statusData = await statusResponse.json();
+            try:
+                # Generate with IP-Adapter (child's face as reference)
+                image_url = self.generate_image_flux_with_face(
+                    page['illustration'],
+                    child_photo
+                )
+                
+                page['imageUrl'] = image_url
+                
+            except Exception as e:
+                print(f"  ⚠️  Failed: {str(e)}")
+                page['imageUrl'] = None
+        
+        return story_data
+    
+    def apply_fal_face_swap(self, target_image_b64, face_image_b64):
+        """Face swap with Fal.ai - simple and working"""
+        try:
+            if not FAL_KEY or not HAS_FAL:
+                print("  ⚠️ Fal.ai not configured")
+                return None
             
-            const progress = 60 + (attempts / maxAttempts) * 35;
-            document.getElementById('trainingProgressBar').style.width = progress + '%';
+            print(f"  🎭 Starting Fal.ai face swap...")
             
-            if (statusData.status === 'succeeded') {
-                document.getElementById('training-done').classList.add('active');
-                document.getElementById('trainingProgressBar').style.width = '100%';
-                document.getElementById('trainingStatus').textContent = 'מוכן! 🎉';
+            # Set API key
+            os.environ["FAL_KEY"] = FAL_KEY
+            
+            # Use simple face-swap
+            handler = fal_client.submit(
+                "fal-ai/face-swap",
+                arguments={
+                    "base_image_url": target_image_b64,
+                    "swap_image_url": face_image_b64
+                }
+            )
+            
+            print(f"  ⏳ Waiting for Fal.ai...")
+            
+            result = handler.get()
+            
+            if result and 'image' in result:
+                output_url = result['image']['url']
                 
-                const modelData = {
-                    model_id: statusData.model_id,
-                    created_at: new Date().toISOString(),
-                    photo_count: photos.length
-                };
+                # Download result
+                req = urllib.request.Request(
+                    output_url,
+                    headers={'User-Agent': 'Mozilla/5.0'}
+                )
                 
-                AITrainingManager.saveModel(modelData);
-                console.log('🤖 Model saved:', modelData);
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
                 
-                await new Promise(resolve => setTimeout(resolve, 1500));
+                with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                    img_data = response.read()
                 
-                alert('✅ הפרופיל מוכן!\n\nעכשיו תוכלו ליצור ספרים עם הילד בתמונות! 🌟');
-                
-                startCreation();
-                break;
-                
-            } else if (statusData.status === 'failed') {
-                throw new Error('Training failed: ' + (statusData.error || 'Unknown error'));
+                img_b64 = base64.b64encode(img_data).decode()
+                print(f"  ✅ Fal.ai face swap succeeded!")
+                return f"data:image/jpeg;base64,{img_b64}"
+            
+            print(f"  ⚠️ Fal.ai: No output")
+            return None
+            
+        except Exception as e:
+            print(f"  ⚠️ Fal.ai error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def apply_instant_id(self, target_image_b64, face_image_b64):
+        """Face swap with working Replicate model"""
+        try:
+            if not REPLICATE_API_TOKEN:
+                print("  ⚠️ No Replicate token")
+                return None
+            
+            print(f"  🎭 Starting Face Swap...")
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            # Ensure data URIs
+            if not target_image_b64.startswith('data:'):
+                target_image_b64 = f"data:image/jpeg;base64,{target_image_b64}"
+            
+            if not face_image_b64.startswith('data:'):
+                face_image_b64 = f"data:image/jpeg;base64,{face_image_b64}"
+            
+            # Use simpler face swap - just swap the prediction endpoint
+            swap_data = {
+                "input": {
+                    "target_image": target_image_b64,
+                    "swap_image": face_image_b64
+                }
             }
-        }
-        
-        if (attempts >= maxAttempts) {
-            throw new Error('Training timeout');
-        }
-        
-    } catch (error) {
-        console.error('Training error:', error);
-        alert('❌ שגיאה באימון: ' + error.message + '\n\nאפשר לנסות שוב או ליצור ספר רגיל.');
-        showScreen('profileScreen');
-    }
-}
-
-function skipTraining() {
-    if (confirm('האם אתם בטוחים שרוצים לדלג?\n\nבלי פרופיל AI, הילד לא יופיע בתמונות.')) {
-        startCreation();
-    }
-}
-
-// ==========================================
-// 🎯 Navigation & Screens
-// ==========================================
-
-function showScreen(screenId) {
-    document.querySelectorAll('.screen').forEach(screen => {
-        screen.classList.remove('active');
-    });
-    const targetScreen = document.getElementById(screenId);
-    if (targetScreen) {
-        targetScreen.classList.add('active');
-    }
-}
-
-function startCreation() {
-    showScreen('creatorScreen');
-    resetForm();
-}
-
-function resetForm() {
-    appState.bookData = {
-        childName: '',
-        childAge: '',
-        childGender: '',
-        theme: '',
-        style: '',
-        customInput: ''
-    };
-    
-    const nameInput = document.getElementById('childName');
-    if (nameInput) nameInput.value = '';
-    
-    document.querySelectorAll('.age-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.gender-btn').forEach(btn => btn.classList.remove('active'));
-    document.querySelectorAll('.theme-card').forEach(card => card.classList.remove('selected'));
-    document.querySelectorAll('.style-card').forEach(card => card.classList.remove('selected'));
-    
-    const customInput = document.getElementById('customInput');
-    if (customInput) customInput.value = '';
-    
-    showFormStep(1);
-}
-
-function showFormStep(step) {
-    document.querySelectorAll('.form-step').forEach(s => s.classList.remove('active'));
-    const stepElement = document.getElementById(`step${step}`);
-    if (stepElement) {
-        stepElement.classList.add('active');
-    }
-    
-    document.querySelectorAll('.progress-step').forEach(s => s.classList.remove('active'));
-    for (let i = 1; i <= step; i++) {
-        const indicator = document.getElementById(`step${i}-indicator`);
-        if (indicator) {
-            indicator.classList.add('active');
-        }
-    }
-}
-
-// ==========================================
-// 📝 Form Functions
-// ==========================================
-
-function validateStep1() {
-    const nameInput = document.getElementById('childName');
-    const name = nameInput ? nameInput.value.trim() : '';
-    const age = appState.bookData.childAge;
-    const gender = appState.bookData.childGender;
-    const photoOption = appState.bookData.photoOption;
-    
-    // Basic validation
-    let isValid = name && age && gender;
-    
-    // If "real" option selected, require at least 1 photo
-    if (photoOption === 'real' && uploadedPhotos.length === 0) {
-        isValid = false;
-    }
-    
-    const nextBtn = document.getElementById('step1-next');
-    if (nextBtn) {
-        nextBtn.disabled = !isValid;
-        
-        // Visual feedback
-        if (isValid) {
-            nextBtn.style.opacity = '1';
-            nextBtn.style.cursor = 'pointer';
-        } else {
-            nextBtn.style.opacity = '0.5';
-            nextBtn.style.cursor = 'not-allowed';
-        }
-    }
-    
-    if (name) appState.bookData.childName = name;
-    
-    console.log('📋 Validation:', {
-        name: !!name,
-        age: !!age,
-        gender: !!gender,
-        photoOption,
-        photos: uploadedPhotos.length,
-        isValid
-    });
-}
-
-function selectAge(age) {
-    document.querySelectorAll('.age-btn').forEach(btn => btn.classList.remove('active'));
-    if (event && event.target) {
-        event.target.classList.add('active');
-    }
-    appState.bookData.childAge = age;
-    validateStep1();
-}
-
-function selectGender(gender) {
-    document.querySelectorAll('.gender-btn').forEach(btn => btn.classList.remove('active'));
-    if (event && event.target) {
-        event.target.classList.add('active');
-    }
-    appState.bookData.childGender = gender;
-    validateStep1();
-}
-
-function selectTheme(theme) {
-    document.querySelectorAll('.theme-card').forEach(card => card.classList.remove('selected'));
-    if (event && event.target) {
-        const card = event.target.closest('.theme-card');
-        if (card) card.classList.add('selected');
-    }
-    appState.bookData.theme = theme;
-    const nextBtn = document.getElementById('step2-next');
-    if (nextBtn) nextBtn.disabled = false;
-}
-
-function selectStyle(style) {
-    document.querySelectorAll('.style-card').forEach(card => card.classList.remove('selected'));
-    if (event && event.target) {
-        const card = event.target.closest('.style-card');
-        if (card) card.classList.add('selected');
-    }
-    appState.bookData.style = style;
-    const nextBtn = document.getElementById('step3-next');
-    if (nextBtn) nextBtn.disabled = false;
-}
-
-function nextStep() {
-    const currentStepElement = document.querySelector('.form-step.active');
-    if (!currentStepElement) return;
-    
-    const currentStep = currentStepElement.id.replace('step', '');
-    const nextStepNum = parseInt(currentStep) + 1;
-    
-    if (nextStepNum === 4) {
-        updateSummary();
-    }
-    
-    showFormStep(nextStepNum);
-}
-
-function prevStep() {
-    const currentStepElement = document.querySelector('.form-step.active');
-    if (!currentStepElement) return;
-    
-    const currentStep = currentStepElement.id.replace('step', '');
-    const prevStepNum = parseInt(currentStep) - 1;
-    
-    if (prevStepNum >= 1) {
-        showFormStep(prevStepNum);
-    }
-}
-
-function updateSummary() {
-    const summary = document.getElementById('summaryContent');
-    if (!summary) return;
-    
-    const themeNames = {
-        'animals': 'חיות וטבע',
-        'family': 'משפחה ואהבה',
-        'space': 'חלל וכוכבים',
-        'magic': 'קסם ופנטזיה'
-    };
-    
-    const styleNames = {
-        'funny': 'מצחיק ומשעשע',
-        'educational': 'חינוכי ומלמד'
-    };
-    
-    const aiModel = AITrainingManager.loadModel();
-    const aiStatus = aiModel ? '✨ עם פרופיל AI (הילד בתמונות!)' : '🎨 איורים רגילים';
-    
-    summary.innerHTML = `
-        <p><strong>שם:</strong> ${appState.bookData.childName}</p>
-        <p><strong>גיל:</strong> ${appState.bookData.childAge}</p>
-        <p><strong>מגדר:</strong> ${appState.bookData.childGender === 'boy' ? 'בן' : 'בת'}</p>
-        <p><strong>נושא:</strong> ${themeNames[appState.bookData.theme] || appState.bookData.theme}</p>
-        <p><strong>סגנון:</strong> ${styleNames[appState.bookData.style] || appState.bookData.style}</p>
-        <p><strong>תמונות:</strong> ${aiStatus}</p>
-    `;
-}
-
-// ==========================================
-// 📚 Story Generation
-// ==========================================
-
-async function generateStory() {
-    const customInputElement = document.getElementById('customInput');
-    appState.bookData.customInput = customInputElement ? customInputElement.value.trim() : '';
-    
-    // No training needed - Fal.ai works with photos directly!
-    
-    showScreen('generatingScreen');
-    
-    const steps = ['progress-story', 'progress-images', 'progress-done'];
-    let currentStep = 0;
-    
-    const progressInterval = setInterval(() => {
-        if (currentStep < steps.length) {
-            const stepElement = document.getElementById(steps[currentStep]);
-            if (stepElement) {
-                stepElement.classList.add('active');
+            
+            headers = {
+                'Authorization': f'Token {REPLICATE_API_TOKEN}',
+                'Content-Type': 'application/json'
             }
-            currentStep++;
-        }
-    }, 2000);
+            
+            # Try lucataco/faceswap - more reliable
+            req = urllib.request.Request(
+                'https://api.replicate.com/v1/models/lucataco/faceswap/predictions',
+                data=json.dumps(swap_data).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                pred_id = result['id']
+            
+            print(f"  ⏳ Face swap processing... ({pred_id})")
+            
+            # Poll for result
+            for attempt in range(60):
+                time.sleep(2)
+                
+                check_req = urllib.request.Request(
+                    f'https://api.replicate.com/v1/predictions/{pred_id}',
+                    headers=headers
+                )
+                
+                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
+                    check_result = json.loads(check_resp.read().decode('utf-8'))
+                    
+                    status = check_result['status']
+                    
+                    if status == 'succeeded':
+                        output_url = check_result['output']
+                        
+                        # Download
+                        img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
+                            img_data = img_resp.read()
+                        
+                        img_b64 = base64.b64encode(img_data).decode()
+                        print(f"  ✅ Face swap succeeded!")
+                        return f"data:image/jpeg;base64,{img_b64}"
+                    
+                    elif status == 'failed':
+                        error = check_result.get('error', 'Unknown')
+                        print(f"  ❌ Face swap failed: {error}")
+                        return None
+            
+            print(f"  ⏱️ Face swap timeout")
+            return None
+            
+        except Exception as e:
+            print(f"  ⚠️ Face swap error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+        """מוסיף פנים של ילד לתמונה עם InstantID"""
+        try:
+            if not REPLICATE_API_TOKEN:
+                print("  ⚠️ No Replicate token")
+                return None
+            
+            print(f"  🔄 Starting InstantID...")
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            # InstantID expects data URIs
+            if not target_image_b64.startswith('data:'):
+                target_image_b64 = f"data:image/jpeg;base64,{target_image_b64}"
+            
+            if not face_image_b64.startswith('data:'):
+                face_image_b64 = f"data:image/jpeg;base64,{face_image_b64}"
+            
+            instant_id_data = {
+                "input": {
+                    "image": target_image_b64,
+                    "face_image": face_image_b64,
+                    "prompt": "high quality children's book illustration, colorful, friendly, detailed face",
+                    "negative_prompt": "ugly, distorted, low quality, blurry, bad anatomy, scary",
+                    "num_steps": 20,
+                    "guidance_scale": 5.0,
+                    "ip_adapter_scale": 0.8,
+                    "seed": 42
+                }
+            }
+            
+            headers = {
+                'Authorization': f'Token {REPLICATE_API_TOKEN}',
+                'Content-Type': 'application/json'
+            }
+            
+            # Use the correct InstantID model
+            req = urllib.request.Request(
+                'https://api.replicate.com/v1/models/zsxkib/instant-id/predictions',
+                data=json.dumps(instant_id_data).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                pred_id = result['id']
+            
+            print(f"  ⏳ Waiting for InstantID (prediction: {pred_id})...")
+            
+            # Wait for completion
+            for attempt in range(60):
+                time.sleep(2)
+                
+                check_req = urllib.request.Request(
+                    f'https://api.replicate.com/v1/predictions/{pred_id}',
+                    headers=headers
+                )
+                
+                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
+                    check_result = json.loads(check_resp.read().decode('utf-8'))
+                    
+                    status = check_result['status']
+                    
+                    if status == 'succeeded':
+                        output_url = check_result['output']
+                        
+                        # Download result
+                        if isinstance(output_url, list) and len(output_url) > 0:
+                            output_url = output_url[0]
+                        
+                        img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
+                            img_data = img_resp.read()
+                        
+                        img_b64 = base64.b64encode(img_data).decode()
+                        print(f"  ✅ InstantID succeeded!")
+                        return f"data:image/jpeg;base64,{img_b64}"
+                    
+                    elif status == 'failed':
+                        error = check_result.get('error', 'Unknown error')
+                        print(f"  ❌ InstantID failed: {error}")
+                        return None
+            
+            print(f"  ⏱️ InstantID timeout")
+            return None
+            
+        except Exception as e:
+            print(f"  ⚠️ InstantID error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
     
-    try {
-        const aiModel = AITrainingManager.loadModel();
-        
-        console.log('📸 uploadedPhotos:', uploadedPhotos);
-        console.log('📸 uploadedPhotos.length:', uploadedPhotos.length);
-        
-        const requestData = {
-            ...appState.bookData,
-            ai_model_id: null,  // Force null for now
-            childPhoto: uploadedPhotos.length > 0 ? uploadedPhotos[0] : null
-        };
-        
-        console.log('📤 Sending story request');
-        console.log('📸 With photo:', uploadedPhotos.length > 0 ? 'YES ✅' : 'NO ❌');
-        console.log('🤖 With AI model:', aiModel ? 'YES ✅' : 'NO ❌');
-        
-        console.log('📤 Sending story request');
-        console.log('📸 With photo:', uploadedPhotos.length > 0 ? 'YES ✅' : 'NO ❌');
-        console.log('🤖 With AI model:', aiModel ? 'YES ✅' : 'NO ❌');
-        
-        const response = await fetch(`${SERVER_CONFIG.url}/api/generate-story`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(requestData)
-        });
-        
-        if (!response.ok) throw new Error('Failed to generate story');
-        
-        const data = await response.json();
-        clearInterval(progressInterval);
-        
-        currentStory = data.story;
-        currentStory.childName = appState.bookData.childName;
-        currentStory.childPhotos = uploadedPhotos.length > 0 ? [...uploadedPhotos] : [];  // ← שמור תמונות!
-        
-        // Save profile with photos
-        if (uploadedPhotos.length > 0) {
-            ChildProfileManager.saveProfile({
-                childName: appState.bookData.childName,
-                childAge: appState.bookData.childAge,
-                childGender: appState.bookData.childGender,
-                photos: uploadedPhotos,
-                createdAt: new Date().toISOString()
-            });
+    def translate_to_english(self, hebrew_text):
+        """תרגום תיאור תמונה מעברית לאנגלית"""
+        try:
+            if not CLAUDE_API_KEY:
+                return hebrew_text  # Fallback
+            
+            prompt = f"""תרגם את התיאור הבא לאנגלית בצורה מדויקת ומפורטת:
+
+"{hebrew_text}"
+
+תן רק את התרגום באנגלית, ללא הסברים."""
+            
+            claude_request = {
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 300,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'x-api-key': CLAUDE_API_KEY,
+                'anthropic-version': '2023-06-01'
+            }
+            
+            req = urllib.request.Request(
+                CLAUDE_API_URL,
+                data=json.dumps(claude_request).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response_data = json.loads(response.read().decode('utf-8'))
+                english_text = response_data['content'][0]['text'].strip()
+                print(f"  🌐 Translated: {english_text[:50]}...")
+                return english_text
+                
+        except Exception as e:
+            print(f"  ⚠️ Translation failed: {str(e)}, using original")
+            return hebrew_text
+    
+    def generate_image_flux_with_face(self, prompt, child_photo=None):
+        """יצירת תמונה עם FLUX + InstantID - הילד מצוייר באיור!"""
+        try:
+            if not FAL_KEY or not HAS_FAL:
+                raise Exception('Fal.ai not configured')
+            
+            print(f"  🎨 FLUX + InstantID...")
+            
+            # Translate Hebrew to English if needed
+            if any(ord(c) > 127 for c in prompt):
+                prompt = self.translate_to_english(prompt)
+            
+            # FLUX prompt - emphasize illustration style
+            full_prompt = f"{prompt}, children's book illustration style, colorful, friendly, warm, high quality, professional illustration"
+            
+            negative_prompt = "realistic photo, photographic, multiple people, crowd, side view, back view, profile view, hidden face, blurry, low quality"
+            
+            print(f"  📝 Prompt: {full_prompt[:80]}...")
+            
+            # Set API key
+            os.environ["FAL_KEY"] = FAL_KEY
+            
+            # Use InstantID if child photo provided and Replicate available
+            if child_photo and HAS_REPLICATE and REPLICATE_API_TOKEN:
+                print(f"  👤 Using InstantID for face consistency...")
+                
+                try:
+                    output = replicate.run(
+                        "zsxkib/instant-id:d3e00714e4d753576757ba80eebe007dd1fdb44c964086d8a96d395b609cf1d6",
+                        input={
+                            "image": child_photo,
+                            "prompt": full_prompt,
+                            "negative_prompt": negative_prompt,
+                            "num_inference_steps": 30,
+                            "guidance_scale": 5.0,
+                            "ip_adapter_scale": 0.8,
+                            "controlnet_conditioning_scale": 0.8
+                        }
+                    )
+                    
+                    if output and len(output) > 0:
+                        image_url = output[0]
+                        
+                        # Download
+                        ctx = ssl.create_default_context()
+                        ctx.check_hostname = False
+                        ctx.verify_mode = ssl.CERT_NONE
+                        
+                        req = urllib.request.Request(
+                            image_url,
+                            headers={'User-Agent': 'Mozilla/5.0'}
+                        )
+                        
+                        with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                            img_data = response.read()
+                        
+                        img_b64 = base64.b64encode(img_data).decode()
+                        print(f"  ✅ InstantID succeeded! Child drawn in illustration style!")
+                        return f"data:image/jpeg;base64,{img_b64}"
+                    
+                except Exception as e:
+                    print(f"  ⚠️ InstantID failed: {str(e)}, falling back to FLUX + Face Swap...")
+            
+            # Fallback: FLUX + Face Swap
+            handler = fal_client.submit(
+                "fal-ai/flux/dev",
+                arguments={
+                    "prompt": full_prompt,
+                    "image_size": "landscape_4_3",
+                    "num_inference_steps": 28,
+                    "guidance_scale": 3.5,
+                    "num_images": 1,
+                    "enable_safety_checker": False,
+                    "negative_prompt": negative_prompt
+                }
+            )
+            
+            print(f"  ⏳ Waiting for FLUX...")
+            
+            result = handler.get()
+            
+            if result and 'images' in result and len(result['images']) > 0:
+                output_url = result['images'][0]['url']
+                
+                # Download
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                
+                req = urllib.request.Request(
+                    output_url,
+                    headers={'User-Agent': 'Mozilla/5.0'}
+                )
+                
+                with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                    img_data = response.read()
+                
+                img_b64 = base64.b64encode(img_data).decode()
+                image_data = f"data:image/jpeg;base64,{img_b64}"
+                
+                print(f"  ✅ FLUX done! ({len(img_data)} bytes)")
+                
+                # Apply face swap if child photo provided
+                if child_photo:
+                    print(f"  👤 Applying face swap...")
+                    face_swapped = self.apply_fal_face_swap(image_data, child_photo)
+                    if face_swapped:
+                        print(f"  ✅ Child's face added to image!")
+                        return face_swapped
+                    else:
+                        print(f"  ⚠️ Face swap failed, using original FLUX image")
+                
+                return image_data
+            
+            raise Exception("No output from FLUX")
+            
+        except Exception as e:
+            print(f"  ⚠️ Image generation error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+            
+            # Fallback: Regular FLUX without face reference
+            handler = fal_client.submit(
+                "fal-ai/flux/dev",
+                arguments={
+                    "prompt": full_prompt,
+                    "image_size": "landscape_4_3",
+                    "num_inference_steps": 28,
+                    "guidance_scale": 3.5,
+                    "num_images": 1,
+                    "enable_safety_checker": False
+                }
+            )
+            
+            print(f"  ⏳ Waiting for FLUX...")
+            
+            result = handler.get()
+            
+            if result and 'images' in result and len(result['images']) > 0:
+                output_url = result['images'][0]['url']
+                
+                # Download
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                
+                req = urllib.request.Request(
+                    output_url,
+                    headers={'User-Agent': 'Mozilla/5.0'}
+                )
+                
+                with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                    img_data = response.read()
+                
+                img_b64 = base64.b64encode(img_data).decode()
+                print(f"  ✅ FLUX done! ({len(img_data)} bytes)")
+                return f"data:image/jpeg;base64,{img_b64}"
+            
+            raise Exception("No output from FLUX")
+            
+        except Exception as e:
+            print(f"  ⚠️ FLUX error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def generate_image_leonardo(self, prompt, character_reference=None):
+        """יוצר תמונה עם Leonardo"""
+        try:
+            if not LEONARDO_API_KEY:
+                raise Exception('Leonardo API key missing')
+            
+            if character_reference:
+                print(f"  🎨 Leonardo (with character reference)...")
+            else:
+                print(f"  🎨 Leonardo...")
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            # Translate Hebrew to English if needed
+            if any(ord(c) > 127 for c in prompt):  # Contains non-ASCII (Hebrew)
+                prompt = self.translate_to_english(prompt)
+            
+            # Balanced prompt - clear facial features for face swap while maintaining illustration style
+            full_prompt = f"{prompt}, illustrated children's book style, character with clear visible face and distinct facial features, expressive friendly eyes, recognizable human-like face, colorful vibrant illustration, warm and inviting, professional children's book art, digital illustration"
+            
+            negative_prompt = "no face, hidden face, side view, back view, abstract, overly simplified, stick figure, blurry, distorted, scary, dark, photorealistic, realistic photo"
+            
+            gen_data = {
+                "prompt": full_prompt,
+                "negative_prompt": negative_prompt,
+                "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
+                "width": 1024,
+                "height": 1024,
+                "num_images": 1,
+                "seed": 123456789,
+                "num_inference_steps": 30,  # ← Balanced detail
+                "guidance_scale": 7.5,  # ← Balanced adherence
+                "presetStyle": "ILLUSTRATION"
+            }
+            
+            headers = {
+                'Authorization': f'Bearer {LEONARDO_API_KEY}',
+                'Content-Type': 'application/json'
+            }
+            
+            req = urllib.request.Request(
+                'https://cloud.leonardo.ai/api/rest/v1/generations',
+                data=json.dumps(gen_data).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                gen_id = result['sdGenerationJob']['generationId']
+            
+            # Wait for completion
+            for _ in range(60):
+                time.sleep(1)
+                
+                check_req = urllib.request.Request(
+                    f'https://cloud.leonardo.ai/api/rest/v1/generations/{gen_id}',
+                    headers=headers
+                )
+                
+                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
+                    check_result = json.loads(check_resp.read().decode('utf-8'))
+                    
+                    if check_result['generations_by_pk']['status'] == 'COMPLETE':
+                        img_url = check_result['generations_by_pk']['generated_images'][0]['url']
+                        
+                        # Download
+                        img_req = urllib.request.Request(img_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
+                            img_data = img_resp.read()
+                        
+                        img_b64 = base64.b64encode(img_data).decode()
+                        print(f"  ✅ Done ({len(img_data)} bytes)")
+                        
+                        return f"data:image/jpeg;base64,{img_b64}"
+            
+            raise Exception("Timeout")
+            
+        except Exception as e:
+            print(f"  ⚠️  Leonardo error: {str(e)}")
+            return None
+    
+    def generate_image_pollinations(self, prompt):
+        """יוצר תמונה עם Pollinations"""
+        try:
+            import urllib.parse
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            full_prompt = f"{prompt}, children's book illustration, colorful"
+            encoded = urllib.parse.quote(full_prompt)
+            url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true"
+            
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            
+            with urllib.request.urlopen(req, timeout=90, context=ctx) as response:
+                img_data = response.read()
+            
+            img_b64 = base64.b64encode(img_data).decode()
+            return f"data:image/jpeg;base64,{img_b64}"
+            
+        except Exception as e:
+            print(f"  ⚠️  Pollinations error: {str(e)}")
+            return None
+    
+    def generate_with_trained_model(self, prompt, model_id):
+        """יוצר תמונה עם המודל המאומן!"""
+        try:
+            if not REPLICATE_API_TOKEN:
+                raise Exception('Replicate API token missing')
+            
+            print(f"  🤖 Using trained model...")
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            # Enhanced prompt for children's books
+            full_prompt = f"{prompt}, children's book illustration style, colorful, friendly, warm and inviting, storybook art, high quality"
+            
+            prediction_data = {
+                "version": model_id,
+                "input": {
+                    "prompt": full_prompt,
+                    "num_outputs": 1,
+                    "aspect_ratio": "1:1",
+                    "output_format": "jpg",
+                    "output_quality": 90
+                }
+            }
+            
+            headers = {
+                'Authorization': f'Token {REPLICATE_API_TOKEN}',
+                'Content-Type': 'application/json'
+            }
+            
+            req = urllib.request.Request(
+                'https://api.replicate.com/v1/predictions',
+                data=json.dumps(prediction_data).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                prediction_id = result['id']
+            
+            # Wait for completion
+            for _ in range(60):
+                time.sleep(2)
+                
+                check_req = urllib.request.Request(
+                    f'https://api.replicate.com/v1/predictions/{prediction_id}',
+                    headers=headers
+                )
+                
+                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
+                    check_result = json.loads(check_resp.read().decode('utf-8'))
+                    
+                    if check_result['status'] == 'succeeded':
+                        output_url = check_result['output'][0] if isinstance(check_result['output'], list) else check_result['output']
+                        
+                        # Download image
+                        img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
+                            img_data = img_resp.read()
+                        
+                        img_b64 = base64.b64encode(img_data).decode()
+                        print(f"  ✅ Image with trained model received!")
+                        
+                        return f"data:image/jpeg;base64,{img_b64}"
+                    
+                    elif check_result['status'] == 'failed':
+                        raise Exception(f"Prediction failed: {check_result.get('error')}")
+            
+            raise Exception("Timeout waiting for trained model")
+            
+        except Exception as e:
+            print(f"  ⚠️ Trained model error: {str(e)}")
+            # Fallback to regular generation
+            print(f"  ⚠️ Falling back to Leonardo...")
+            return self.generate_image_leonardo(prompt)
+    
+    def apply_face_swap(self, target_image_b64, source_face_b64):
+        """החלפת פנים עם Replicate"""
+        try:
+            if not REPLICATE_API_TOKEN:
+                return None
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            swap_data = {
+                "version": "278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
+                "input": {
+                    "target_image": target_image_b64,
+                    "swap_image": source_face_b64
+                }
+            }
+            
+            headers = {
+                'Authorization': f'Token {REPLICATE_API_TOKEN}',
+                'Content-Type': 'application/json'
+            }
+            
+            req = urllib.request.Request(
+                'https://api.replicate.com/v1/predictions',
+                data=json.dumps(swap_data).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                pred_id = result['id']
+            
+            # Wait for result
+            for _ in range(60):
+                time.sleep(1)
+                
+                check_req = urllib.request.Request(
+                    f'https://api.replicate.com/v1/predictions/{pred_id}',
+                    headers=headers
+                )
+                
+                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
+                    check_result = json.loads(check_resp.read().decode('utf-8'))
+                    
+                    if check_result['status'] == 'succeeded':
+                        output_url = check_result['output']
+                        
+                        # Download
+                        img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
+                            img_data = img_resp.read()
+                        
+                        img_b64 = base64.b64encode(img_data).decode()
+                        return f"data:image/jpeg;base64,{img_b64}"
+                    
+                    elif check_result['status'] == 'failed':
+                        return None
+            
+            return None
+            
+        except Exception as e:
+            print(f"  ⚠️  Face swap error: {str(e)}")
+            return None
+    
+    def build_story_prompt(self, data):
+        """בונה prompt ל-Claude"""
+        theme_names = {
+            'animals': 'חיות וטבע',
+            'family': 'משפחה ואהבה',
+            'space': 'חלל וכוכבים',
+            'magic': 'קסם ופנטזיה'
         }
         
-        StorageManager.saveCurrentStory(currentStory);
-        displayStory(currentStory);
-        showScreen('previewScreen');
+        style_names = {
+            'funny': 'מצחיק',
+            'educational': 'חינוכי'
+        }
         
-    } catch (error) {
-        clearInterval(progressInterval);
-        alert('שגיאה ביצירת הסיפור: ' + error.message);
-        showScreen('creatorScreen');
-    }
-}
+        # Full book - 6 pages!
+        pages_by_age = {
+            '0-2': '4',
+            '3-5': '6',
+            '6-8': '8',
+            '9-12': '10'
+        }
+        
+        pages = pages_by_age.get(data.get('childAge', '3-5'), '1')
+        theme = theme_names.get(data.get('theme', ''), 'הרפתקאות')
+        style = style_names.get(data.get('style', ''), 'מצחיק')
+        
+        prompt = f"""צור סיפור ילדים בעברית:
 
-async function trainModelFromPhotos() {
-    return new Promise(async (resolve, reject) => {
-        try {
-            const response = await fetch(`${SERVER_CONFIG.url}/api/train-model`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    photos: uploadedPhotos,
-                    child_name: appState.bookData.childName || 'child_' + Date.now()
+שם: {data.get('childName', 'ילד')}
+גיל: {data.get('childAge', '3-5')}
+מגדר: {'בת' if data.get('childGender') == 'girl' else 'בן'}
+נושא: {theme}
+סגנון: {style}
+אורך: {pages} עמודים
+"""
+        
+        if data.get('customInput'):
+            prompt += f"פרטים: {data['customInput']}\n"
+        
+        prompt += """
+חשוב מאוד!
+1. הטקסט (text) בעברית בלבד!
+2. תיאור התמונה (illustration) גם בעברית!
+3. תאר דמויות באופן עקבי בכל העמודים
+4. דוגמה: "ילד בן 4 עם שיער קצר וחום לובש חולצה כחולה..."
+
+פורמט JSON:
+{
+  "pages": [
+    {
+      "text": "הטקסט בעברית כאן...",
+      "illustration": "ילד בן 4 עם שיער קצר חום עומד בגן חיות צבעוני..."
+    }
+  ]
+}
+"""
+        return prompt
+    
+    def handle_suggest_alternative(self):
+        """מציע חלופות לטקסט"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            prompt = f"""הצע 3 חלופות:
+"{data['currentText']}"
+
+פורמט:
+1. ...
+2. ...
+3. ...
+"""
+            
+            claude_request = {
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 500,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'x-api-key': CLAUDE_API_KEY,
+                'anthropic-version': '2023-06-01'
+            }
+            
+            req = urllib.request.Request(
+                CLAUDE_API_URL,
+                data=json.dumps(claude_request).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=60) as response:
+                response_data = json.loads(response.read().decode('utf-8'))
+                content = response_data['content'][0]['text']
+                
+                lines = content.strip().split('\n')
+                alternatives = []
+                for line in lines:
+                    clean = line.strip()
+                    if clean and len(clean) > 5:
+                        if clean[0].isdigit() and '. ' in clean:
+                            clean = clean.split('. ', 1)[1]
+                        alternatives.append(clean)
+                
+                self.send_json_response({
+                    'success': True,
+                    'alternatives': alternatives[:3]
                 })
-            });
+                
+        except Exception as e:
+            self.send_json_response({'error': str(e)}, status=500)
+    
+    def handle_regenerate_image(self):
+        """מייצר תמונה מחדש עם הנחיות מהמשתמש"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
             
-            const data = await response.json();
+            page_text = data.get('page_text', '')
+            user_prompt = data.get('user_prompt', '').strip()
+            child_photo = data.get('child_photo')
             
-            if (!response.ok) {
-                throw new Error(data.error || 'Training failed');
+            print(f"\n🎨 Regenerating image...")
+            if user_prompt:
+                print(f"  👤 User request: {user_prompt[:50]}...")
+            
+            # Combine user prompt with original text
+            if user_prompt:
+                final_prompt = f"{user_prompt}, {page_text}"
+            else:
+                final_prompt = page_text
+            
+            print(f"  📝 Final prompt: {final_prompt[:100]}...")
+            
+            # Generate image with FLUX + IP-Adapter
+            image_url = self.generate_image_flux_with_face(final_prompt, child_photo)
+            
+            if not image_url:
+                raise Exception("Leonardo failed to generate image")
+            
+            # Apply face swap if photo available
+            if child_photo and FAL_KEY and HAS_FAL:
+                print(f"  👤 Applying Fal.ai face swap...")
+                face_swapped = self.apply_fal_face_swap(image_url, child_photo)
+                if face_swapped:
+                    image_url = face_swapped
+                    print(f"  ✅ Child added to image!")
+                else:
+                    print(f"  ⚠️ Face swap failed, using original image")
+            
+            print(f"  ✅ Image regenerated successfully!")
+            
+            self.send_json_response({
+                'success': True,
+                'imageUrl': image_url
+            })
+            
+        except Exception as e:
+            error_msg = str(e)
+            print(f"  ❌ Regeneration error: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': error_msg
+            }, status=500)
+    
+    def handle_test_face_swap(self):
+        """בודק face swap עם תמונת בדיקה - מהיר!"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            child_photo = data.get('child_photo')
+            child_name = data.get('child_name', 'ילד')
+            
+            if not child_photo:
+                raise Exception('No child photo provided')
+            
+            print(f"\n🧪 Testing face swap for {child_name}...")
+            
+            # Test prompt - simple scene
+            test_prompt = f"A cheerful child in a colorful playground, playing happily, sunny day"
+            
+            print(f"  📝 Test prompt: {test_prompt}")
+            
+            # Generate test image with FLUX
+            image_url = self.generate_image_flux_with_face(test_prompt, child_photo)
+            
+            if not image_url:
+                raise Exception("Failed to generate test image")
+            
+            print(f"  ✅ Test complete!")
+            
+            self.send_json_response({
+                'success': True,
+                'imageUrl': image_url,
+                'message': 'Test image generated successfully!'
+            })
+            
+        except Exception as e:
+            error_msg = str(e)
+            print(f"  ❌ Test error: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': error_msg
+            }, status=500)
+    
+    def handle_start_lora_training(self):
+        """מתחיל אימון LoRA עם Cloudinary + Replicate"""
+        try:
+            if not HAS_REPLICATE or not REPLICATE_API_TOKEN:
+                raise Exception('Replicate not configured')
+            
+            if not CLOUDINARY_CLOUD_NAME or not CLOUDINARY_API_KEY:
+                raise Exception('Cloudinary not configured')
+            
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            child_photos = data.get('child_photos', [])
+            child_name = data.get('child_name', '').strip()
+            
+            if not child_name:
+                raise Exception('Child name required')
+            
+            if len(child_photos) < 5:
+                raise Exception(f'Need at least 5 photos, got {len(child_photos)}')
+            
+            print(f"\n🎓 Starting LoRA training for {child_name}...")
+            print(f"  📸 Photos: {len(child_photos)}")
+            
+            # Configure Cloudinary
+            import cloudinary
+            import cloudinary.uploader
+            
+            cloudinary.config(
+                cloud_name=CLOUDINARY_CLOUD_NAME,
+                api_key=CLOUDINARY_API_KEY,
+                api_secret=CLOUDINARY_API_SECRET
+            )
+            
+            # Create trigger word
+            trigger_word = f"{child_name.lower().replace(' ', '_')}_kid"
+            
+            # Create ZIP
+            import tempfile
+            import zipfile
+            
+            temp_dir = tempfile.mkdtemp()
+            zip_path = os.path.join(temp_dir, 'training_images.zip')
+            
+            print(f"  💾 Creating ZIP...")
+            
+            with zipfile.ZipFile(zip_path, 'w') as zipf:
+                for i, photo_b64 in enumerate(child_photos):
+                    # Remove data:image prefix
+                    if ',' in photo_b64:
+                        photo_b64 = photo_b64.split(',')[1]
+                    
+                    photo_data = base64.b64decode(photo_b64)
+                    
+                    # Save temp file
+                    photo_filename = f"image_{i+1}.jpg"
+                    photo_path = os.path.join(temp_dir, photo_filename)
+                    
+                    with open(photo_path, 'wb') as f:
+                        f.write(photo_data)
+                    
+                    zipf.write(photo_path, photo_filename)
+            
+            print(f"  📦 ZIP: {os.path.getsize(zip_path)} bytes")
+            
+            # Upload to Cloudinary
+            print(f"  ☁️  Uploading to Cloudinary...")
+            upload_result = cloudinary.uploader.upload(
+                zip_path,
+                resource_type="raw",
+                folder="lora_training",
+                public_id=f"{child_name.lower()}_{int(time.time())}"
+            )
+            
+            zip_url = upload_result['secure_url']
+            print(f"  ✅ Uploaded: {zip_url}")
+            
+            # Start Replicate training
+            print(f"  🎓 Starting Replicate training...")
+            
+            training = replicate.trainings.create(
+                version="ostris/flux-dev-lora-trainer:e440909d3512c31646ee2e0c7d6f6f4923224863a6a10c494606e79fb5844497",
+                input={
+                    "input_images": zip_url,
+                    "trigger_word": trigger_word,
+                    "steps": 1000,
+                    "learning_rate": 0.0004,
+                    "resolution": "512,768,1024"
+                },
+                destination=f"{REPLICATE_API_TOKEN.split('_')[1] if '_' in REPLICATE_API_TOKEN else 'user'}/{child_name.lower()}-lora"
+            )
+            
+            print(f"  ✅ Training started: {training.id}")
+            
+            self.send_json_response({
+                'success': True,
+                'training_id': training.id,
+                'trigger_word': trigger_word,
+                'estimated_time': 600
+            })
+            
+        except Exception as e:
+            error_msg = str(e)
+            print(f"  ❌ Training error: {error_msg}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': error_msg
+            }, status=500)
+    
+    def handle_lora_status(self, training_id):
+        """בודק סטטוס אימון LoRA"""
+        try:
+            if not HAS_REPLICATE:
+                raise Exception('Replicate not configured')
+            
+            print(f"  🔍 Checking LoRA training: {training_id}")
+            
+            training = replicate.trainings.get(training_id)
+            
+            response = {
+                'training_id': training_id,
+                'status': training.status
             }
             
-            // Quick training (mock)
-            const trainingId = data.training_id;
+            if training.status == 'succeeded':
+                response['lora_url'] = training.output.get('weights')
+                response['version'] = training.output.get('version')
+                print(f"  ✅ Training completed!")
+            elif training.status == 'failed':
+                response['error'] = training.error
+                print(f"  ❌ Training failed: {training.error}")
+            else:
+                print(f"  ⏳ Status: {training.status}")
             
-            // Wait a bit for mock training
-            await new Promise(res => setTimeout(res, 1000));
+            self.send_json_response(response)
             
-            const statusResponse = await fetch(`${SERVER_CONFIG.url}/api/training-status/${trainingId}`);
-            const statusData = await statusResponse.json();
+        except Exception as e:
+            print(f"  ❌ Status error: {str(e)}")
+            self.send_json_response({
+                'status': 'error',
+                'error': str(e)
+            }, status=500)
+    
+    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration"):
+        """יוצר תמונה עם LoRA מאומן - מושלם!"""
+        try:
+            if not HAS_REPLICATE:
+                raise Exception('Replicate not configured')
             
-            if (statusData.status === 'succeeded') {
-                const modelData = {
-                    model_id: statusData.model_id,
-                    created_at: new Date().toISOString(),
-                    photo_count: uploadedPhotos.length,
-                    child_name: appState.bookData.childName
-                };
-                
-                AITrainingManager.saveModel(modelData);
-                console.log('🤖 Quick training completed:', modelData);
-                resolve();
-            } else {
-                reject(new Error('Training failed'));
+            # Style-specific prompts
+            style_prompts = {
+                "illustration": "children's book illustration style, colorful, friendly, warm",
+                "watercolor": "watercolor painting, soft colors, artistic, gentle",
+                "cartoon": "cartoon style, bold colors, playful, fun",
+                "realistic": "realistic digital art, detailed, professional",
+                "comic": "comic book style, bold lines, vibrant"
             }
             
-        } catch (error) {
-            console.error('Training error:', error);
-            reject(error);
-        }
-    });
-}
-
-function displayStory(story) {
-    const container = document.getElementById('storyPages');
-    if (!container) return;
-    
-    container.innerHTML = '';
-    
-    const titleElement = document.getElementById('previewTitle');
-    if (titleElement) {
-        titleElement.textContent = `🌈 הספר של ${story.childName} 🌈`;
-    }
-    
-    if (!story.pages) return;
-    
-    story.pages.forEach((page, index) => {
-        const pageDiv = document.createElement('div');
-        pageDiv.className = 'story-page';
-        pageDiv.id = `page-${index}`;
-        
-        let imageHTML = '';
-        if (page.imageUrl) {
-            imageHTML = `<img src="${page.imageUrl}" class="page-image" alt="איור עמוד ${index + 1}" style="width: 100%; max-width: 500px; border-radius: 15px; margin-bottom: 1rem;">`;
-        } else {
-            imageHTML = `
-                <div class="page-image-placeholder" style="background: linear-gradient(135deg, #e0f7fa 0%, #b2ebf2 100%); border-radius: 15px; padding: 3rem; text-align: center; color: #666; margin-bottom: 1rem;">
-                    <div style="font-size: 3rem; margin-bottom: 1rem;">🎨</div>
-                    <div style="font-size: 0.9rem;">${page.illustration || '[מקום לאיור]'}</div>
-                </div>
-            `;
-        }
-        
-        pageDiv.innerHTML = `
-            <div class="page-number">עמוד ${index + 1}</div>
+            style_prompt = style_prompts.get(style_name, style_prompts["illustration"])
             
-            ${imageHTML}
+            # Translate Hebrew to English if needed
+            if any(ord(c) > 127 for c in prompt):
+                prompt = self.translate_to_english(prompt)
             
-            <div class="page-text-container">
-                <div class="page-text" id="text-${index}">${page.text}</div>
-                <textarea class="page-text-edit" id="edit-${index}" style="display: none;">${page.text}</textarea>
-            </div>
+            # Combine everything
+            full_prompt = f"{trigger_word}, {prompt}, {style_prompt}"
             
-            <div class="page-actions">
-                <button class="btn-small btn-edit" onclick="startEdit(${index})">
-                    ✏️ ערוך טקסט
-                </button>
-                <button class="btn-small btn-suggest" onclick="suggestAlternatives(${index})">
-                    💡 הצע חלופה
-                </button>
-                <button class="btn-small btn-regenerate-image" onclick="showImageEditPopup(${index})" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-                    🎨 שנה תמונה
-                </button>
-                <button class="btn-small btn-save" id="save-${index}" style="display: none;" onclick="saveEdit(${index})">
-                    ✓ שמור
-                </button>
-                <button class="btn-small btn-cancel" id="cancel-${index}" style="display: none;" onclick="cancelEdit(${index})">
-                    ✗ ביטול
-                </button>
-            </div>
+            print(f"  🎨 Generating with LoRA...")
+            print(f"  📝 Prompt: {full_prompt[:100]}...")
             
-            <div id="alternatives-${index}" class="alternatives-container" style="display: none;"></div>
-        `;
-        container.appendChild(pageDiv);
-    });
-}
-
-// ==========================================
-// ✏️ Editing Functions
-// ==========================================
-
-function startEdit(pageIndex) {
-    const textDiv = document.getElementById(`text-${pageIndex}`);
-    const textarea = document.getElementById(`edit-${pageIndex}`);
-    const saveBtn = document.getElementById(`save-${pageIndex}`);
-    const cancelBtn = document.getElementById(`cancel-${pageIndex}`);
-    
-    if (textDiv) textDiv.style.display = 'none';
-    if (textarea) {
-        textarea.style.display = 'block';
-        textarea.focus();
-    }
-    if (saveBtn) saveBtn.style.display = 'inline-block';
-    if (cancelBtn) cancelBtn.style.display = 'inline-block';
-}
-
-function saveEdit(pageIndex) {
-    const textDiv = document.getElementById(`text-${pageIndex}`);
-    const textarea = document.getElementById(`edit-${pageIndex}`);
-    
-    if (textarea && currentStory && currentStory.pages[pageIndex]) {
-        const newText = textarea.value.trim();
-        if (newText) {
-            currentStory.pages[pageIndex].text = newText;
-            if (textDiv) textDiv.textContent = newText;
-            StorageManager.saveCurrentStory(currentStory);
-        }
-    }
-    
-    cancelEdit(pageIndex);
-}
-
-function cancelEdit(pageIndex) {
-    const textDiv = document.getElementById(`text-${pageIndex}`);
-    const textarea = document.getElementById(`edit-${pageIndex}`);
-    const saveBtn = document.getElementById(`save-${pageIndex}`);
-    const cancelBtn = document.getElementById(`cancel-${pageIndex}`);
-    
-    if (currentStory && currentStory.pages[pageIndex] && textarea) {
-        textarea.value = currentStory.pages[pageIndex].text;
-    }
-    if (textDiv) textDiv.style.display = 'block';
-    if (textarea) textarea.style.display = 'none';
-    if (saveBtn) saveBtn.style.display = 'none';
-    if (cancelBtn) cancelBtn.style.display = 'none';
-}
-
-async function suggestAlternatives(pageIndex) {
-    if (!currentStory || !currentStory.pages[pageIndex]) return;
-    
-    const container = document.getElementById(`alternatives-${pageIndex}`);
-    if (!container) return;
-    
-    container.innerHTML = '<div style="padding: 1rem; text-align: center;">⏳ מחפש חלופות...</div>';
-    container.style.display = 'block';
-    
-    try {
-        const response = await fetch(`${SERVER_CONFIG.url}/api/suggest-alternative`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                currentText: currentStory.pages[pageIndex].text,
-                childName: currentStory.childName
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.alternatives && data.alternatives.length > 0) {
-            container.innerHTML = '<h4 style="margin-bottom: 0.5rem;">💡 חלופות מוצעות:</h4>';
+            output = replicate.run(
+                "ostris/flux-dev-lora:091495765fa5ef2725a175a57b276ec30dc9d39297e6fe30e4b7dbb5376a0d1f",
+                input={
+                    "prompt": full_prompt,
+                    "lora_url": lora_url,
+                    "lora_scale": 0.8,
+                    "num_outputs": 1,
+                    "aspect_ratio": "4:3",
+                    "output_format": "jpg",
+                    "guidance_scale": 3.5,
+                    "output_quality": 90,
+                    "num_inference_steps": 28,
+                    "disable_safety_checker": True
+                }
+            )
             
-            data.alternatives.forEach((alt, i) => {
-                const btn = document.createElement('button');
-                btn.className = 'alternative-option';
-                btn.textContent = `${i + 1}. ${alt}`;
-                btn.onclick = () => useAlternative(pageIndex, alt);
-                container.appendChild(btn);
-            });
-        } else {
-            container.innerHTML = '<div>לא נמצאו חלופות</div>';
-        }
-    } catch (error) {
-        container.innerHTML = '<div style="color: red;">שגיאה בחיפוש חלופות</div>';
-    }
-}
-
-function useAlternative(pageIndex, newText) {
-    if (!currentStory || !currentStory.pages[pageIndex]) return;
-    
-    currentStory.pages[pageIndex].text = newText;
-    
-    const textDiv = document.getElementById(`text-${pageIndex}`);
-    const textarea = document.getElementById(`edit-${pageIndex}`);
-    const altContainer = document.getElementById(`alternatives-${pageIndex}`);
-    
-    if (textDiv) textDiv.textContent = newText;
-    if (textarea) textarea.value = newText;
-    if (altContainer) altContainer.style.display = 'none';
-    
-    StorageManager.saveCurrentStory(currentStory);
-}
-
-// ==========================================
-// 📄 PDF & Actions
-// ==========================================
-
-async function downloadPDF() {
-    if (!currentStory) {
-        alert('אין ספר לשמירה');
-        return;
-    }
-    
-    const modal = document.getElementById('pdfModal');
-    if (modal) modal.classList.add('active');
-    
-    try {
-        const response = await fetch(`${SERVER_CONFIG.url}/api/generate-pdf`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(currentStory)
-        });
-        
-        if (!response.ok) throw new Error('Failed to generate PDF');
-        
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `lilush_tovush_${currentStory.childName || 'story'}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        
-        if (modal) modal.classList.remove('active');
-        
-    } catch (error) {
-        if (modal) modal.classList.remove('active');
-        alert('שגיאה ביצירת PDF: ' + error.message);
-    }
-}
-
-function saveToHistory() {
-    if (currentStory) {
-        StorageManager.saveToHistory(currentStory);
-        alert('✅ הספר נשמר להיסטוריה!');
-    }
-}
-
-function showHistory() {
-    const history = StorageManager.getHistory();
-    if (history.length === 0) {
-        alert('אין ספרים שמורים עדיין');
-        return;
-    }
-    
-    alert(`יש ${history.length} ספרים בהיסטוריה!\n\n(תכונה זו תשופר בקרוב)`);
-}
-
-function startOver() {
-    if (confirm('להתחיל ספר חדש?')) {
-        showScreen('landingScreen');
-    }
-}
-
-// ==========================================
-// 🚀 Initialization
-// ==========================================
-
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('🚀 App loaded');
-    
-    // Check for saved story
-    const saved = StorageManager.loadCurrentStory();
-    if (saved && confirm('נמצא ספר שמור. להמשיך לעבוד עליו?')) {
-        currentStory = saved;
-        displayStory(currentStory);
-        showScreen('previewScreen');
-    }
-    
-    // Check for AI model
-    const aiModel = AITrainingManager.loadModel();
-    if (aiModel) {
-        console.log('🤖 AI Model loaded:', aiModel.model_id);
-    }
-    
-    // Setup event listeners
-    const childNameInput = document.getElementById('childName');
-    if (childNameInput) {
-        childNameInput.addEventListener('input', validateStep1);
-    }
-    
-});
-
-// ==========================================
-// 🎨 Image Editing Functions
-// ==========================================
-
-function showImageEditPopup(pageIndex) {
-    const page = currentStory.pages[pageIndex];
-    
-    // Create modal HTML
-    const modalHTML = `
-        <div class="modal-overlay" id="imageEditModal" onclick="closeImageEditPopup(event)">
-            <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 500px; background: white; padding: 2rem; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2);">
-                <h2 style="color: #667eea; margin-bottom: 1rem; font-size: 1.5rem;">🎨 שינוי תמונה</h2>
+            if output and len(output) > 0:
+                image_url = output[0]
                 
-                <p style="color: #666; margin-bottom: 1rem; font-size: 0.9rem;">
-                    תאר במילים מה תרצה לראות בתמונה:
-                </p>
+                # Download
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
                 
-                <textarea id="imagePromptInput" 
-                    placeholder="למשל: הילד במגרש משחקים עם כדור, שמש בשמיים, עצים ברקע..." 
-                    style="width: 100%; min-height: 100px; padding: 0.75rem; border: 2px solid #e0e0e0; border-radius: 10px; font-family: inherit; font-size: 0.9rem; resize: vertical; direction: rtl;"
-                ></textarea>
+                req = urllib.request.Request(
+                    image_url,
+                    headers={'User-Agent': 'Mozilla/5.0'}
+                )
                 
-                <p style="color: #999; font-size: 0.8rem; margin-top: 0.5rem; margin-bottom: 1.5rem;">
-                    💡 השאר ריק כדי ליצור תמונה חדשה באופן אוטומטי
-                </p>
+                with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                    img_data = response.read()
                 
-                <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
-                    <button onclick="closeImageEditPopup()" 
-                        style="padding: 0.75rem 1.5rem; background: #f5f5f5; border: none; border-radius: 10px; cursor: pointer; font-weight: 600;">
-                        ביטול
-                    </button>
-                    <button onclick="regenerateImage(${pageIndex})" 
-                        style="padding: 0.75rem 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: 600;">
-                        🎨 צור תמונה חדשה
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    document.body.insertAdjacentHTML('beforeend', modalHTML);
-    
-    // Focus on textarea
-    setTimeout(() => {
-        const input = document.getElementById('imagePromptInput');
-        if (input) input.focus();
-    }, 100);
-}
-
-function closeImageEditPopup(event) {
-    const modal = document.getElementById('imageEditModal');
-    if (modal) {
-        modal.remove();
-    }
-}
-
-async function regenerateImage(pageIndex) {
-    const userPrompt = document.getElementById('imagePromptInput').value.trim();
-    const page = currentStory.pages[pageIndex];
-    
-    // Get child photo from story or uploaded photos
-    const childPhoto = (currentStory.childPhotos && currentStory.childPhotos.length > 0) 
-        ? currentStory.childPhotos[0] 
-        : (uploadedPhotos.length > 0 ? uploadedPhotos[0] : null);
-    
-    console.log('🎭 Regenerating with child photo:', childPhoto ? 'YES ✅' : 'NO ❌');
-    
-    // Close modal
-    closeImageEditPopup();
-    
-    // Show loading
-    showLoadingOverlay('מייצר תמונה חדשה... ⏳');
-    
-    try {
-        const response = await fetch(`${SERVER_CONFIG.url}/api/regenerate-image`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                page_text: page.illustration,
-                user_prompt: userPrompt,
-                child_photo: childPhoto
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success && data.imageUrl) {
-            // Update the image
-            page.imageUrl = data.imageUrl;
+                img_b64 = base64.b64encode(img_data).decode()
+                print(f"  ✅ LoRA image generated! ({len(img_data)} bytes)")
+                return f"data:image/jpeg;base64,{img_b64}"
             
-            // Update the display
-            const imgElement = document.querySelector(`#page-${pageIndex} .page-image`);
-            if (imgElement) {
-                imgElement.src = data.imageUrl;
+            raise Exception("No output from LoRA generation")
+            
+        except Exception as e:
+            print(f"  ❌ LoRA generation error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def handle_generate_pdf(self):
+        """יוצר PDF"""
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.pdfgen import canvas
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+            from reportlab.lib.utils import simpleSplit
+            
+            try:
+                from bidi.algorithm import get_display
+                import arabic_reshaper
+                has_bidi = True
+            except:
+                has_bidi = False
+            
+            def fix_hebrew(text):
+                if not has_bidi:
+                    return text
+                try:
+                    reshaped = arabic_reshaper.reshape(text)
+                    return get_display(reshaped)
+                except:
+                    return text
+            
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            story_data = json.loads(post_data.decode('utf-8'))
+            
+            child_name = story_data.get('childName', 'ילד')
+            pages = story_data.get('pages', [])
+            
+            print(f"📄 PDF for: {child_name}")
+            
+            buffer = BytesIO()
+            c = canvas.Canvas(buffer, pagesize=A4)
+            width, height = A4
+            
+            hebrew_font = 'Helvetica'
+            font_paths = [
+                '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+                'C:\\Windows\\Fonts\\arial.ttf'
+            ]
+            
+            for font_path in font_paths:
+                try:
+                    pdfmetrics.registerFont(TTFont('Hebrew', font_path))
+                    hebrew_font = 'Hebrew'
+                    break
+                except:
+                    continue
+            
+            # Cover
+            c.setFont(hebrew_font, 32)
+            title = fix_hebrew(f"הספר של {child_name}")
+            c.drawString((width - c.stringWidth(title, hebrew_font, 32)) / 2, height - 100, title)
+            c.showPage()
+            
+            # Pages
+            for i, page in enumerate(pages):
+                c.setFont(hebrew_font, 10)
+                page_num = fix_hebrew(f"עמוד {i + 1}")
+                c.drawString(width - 100, height - 30, page_num)
+                
+                c.setFont(hebrew_font, 14)
+                text = fix_hebrew(page.get('text', ''))
+                lines = simpleSplit(text, hebrew_font, 14, width - 100)
+                
+                y_position = height - 280
+                for line in lines:
+                    line_width = c.stringWidth(line, hebrew_font, 14)
+                    c.drawString((width - line_width) / 2, y_position, line)
+                    y_position -= 20
+                
+                c.showPage()
+            
+            c.save()
+            
+            pdf_data = buffer.getvalue()
+            buffer.close()
+            
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/pdf')
+            self.send_header('Content-Disposition', f'attachment; filename="lilush_{child_name}.pdf"')
+            self.send_header('Content-Length', len(pdf_data))
+            self.end_headers()
+            self.wfile.write(pdf_data)
+            
+            print(f"✅ PDF done ({len(pdf_data)} bytes)")
+            
+        except Exception as e:
+            print(f"❌ PDF error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({'error': str(e)}, status=500)
+    
+    def send_json_response(self, data, status=200):
+        self.send_response(status)
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.end_headers()
+        self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
+    
+    def log_message(self, format, *args):
+        if self.path.startswith('/api/'):
+            return
+        SimpleHTTPRequestHandler.log_message(self, format, *args)
+    
+    # ==========================================
+    # 🤖 AI Training Endpoints (NEW!)
+    # ==========================================
+    
+    def handle_train_model(self):
+        """מאמן מודל AI על בסיס תמונות הילד"""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            photos = data.get('photos', [])
+            child_name = data.get('child_name', 'child')
+            
+            print(f"\n🤖 Starting AI Training")
+            print(f"📸 Photos: {len(photos)}")
+            print(f"👤 Name: {child_name}")
+            
+            if not REPLICATE_API_TOKEN:
+                raise Exception('Replicate API token not configured')
+            
+            if len(photos) < 5:
+                raise Exception('Need at least 5 photos for training')
+            
+            # Start training
+            training_id = self.start_replicate_training(photos, child_name)
+            
+            if training_id:
+                print(f"✅ Training started: {training_id}")
+                
+                self.send_json_response({
+                    'success': True,
+                    'training_id': training_id,
+                    'message': 'Training started successfully',
+                    'estimated_time': '5-10 minutes'
+                })
+            else:
+                raise Exception('Failed to start training')
+                
+        except Exception as e:
+            print(f"❌ Training error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({'error': str(e)}, status=500)
+    
+    def start_replicate_training(self, photos, child_name):
+        """מתחיל אימון ב-Replicate - גרסה פשוטה"""
+        try:
+            if not REPLICATE_API_TOKEN:
+                raise Exception('No Replicate token')
+            
+            print(f"  🚀 REAL Replicate Training starting...")
+            print(f"  📸 Photos: {len(photos)}")
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            # Create ZIP from photos
+            zip_b64 = self.create_zip_from_photos(photos)
+            if not zip_b64:
+                raise Exception('Failed to create ZIP')
+            
+            # Simplified Training - try without specific version first
+            print(f"  🔍 Checking available training options...")
+            
+            # Try simple prediction first to test
+            training_data = {
+                "input": {
+                    "input_images": f"data:application/zip;base64,{zip_b64}",
+                    "steps": 500,
+                    "trigger_word": child_name
+                }
             }
             
-            // Save to storage
-            StorageManager.saveCurrentStory(currentStory);
+            headers = {
+                'Authorization': f'Token {REPLICATE_API_TOKEN}',
+                'Content-Type': 'application/json'
+            }
             
-            showSuccessMessage('✅ תמונה חדשה נוצרה בהצלחה!');
-        } else {
-            throw new Error(data.error || 'Failed to regenerate image');
-        }
-        
-    } catch (error) {
-        console.error('Image regeneration error:', error);
-        alert('שגיאה ביצירת תמונה חדשה: ' + error.message);
-    } finally {
-        hideLoadingOverlay();
-    }
-}
-
-function showLoadingOverlay(message) {
-    const overlayHTML = `
-        <div id="loadingOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;">
-            <div style="background: white; padding: 2rem 3rem; border-radius: 20px; text-align: center;">
-                <div style="font-size: 2rem; margin-bottom: 1rem;">🎨</div>
-                <div style="font-size: 1.1rem; color: #333; font-weight: 600;">${message}</div>
-                <div style="margin-top: 1rem; color: #666; font-size: 0.9rem;">זה ייקח כ-15 שניות...</div>
-            </div>
-        </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', overlayHTML);
-}
-
-function hideLoadingOverlay() {
-    const overlay = document.getElementById('loadingOverlay');
-    if (overlay) overlay.remove();
-}
-
-function showSuccessMessage(message) {
-    const msgHTML = `
-        <div id="successMessage" style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1rem 2rem; border-radius: 50px; z-index: 10001; box-shadow: 0 5px 20px rgba(0,0,0,0.2); font-weight: 600;">
-            ${message}
-        </div>
-    `;
-    document.body.insertAdjacentHTML('beforeend', msgHTML);
-    
-    setTimeout(() => {
-        const msg = document.getElementById('successMessage');
-        if (msg) {
-            msg.style.transition = 'opacity 0.5s';
-            msg.style.opacity = '0';
-            setTimeout(() => msg.remove(), 500);
-        }
-    }, 3000);
-}
-
-// ==========================================
-// App initialization complete
-// ==========================================
-console.log('✅ App initialized successfully');
-
-// ==========================================
-// 🧪 Test Face Swap Function
-// ==========================================
-
-async function testFaceSwap() {
-    if (uploadedPhotos.length === 0) {
-        alert('אנא העלה תמונה קודם');
-        return;
-    }
-    
-    const childName = document.getElementById('childName').value.trim() || 'הילד';
-    
-    // Show loading
-    const preview = document.getElementById('photoPreviewInline');
-    const loadingDiv = document.createElement('div');
-    loadingDiv.id = 'testLoading';
-    loadingDiv.style.cssText = 'grid-column: 1/-1; text-align: center; padding: 1.5rem; background: white; border-radius: 10px; margin-top: 0.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
-    loadingDiv.innerHTML = `
-        <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎨</div>
-        <div style="font-weight: bold; color: #667eea; margin-bottom: 0.5rem;">יוצר תמונת בדיקה...</div>
-        <div style="font-size: 0.9rem; color: #666;">זה ייקח כ-15 שניות</div>
-    `;
-    preview.appendChild(loadingDiv);
-    
-    try {
-        const response = await fetch(`${SERVER_CONFIG.url}/api/test-face-swap`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                child_photo: uploadedPhotos[0],
-                child_name: childName
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success && data.imageUrl) {
-            // Remove loading
-            loadingDiv.remove();
+            # Try the trainings endpoint
+            training_url = 'https://api.replicate.com/v1/models/ostris/flux-dev-lora-trainer/versions/4a78013f38e8c316fb9bdb7b8b7f81c0059fc7e127e60f03c90fd639b3e6408c/trainings'
             
-            // Show result
-            const resultDiv = document.createElement('div');
-            resultDiv.style.cssText = 'grid-column: 1/-1; background: white; border-radius: 10px; padding: 1rem; margin-top: 0.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
-            resultDiv.innerHTML = `
-                <div style="font-weight: bold; color: #667eea; margin-bottom: 0.75rem; text-align: center;">✅ תמונת בדיקה:</div>
-                <img src="${data.imageUrl}" style="width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
-                <div style="margin-top: 0.75rem; text-align: center; font-size: 0.9rem; color: #666;">
-                    האם ${childName} מזוהה בתמונה? אם כן, אפשר להמשיך ליצור ספר!
-                </div>
-                <button onclick="this.parentElement.remove()" style="width: 100%; margin-top: 0.75rem; padding: 0.5rem; background: #f5f5f5; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
-                    סגור
-                </button>
-            `;
-            preview.appendChild(resultDiv);
+            req = urllib.request.Request(
+                'https://api.replicate.com/v1/trainings',
+                data=json.dumps(training_data).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
             
-        } else {
-            throw new Error(data.error || 'Failed to test face swap');
-        }
-        
-    } catch (error) {
-        console.error('Test error:', error);
-        loadingDiv.remove();
-        alert('שגיאה בבדיקה: ' + error.message);
-    }
-}
+            print(f"  📤 Sending training request to Replicate...")
+            
+            with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                training_id = result['id']
+            
+            print(f"  ✅ Training started: {training_id}")
+            print(f"  ⏱️  This will take ~10 minutes...")
+            
+            return training_id
+                
+        except Exception as e:
+            print(f"  ❌ Training error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def create_zip_from_photos(self, photos):
+        """יוצר ZIP מתמונות base64"""
+        try:
+            import zipfile
+            from io import BytesIO
+            
+            zip_buffer = BytesIO()
+            
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                for i, photo_b64 in enumerate(photos):
+                    # Remove data:image/... prefix
+                    if ',' in photo_b64:
+                        photo_b64 = photo_b64.split(',')[1]
+                    
+                    photo_data = base64.b64decode(photo_b64)
+                    zip_file.writestr(f'photo_{i+1}.jpg', photo_data)
+            
+            zip_data = zip_buffer.getvalue()
+            return base64.b64encode(zip_data).decode()
+            
+        except Exception as e:
+            print(f"  ⚠️ ZIP creation error: {str(e)}")
+            return None
+    
+    def handle_training_status(self, training_id):
+        """בודק סטטוס של training"""
+        try:
+            # Mock implementation for MVP
+            # In production, this would check real Replicate API
+            
+            if training_id.startswith('mock_training_'):
+                # Simulate training completion after a short delay
+                # In real implementation, this would poll Replicate
+                
+                # Extract model ID from training ID
+                model_id = training_id.replace('mock_training_', '')
+                
+                # For demo purposes, mark as succeeded immediately
+                response_data = {
+                    'status': 'succeeded',
+                    'id': training_id,
+                    'model_id': model_id
+                }
+                
+                print(f"✅ Mock training completed: {model_id}")
+                
+                self.send_json_response(response_data)
+                return
+            
+            # If it's a real Replicate training ID, check it properly
+            if not REPLICATE_API_TOKEN:
+                raise Exception('Replicate API token not configured')
+            
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            
+            headers = {
+                'Authorization': f'Token {REPLICATE_API_TOKEN}',
+                'Content-Type': 'application/json'
+            }
+            
+            req = urllib.request.Request(
+                f'https://api.replicate.com/v1/trainings/{training_id}',
+                headers=headers
+            )
+            
+            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                
+                status = result.get('status')
+                
+                response_data = {
+                    'status': status,
+                    'id': training_id
+                }
+                
+                if status == 'succeeded':
+                    model_version = result.get('output', {}).get('version')
+                    if model_version:
+                        response_data['model_id'] = model_version
+                        print(f"✅ Training completed: {model_version}")
+                
+                elif status == 'failed':
+                    error = result.get('error', 'Unknown error')
+                    response_data['error'] = error
+                    print(f"❌ Training failed: {error}")
+                
+                self.send_json_response(response_data)
+                
+        except Exception as e:
+            print(f"❌ Status check error: {str(e)}")
+            self.send_json_response({'error': str(e)}, status=500)
+
+
+def run_server(port=None):
+    if port is None:
+        port = int(os.environ.get('PORT', 8000))
+    
+    print("\n" + "="*60)
+    print("🚀 לילוש טובוש")
+    print("="*60)
+    print(f"📸 Images: {IMAGE_MODE}")
+    print(f"👤 Face Swap: {'ON' if FAL_KEY and HAS_FAL else 'OFF'}")
+    print(f"📡 Port: {port}")
+    print("="*60 + "\n")
+    
+    server_address = ('', port)
+    httpd = HTTPServer(server_address, CORSRequestHandler)
+    
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\n👋 Stopped!")
+
+
+if __name__ == '__main__':
+    run_server()
