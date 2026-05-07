@@ -12,8 +12,29 @@ import urllib.error
 from io import BytesIO
 import base64
 import os
+import re
 import time
 import ssl
+
+
+def safe_slug(name, fallback_prefix="child"):
+    """
+    ממיר שם בעברית/לטינית ל-slug בטוח ל-URL ול-Replicate.
+    Replicate דורש: רק אותיות לטיניות קטנות, מספרים, ומקפים.
+    """
+    if not name:
+        return f"{fallback_prefix}-{int(time.time())}"
+    
+    name = name.strip().lower()
+    
+    # אם השם כבר באנגלית בלבד - נקה ושמור
+    if re.match(r'^[a-z0-9\s_-]+$', name):
+        slug = re.sub(r'[\s_]+', '-', name)
+        slug = re.sub(r'-+', '-', slug).strip('-')
+        return slug if slug else f"{fallback_prefix}-{int(time.time())}"
+    
+    # אם יש תווי עברית/אחרים - השתמש ב-prefix + timestamp
+    return f"{fallback_prefix}-{int(time.time())}"
 
 # ========================================
 # API Keys
@@ -1104,7 +1125,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             }, status=500)
     
     def handle_start_lora_training(self):
-        """מתחיל אימון LoRA עם Cloudinary + Replicate"""
+        """מתחיל אימון LoRA עם Cloudinary + Replicate - גרסה מתוקנת"""
         try:
             if not HAS_REPLICATE or not REPLICATE_API_TOKEN:
                 raise Exception('Replicate not configured')
@@ -1112,20 +1133,28 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             if not CLOUDINARY_CLOUD_NAME or not CLOUDINARY_API_KEY:
                 raise Exception('Cloudinary not configured')
             
+            if not REPLICATE_USERNAME:
+                raise Exception('REPLICATE_USERNAME not configured in environment variables')
+            
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
             
             child_photos = data.get('child_photos', [])
-            child_name = data.get('child_name', '').strip()
+            child_name_raw = data.get('child_name', '').strip()
             
-            if not child_name:
+            if not child_name_raw:
                 raise Exception('Child name required')
             
             if len(child_photos) < 5:
                 raise Exception(f'Need at least 5 photos, got {len(child_photos)}')
             
-            print(f"\n🎓 Starting LoRA training for {child_name}...")
+            # 🔧 FIX 1: שם בטוח ל-URL (פותר בעיית עברית בURL)
+            child_slug = safe_slug(child_name_raw)
+            
+            print(f"\n🎓 Starting LoRA training")
+            print(f"  👤 Child name (display): {child_name_raw}")
+            print(f"  🔗 Child slug (API): {child_slug}")
             print(f"  📸 Photos: {len(child_photos)}")
             
             # Configure Cloudinary
@@ -1138,8 +1167,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 api_secret=CLOUDINARY_API_SECRET
             )
             
-            # Create trigger word
-            trigger_word = f"{child_name.lower().replace(' ', '_')}_kid"
+            # 🔧 FIX 2: trigger_word באנגלית בלבד
+            trigger_word = f"{child_slug.replace('-', '_')}_kid"
+            print(f"  🏷️  Trigger word: {trigger_word}")
             
             # Create ZIP
             import tempfile
@@ -1152,13 +1182,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             with zipfile.ZipFile(zip_path, 'w') as zipf:
                 for i, photo_b64 in enumerate(child_photos):
-                    # Remove data:image prefix
                     if ',' in photo_b64:
                         photo_b64 = photo_b64.split(',')[1]
                     
                     photo_data = base64.b64decode(photo_b64)
                     
-                    # Save temp file
                     photo_filename = f"image_{i+1}.jpg"
                     photo_path = os.path.join(temp_dir, photo_filename)
                     
@@ -1169,27 +1197,46 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             print(f"  📦 ZIP: {os.path.getsize(zip_path)} bytes")
             
-            # Upload to Cloudinary
+            # Upload to Cloudinary - השתמש ב-slug (לא בשם המקורי בעברית)
             print(f"  ☁️  Uploading to Cloudinary...")
             upload_result = cloudinary.uploader.upload(
                 zip_path,
                 resource_type="raw",
                 folder="lora_training",
-                public_id=f"{child_name.lower()}_{int(time.time())}"
+                public_id=f"{child_slug}_{int(time.time())}"
             )
             
             zip_url = upload_result['secure_url']
             print(f"  ✅ Uploaded: {zip_url}")
             
+            # 🔧 FIX 3: יצור את המודל ב-Replicate לפני training
+            # זה הפתרון לבעיית 404 "destination does not exist"
+            model_name = f"{child_slug}-lora"
+            destination = f"{REPLICATE_USERNAME}/{model_name}"
+            
+            print(f"  📍 Destination: {destination}")
+            print(f"  🏗️  Ensuring model exists at Replicate...")
+            
+            try:
+                replicate.models.create(
+                    owner=REPLICATE_USERNAME,
+                    name=model_name,
+                    visibility="private",
+                    hardware="gpu-t4",
+                    description=f"LoRA model for child book - {child_name_raw}"
+                )
+                print(f"  ✅ Model created: {destination}")
+            except Exception as model_error:
+                err_str = str(model_error).lower()
+                # אם המודל כבר קיים - זה בסדר, ממשיכים
+                if "already exists" in err_str or "already taken" in err_str or "422" in err_str:
+                    print(f"  ℹ️  Model already exists: {destination}")
+                else:
+                    print(f"  ❌ Failed to create model: {model_error}")
+                    raise Exception(f'Could not create Replicate model: {model_error}')
+            
             # Start Replicate training
             print(f"  🎓 Starting Replicate training...")
-            
-            # Build destination
-            if not REPLICATE_USERNAME:
-                raise Exception('REPLICATE_USERNAME not configured in environment variables')
-            
-            destination = f"{REPLICATE_USERNAME}/{child_name.lower().replace(' ', '-')}-lora"
-            print(f"  📍 Destination: {destination}")
             
             training = replicate.trainings.create(
                 version="ostris/flux-dev-lora-trainer:e440909d3512c31646ee2e0c7d6f6f4923224863a6a10c494606e79fb5844497",
@@ -1198,7 +1245,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                     "trigger_word": trigger_word,
                     "steps": 1000,
                     "learning_rate": 0.0004,
-                    "resolution": "512,768,1024"
+                    "resolution": "512,768,1024",
+                    "autocaption": True
                 },
                 destination=destination
             )
@@ -1209,6 +1257,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 'success': True,
                 'training_id': training.id,
                 'trigger_word': trigger_word,
+                'destination': destination,
+                'child_name': child_name_raw,
+                'child_slug': child_slug,
                 'estimated_time': 600
             })
             
