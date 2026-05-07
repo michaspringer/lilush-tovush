@@ -281,6 +281,15 @@ function previewPhotosInline() {
         testBtn.onclick = testFaceSwap;
         preview.appendChild(testBtn);
         
+        // Add LoRA upgrade button
+        const loraBtn = document.createElement('button');
+        loraBtn.style.cssText = 'grid-column: 1/-1; padding: 0.75rem 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 0.95rem; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); transition: transform 0.2s; margin-top: 0.5rem;';
+        loraBtn.innerHTML = '🎓 שדרג ל-LoRA מאומן<br><span style="font-size: 0.85rem; font-weight: normal;">דמיון מושלם • 10 דקות אימון חד-פעמי</span>';
+        loraBtn.onmouseover = () => loraBtn.style.transform = 'scale(1.05)';
+        loraBtn.onmouseout = () => loraBtn.style.transform = 'scale(1)';
+        loraBtn.onclick = startLoraTraining;
+        preview.appendChild(loraBtn);
+        
         console.log(`✅ Uploaded ${uploadedPhotos.length} photos successfully`);
         console.log(`📸 Preview displayed with ${results.length} images`);
         
@@ -1270,4 +1279,133 @@ async function testFaceSwap() {
         loadingDiv.remove();
         alert('שגיאה בבדיקה: ' + error.message);
     }
+}
+
+// ==========================================
+// 🎓 LoRA Training Function
+// ==========================================
+
+async function startLoraTraining() {
+    if (uploadedPhotos.length < 5) {
+        alert('צריך לפחות 5 תמונות לאימון LoRA.\n\nהעלה עוד ' + (5 - uploadedPhotos.length) + ' תמונות.');
+        return;
+    }
+    
+    const childName = document.getElementById('childName').value.trim();
+    if (!childName) {
+        alert('אנא הזן שם ילד קודם');
+        return;
+    }
+    
+    const confirmed = confirm(
+        `🎓 אימון LoRA מאומן\n\n` +
+        `ילד: ${childName}\n` +
+        `תמונות: ${uploadedPhotos.length}\n` +
+        `זמן: 10 דקות\n` +
+        `עלות: ₪2 (חד-פעמי)\n\n` +
+        `אחרי האימון תוכל ליצור ספרים אין-סופיים עם ${childName}!\n\n` +
+        `להתחיל אימון?`
+    );
+    
+    if (!confirmed) return;
+    
+    // Show loading
+    const preview = document.getElementById('photoPreviewInline');
+    const loadingDiv = document.createElement('div');
+    loadingDiv.id = 'loraLoading';
+    loadingDiv.style.cssText = 'grid-column: 1/-1; text-align: center; padding: 1.5rem; background: white; border-radius: 10px; margin-top: 0.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
+    loadingDiv.innerHTML = `
+        <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎓</div>
+        <div style="font-weight: bold; color: #667eea; margin-bottom: 0.5rem;">מאמן LoRA ל-${childName}...</div>
+        <div style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">זה ייקח כ-10 דקות</div>
+        <div style="background: #f0f0f0; border-radius: 8px; height: 8px; overflow: hidden;">
+            <div id="loraProgress" style="background: linear-gradient(90deg, #667eea, #764ba2); height: 100%; width: 0%; transition: width 0.3s;"></div>
+        </div>
+        <div id="loraStatus" style="margin-top: 0.5rem; font-size: 0.85rem; color: #999;">מתחיל...</div>
+    `;
+    preview.appendChild(loadingDiv);
+    
+    try {
+        // Start training
+        const response = await fetch(`${SERVER_CONFIG.url}/api/start-lora-training`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                child_name: childName,
+                child_photos: uploadedPhotos
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Poll for status
+            pollLoraStatus(data.training_id, childName, data.trigger_word);
+        } else {
+            throw new Error(data.error);
+        }
+        
+    } catch (error) {
+        console.error('Training error:', error);
+        loadingDiv.remove();
+        alert('שגיאה באימון: ' + error.message);
+    }
+}
+
+async function pollLoraStatus(trainingId, childName, triggerWord) {
+    const startTime = Date.now();
+    const statusEl = document.getElementById('loraStatus');
+    const progressEl = document.getElementById('loraProgress');
+    
+    const interval = setInterval(async () => {
+        try {
+            const response = await fetch(`${SERVER_CONFIG.url}/api/lora-status/${trainingId}`);
+            const data = await response.json();
+            
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const progress = Math.min(95, (elapsed / 600) * 100);
+            
+            progressEl.style.width = progress + '%';
+            statusEl.textContent = `${Math.floor(progress)}% • ${Math.floor(elapsed / 60)} דקות`;
+            
+            if (data.status === 'succeeded') {
+                clearInterval(interval);
+                
+                progressEl.style.width = '100%';
+                statusEl.textContent = '100% • אימון הושלם!';
+                
+                // Save LoRA
+                saveLoraModel({
+                    child_name: childName,
+                    trigger_word: triggerWord,
+                    lora_url: data.lora_url,
+                    version: data.version,
+                    created_at: new Date().toISOString()
+                });
+                
+                setTimeout(() => {
+                    document.getElementById('loraLoading').remove();
+                    alert(`✅ אימון LoRA הושלם!\n\nעכשיו ${childName} מוכן ליצירת ספרים מושלמים!`);
+                }, 2000);
+                
+            } else if (data.status === 'failed') {
+                clearInterval(interval);
+                statusEl.textContent = '❌ אימון נכשל';
+                throw new Error(data.error);
+            }
+            
+        } catch (error) {
+            clearInterval(interval);
+            console.error('Status check error:', error);
+            document.getElementById('loraLoading').remove();
+            alert('שגיאה בבדיקת סטטוס: ' + error.message);
+        }
+    }, 5000); // Check every 5 seconds
+}
+
+function saveLoraModel(model) {
+    const models = JSON.parse(localStorage.getItem('lora_models') || '[]');
+    models.push(model);
+    localStorage.setItem('lora_models', JSON.stringify(models));
+    console.log('LoRA model saved:', model);
 }
