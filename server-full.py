@@ -1183,6 +1183,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # Start Replicate training
             print(f"  🎓 Starting Replicate training...")
             
+            # Note: destination requires your Replicate username
+            # For now, we'll let Replicate auto-assign
             training = replicate.trainings.create(
                 version="ostris/flux-dev-lora-trainer:e440909d3512c31646ee2e0c7d6f6f4923224863a6a10c494606e79fb5844497",
                 input={
@@ -1191,8 +1193,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                     "steps": 1000,
                     "learning_rate": 0.0004,
                     "resolution": "512,768,1024"
-                },
-                destination=f"{REPLICATE_API_TOKEN.split('_')[1] if '_' in REPLICATE_API_TOKEN else 'user'}/{child_name.lower()}-lora"
+                }
+                # Removed destination - Replicate will auto-assign
             )
             
             print(f"  ✅ Training started: {training.id}")
