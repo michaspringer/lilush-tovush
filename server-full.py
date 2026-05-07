@@ -163,24 +163,38 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             child_name = request_data.get('childName', 'ילד')
             child_photo = request_data.get('childPhoto')
-            ai_model_id = request_data.get('ai_model_id')  # NEW!
+            ai_model_id = request_data.get('ai_model_id')
+            
+            # 🎓 NEW: LoRA parameters
+            lora_url = request_data.get('lora_url')
+            trigger_word = request_data.get('trigger_word')
+            use_lora = request_data.get('use_lora', False) and lora_url and trigger_word
             
             print(f"\n📖 Creating story for: {child_name}")
-            if child_photo:
-                print("📸 Photo uploaded - will use InstantID!")
+            if use_lora:
+                print(f"🎓 USING TRAINED LoRA MODEL!")
+                print(f"   Trigger word: {trigger_word}")
+                print(f"   LoRA URL: {lora_url[:80]}...")
+            elif child_photo:
+                print("📸 Photo uploaded - will use FLUX face swap")
             if ai_model_id:
                 print(f"🤖 Using trained AI model: {ai_model_id[:20]}...")
             
             print("📝 Step 1: Generating story with Claude...")
             story_data = self.create_story_with_claude(request_data)
             
-            # Add AI model ID to story data
             if ai_model_id:
                 story_data['ai_model_id'] = ai_model_id
             
             if IMAGE_MODE != 'none' and story_data.get('pages'):
                 print(f"🎨 Step 2: Generating images ({IMAGE_MODE})...")
-                story_data = self.add_images_to_story(story_data, child_photo)
+                # 🎓 העבר את ה-LoRA לפונקציה
+                story_data = self.add_images_to_story(
+                    story_data,
+                    child_photo,
+                    lora_url=lora_url if use_lora else None,
+                    trigger_word=trigger_word if use_lora else None
+                )
             
             print("✅ Story complete!")
             self.send_json_response({
@@ -224,25 +238,46 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             story_data = json.loads(clean_content)
             return story_data
     
-    def add_images_to_story(self, story_data, child_photo=None):
-        """מוסיף תמונות לסיפור עם FLUX + IP-Adapter"""
+    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None):
+        """מוסיף תמונות לסיפור - עם LoRA אם יש, אחרת FLUX + face swap"""
         pages = story_data.get('pages', [])
         
-        if child_photo:
-            print(f"  🎨 Creating {len(pages)} images with FLUX + IP-Adapter...")
+        use_lora = lora_url and trigger_word
+        
+        if use_lora:
+            print(f"  🎓 Creating {len(pages)} images with LoRA model!")
+            print(f"  🏷️  Trigger word: {trigger_word}")
+        elif child_photo:
+            print(f"  🎨 Creating {len(pages)} images with FLUX + face swap...")
             print(f"  👤 Child will be drawn in illustration style!")
         else:
-            print(f"  🎨 Creating {len(pages)} images with FLUX...")
+            print(f"  🎨 Creating {len(pages)} images with FLUX (no child)...")
         
         for i, page in enumerate(pages):
             print(f"  🖼️  Image {i+1}/{len(pages)}...")
             
             try:
-                # Generate with IP-Adapter (child's face as reference)
-                image_url = self.generate_image_flux_with_face(
-                    page['illustration'],
-                    child_photo
-                )
+                if use_lora:
+                    # 🎓 מסלול LoRA - הילד מצוייר ישירות בסגנון illustration
+                    image_url = self.generate_image_with_lora(
+                        prompt=page['illustration'],
+                        lora_url=lora_url,
+                        trigger_word=trigger_word
+                    )
+                    
+                    # Fallback: אם LoRA נכשל, נסה FLUX רגיל
+                    if not image_url:
+                        print(f"  ⚠️  LoRA failed, falling back to FLUX...")
+                        image_url = self.generate_image_flux_with_face(
+                            page['illustration'],
+                            child_photo
+                        )
+                else:
+                    # מסלול רגיל - FLUX + face swap
+                    image_url = self.generate_image_flux_with_face(
+                        page['illustration'],
+                        child_photo
+                    )
                 
                 page['imageUrl'] = image_url
                 
@@ -1344,14 +1379,14 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             }, status=500)
     
     def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration"):
-        """יוצר תמונה עם LoRA מאומן - מושלם!"""
+        """יוצר תמונה עם LoRA מאומן - גרסה מותאמת לאחר בדיקות"""
         try:
             if not HAS_REPLICATE:
                 raise Exception('Replicate not configured')
             
             # Style-specific prompts
             style_prompts = {
-                "illustration": "children's book illustration style, colorful, friendly, warm",
+                "illustration": "children's book illustration style, warm colors, soft lighting, detailed",
                 "watercolor": "watercolor painting, soft colors, artistic, gentle",
                 "cartoon": "cartoon style, bold colors, playful, fun",
                 "realistic": "realistic digital art, detailed, professional",
@@ -1364,18 +1399,24 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             if any(ord(c) > 127 for c in prompt):
                 prompt = self.translate_to_english(prompt)
             
-            # Combine everything
-            full_prompt = f"{trigger_word}, {prompt}, {style_prompt}"
+            # 🎯 Improved prompt structure - based on Playground testing
+            # מבנה שעובד: trigger_word כדמות מרכזית + פנים ברורות + הסצנה + סגנון
+            full_prompt = (
+                f"{trigger_word} as the main character, "
+                f"clear face, recognizable features, "
+                f"{prompt}, "
+                f"{style_prompt}"
+            )
             
             print(f"  🎨 Generating with LoRA...")
-            print(f"  📝 Prompt: {full_prompt[:100]}...")
+            print(f"  📝 Prompt: {full_prompt[:150]}...")
             
             output = replicate.run(
                 "ostris/flux-dev-lora:091495765fa5ef2725a175a57b276ec30dc9d39297e6fe30e4b7dbb5376a0d1f",
                 input={
                     "prompt": full_prompt,
                     "lora_url": lora_url,
-                    "lora_scale": 0.8,
+                    "lora_scale": 1.0,  # 🎯 Increased from 0.8 - stronger LoRA influence
                     "num_outputs": 1,
                     "aspect_ratio": "4:3",
                     "output_format": "jpg",
