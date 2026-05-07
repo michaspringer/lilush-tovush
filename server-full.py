@@ -21,6 +21,7 @@ import ssl
 CLAUDE_API_KEY = os.environ.get('CLAUDE_API_KEY', 'YOUR_CLAUDE_KEY_HERE')
 LEONARDO_API_KEY = os.environ.get('LEONARDO_API_KEY', '')
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN', '')
+REPLICATE_USERNAME = os.environ.get('REPLICATE_USERNAME', '')  # Your Replicate username
 FAL_KEY = os.environ.get('FAL_KEY', '')
 IMAGE_MODE = os.environ.get('IMAGE_MODE', 'leonardo')
 
@@ -1183,8 +1184,13 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # Start Replicate training
             print(f"  🎓 Starting Replicate training...")
             
-            # Note: destination requires your Replicate username
-            # For now, we'll let Replicate auto-assign
+            # Build destination
+            if not REPLICATE_USERNAME:
+                raise Exception('REPLICATE_USERNAME not configured in environment variables')
+            
+            destination = f"{REPLICATE_USERNAME}/{child_name.lower().replace(' ', '-')}-lora"
+            print(f"  📍 Destination: {destination}")
+            
             training = replicate.trainings.create(
                 version="ostris/flux-dev-lora-trainer:e440909d3512c31646ee2e0c7d6f6f4923224863a6a10c494606e79fb5844497",
                 input={
@@ -1193,8 +1199,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                     "steps": 1000,
                     "learning_rate": 0.0004,
                     "resolution": "512,768,1024"
-                }
-                # Removed destination - Replicate will auto-assign
+                },
+                destination=destination
             )
             
             print(f"  ✅ Training started: {training.id}")
