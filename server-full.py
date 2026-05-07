@@ -505,28 +505,69 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             return hebrew_text
     
     def generate_image_flux_with_face(self, prompt, child_photo=None):
-        """יצירת תמונה עם FLUX + Face Swap"""
+        """יצירת תמונה עם FLUX + InstantID - הילד מצוייר באיור!"""
         try:
             if not FAL_KEY or not HAS_FAL:
                 raise Exception('Fal.ai not configured')
             
-            print(f"  🎨 FLUX...")
+            print(f"  🎨 FLUX + InstantID...")
             
             # Translate Hebrew to English if needed
             if any(ord(c) > 127 for c in prompt):
                 prompt = self.translate_to_english(prompt)
             
-            # FLUX prompt - emphasize clear frontal face
-            full_prompt = f"{prompt}, children's book illustration style, front-facing character with clear visible face, looking at camera, detailed facial features, friendly expression, colorful, warm, high quality"
+            # FLUX prompt - emphasize illustration style
+            full_prompt = f"{prompt}, children's book illustration style, colorful, friendly, warm, high quality, professional illustration"
             
-            negative_prompt = "side view, back view, profile view, hidden face, no face, blurry face, abstract face, multiple people"
+            negative_prompt = "realistic photo, photographic, multiple people, crowd, side view, back view, profile view, hidden face, blurry, low quality"
             
             print(f"  📝 Prompt: {full_prompt[:80]}...")
             
             # Set API key
             os.environ["FAL_KEY"] = FAL_KEY
             
-            # Generate with FLUX
+            # Use InstantID if child photo provided and Replicate available
+            if child_photo and HAS_REPLICATE and REPLICATE_API_TOKEN:
+                print(f"  👤 Using InstantID for face consistency...")
+                
+                try:
+                    output = replicate.run(
+                        "zsxkib/instant-id:d3e00714e4d753576757ba80eebe007dd1fdb44c964086d8a96d395b609cf1d6",
+                        input={
+                            "image": child_photo,
+                            "prompt": full_prompt,
+                            "negative_prompt": negative_prompt,
+                            "num_inference_steps": 30,
+                            "guidance_scale": 5.0,
+                            "ip_adapter_scale": 0.8,
+                            "controlnet_conditioning_scale": 0.8
+                        }
+                    )
+                    
+                    if output and len(output) > 0:
+                        image_url = output[0]
+                        
+                        # Download
+                        ctx = ssl.create_default_context()
+                        ctx.check_hostname = False
+                        ctx.verify_mode = ssl.CERT_NONE
+                        
+                        req = urllib.request.Request(
+                            image_url,
+                            headers={'User-Agent': 'Mozilla/5.0'}
+                        )
+                        
+                        with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                            img_data = response.read()
+                        
+                        img_b64 = base64.b64encode(img_data).decode()
+                        print(f"  ✅ InstantID succeeded! Child drawn in illustration style!")
+                        return f"data:image/jpeg;base64,{img_b64}"
+                    
+                except Exception as e:
+                    print(f"  ⚠️ InstantID failed: {str(e)}, falling back to FLUX + Face Swap...")
+            
+            # Fallback: FLUX + Face Swap
             handler = fal_client.submit(
                 "fal-ai/flux/dev",
                 arguments={
@@ -567,7 +608,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 
                 # Apply face swap if child photo provided
                 if child_photo:
-                    print(f"  👤 Applying InsightFace face swap...")
+                    print(f"  👤 Applying face swap...")
                     face_swapped = self.apply_fal_face_swap(image_data, child_photo)
                     if face_swapped:
                         print(f"  ✅ Child's face added to image!")
@@ -580,7 +621,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             raise Exception("No output from FLUX")
             
         except Exception as e:
-            print(f"  ⚠️ FLUX error: {str(e)}")
+            print(f"  ⚠️ Image generation error: {str(e)}")
             import traceback
             traceback.print_exc()
             return None
@@ -1242,6 +1283,77 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 'status': 'error',
                 'error': str(e)
             }, status=500)
+    
+    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration"):
+        """יוצר תמונה עם LoRA מאומן - מושלם!"""
+        try:
+            if not HAS_REPLICATE:
+                raise Exception('Replicate not configured')
+            
+            # Style-specific prompts
+            style_prompts = {
+                "illustration": "children's book illustration style, colorful, friendly, warm",
+                "watercolor": "watercolor painting, soft colors, artistic, gentle",
+                "cartoon": "cartoon style, bold colors, playful, fun",
+                "realistic": "realistic digital art, detailed, professional",
+                "comic": "comic book style, bold lines, vibrant"
+            }
+            
+            style_prompt = style_prompts.get(style_name, style_prompts["illustration"])
+            
+            # Translate Hebrew to English if needed
+            if any(ord(c) > 127 for c in prompt):
+                prompt = self.translate_to_english(prompt)
+            
+            # Combine everything
+            full_prompt = f"{trigger_word}, {prompt}, {style_prompt}"
+            
+            print(f"  🎨 Generating with LoRA...")
+            print(f"  📝 Prompt: {full_prompt[:100]}...")
+            
+            output = replicate.run(
+                "ostris/flux-dev-lora:091495765fa5ef2725a175a57b276ec30dc9d39297e6fe30e4b7dbb5376a0d1f",
+                input={
+                    "prompt": full_prompt,
+                    "lora_url": lora_url,
+                    "lora_scale": 0.8,
+                    "num_outputs": 1,
+                    "aspect_ratio": "4:3",
+                    "output_format": "jpg",
+                    "guidance_scale": 3.5,
+                    "output_quality": 90,
+                    "num_inference_steps": 28,
+                    "disable_safety_checker": True
+                }
+            )
+            
+            if output and len(output) > 0:
+                image_url = output[0]
+                
+                # Download
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                
+                req = urllib.request.Request(
+                    image_url,
+                    headers={'User-Agent': 'Mozilla/5.0'}
+                )
+                
+                with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
+                    img_data = response.read()
+                
+                img_b64 = base64.b64encode(img_data).decode()
+                print(f"  ✅ LoRA image generated! ({len(img_data)} bytes)")
+                return f"data:image/jpeg;base64,{img_b64}"
+            
+            raise Exception("No output from LoRA generation")
+            
+        except Exception as e:
+            print(f"  ❌ LoRA generation error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            return None
     
     def handle_generate_pdf(self):
         """יוצר PDF"""
