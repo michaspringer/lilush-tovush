@@ -1197,17 +1197,53 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             print(f"  📦 ZIP: {os.path.getsize(zip_path)} bytes")
             
-            # Upload to Cloudinary - השתמש ב-slug (לא בשם המקורי בעברית)
-            print(f"  ☁️  Uploading to Cloudinary...")
+            # 🔧 FIX 4: העלאה ל-Cloudinary כקובץ ציבורי
+            # type="upload" + access_mode="public" מבטיחים שReplicate יוכל להוריד
+            print(f"  ☁️  Uploading to Cloudinary (public)...")
             upload_result = cloudinary.uploader.upload(
                 zip_path,
                 resource_type="raw",
+                type="upload",
                 folder="lora_training",
-                public_id=f"{child_slug}_{int(time.time())}"
+                public_id=f"{child_slug}_{int(time.time())}",
+                access_mode="public",
+                use_filename=False,
+                unique_filename=False
             )
             
             zip_url = upload_result['secure_url']
             print(f"  ✅ Uploaded: {zip_url}")
+            
+            # 🔧 FIX 5: ודא שה-URL נגיש לפני שולח ל-Replicate
+            # אם Cloudinary מחזיר 401, נכשל מהר ובהבנה
+            print(f"  🔍 Verifying URL is publicly accessible...")
+            try:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                
+                req = urllib.request.Request(
+                    zip_url,
+                    headers={'User-Agent': 'Mozilla/5.0'},
+                    method='HEAD'
+                )
+                with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
+                    if resp.status == 200:
+                        print(f"  ✅ URL is publicly accessible (HTTP 200)")
+                    else:
+                        print(f"  ⚠️  URL returned HTTP {resp.status}")
+            except urllib.error.HTTPError as he:
+                if he.code == 401 or he.code == 403:
+                    raise Exception(
+                        f'Cloudinary URL not publicly accessible (HTTP {he.code}). '
+                        f'Check Cloudinary settings: Settings → Security → '
+                        f'"Restricted media types" should NOT include "raw", '
+                        f'and "Resource list" delivery should be allowed.'
+                    )
+                else:
+                    print(f"  ⚠️  HEAD check returned {he.code}, continuing anyway...")
+            except Exception as verify_error:
+                print(f"  ⚠️  Could not verify URL ({verify_error}), continuing anyway...")
             
             # 🔧 FIX 3: יצור את המודל ב-Replicate לפני training
             # זה הפתרון לבעיית 404 "destination does not exist"
