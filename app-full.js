@@ -678,7 +678,17 @@ async function generateStory() {
     const customInputElement = document.getElementById('customInput');
     appState.bookData.customInput = customInputElement ? customInputElement.value.trim() : '';
     
-    // No training needed - Fal.ai works with photos directly!
+    // 🎯 חפש אם יש LoRA מאומן עבור הילד הזה
+    const childLora = findLoraForChild(appState.bookData.childName);
+    
+    // 🆕 שלב חדש: אם יש LoRA - הצג תצוגה מקדימה לפני יצירת הספר
+    if (childLora) {
+        const previewApproved = await showLoraPreview(childLora);
+        if (!previewApproved) {
+            console.log('User cancelled book creation after preview');
+            return;  // המשתמש לא אישר - חזרה לטופס
+        }
+    }
     
     showScreen('generatingScreen');
     
@@ -701,9 +711,6 @@ async function generateStory() {
         console.log('📸 uploadedPhotos:', uploadedPhotos);
         console.log('📸 uploadedPhotos.length:', uploadedPhotos.length);
         
-        // 🎯 חפש אם יש LoRA מאומן עבור הילד הזה
-        const childLora = findLoraForChild(appState.bookData.childName);
-        
         const requestData = {
             ...appState.bookData,
             ai_model_id: null,  // Force null for now
@@ -711,7 +718,7 @@ async function generateStory() {
             // 🎓 אם יש LoRA - שלח אותו לשרת!
             lora_url: childLora ? childLora.lora_url : null,
             trigger_word: childLora ? childLora.trigger_word : null,
-            lora_version: childLora ? childLora.version : null,  // 🆕 שולח גם את ה-version!
+            lora_version: childLora ? childLora.version : null,
             use_lora: !!childLora
         };
         
@@ -1468,4 +1475,152 @@ function deleteLoraModel(childName) {
     const filtered = models.filter(m => m.child_name !== childName);
     localStorage.setItem('lora_models', JSON.stringify(filtered));
     console.log(`🗑️ Deleted LoRA for: ${childName}`);
+}
+
+// ==========================================
+// 🔍 LoRA Preview - Sanity Check Before Book Generation
+// ==========================================
+async function showLoraPreview(childLora) {
+    /**
+     * מציג תצוגה מקדימה של הילד לפני יצירת הספר.
+     * מחזיר Promise<boolean>: true = המשתמש מאשר, false = ביטול
+     */
+    return new Promise(async (resolve) => {
+        // יצירת overlay מודלי
+        const overlay = document.createElement('div');
+        overlay.id = 'loraPreviewOverlay';
+        overlay.style.cssText = `
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.85);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 10000;
+            font-family: inherit;
+        `;
+        
+        overlay.innerHTML = `
+            <div style="background: #fff; border-radius: 20px; padding: 2rem; max-width: 500px; width: 90%; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.4);">
+                <h2 style="margin: 0 0 0.5rem 0; color: #2A2118; font-size: 1.5rem;">
+                    🔍 בדיקה מקדימה
+                </h2>
+                <p style="color: #5C4A35; margin-bottom: 1.5rem; font-size: 0.95rem;">
+                    ככה ${childLora.child_name} ייראה בספר. רוצה להמשיך?
+                </p>
+                
+                <div id="previewImageContainer" style="
+                    background: #FBF4E4;
+                    border-radius: 16px;
+                    min-height: 300px;
+                    display: flex; align-items: center; justify-content: center;
+                    margin-bottom: 1.5rem;
+                    overflow: hidden;
+                ">
+                    <div id="previewLoader" style="text-align: center;">
+                        <div style="font-size: 2.5rem; margin-bottom: 1rem;">🎨</div>
+                        <div style="color: #5C4A35; font-weight: 600;">יוצר תמונת בדיקה...</div>
+                        <div style="color: #999; font-size: 0.85rem; margin-top: 0.5rem;">~10 שניות</div>
+                    </div>
+                </div>
+                
+                <div id="previewActions" style="display: none; gap: 0.8rem; flex-direction: column;">
+                    <button id="previewApprove" style="
+                        background: #C95E48; color: white; border: none;
+                        padding: 0.9rem 2rem; border-radius: 100px; cursor: pointer;
+                        font-size: 1rem; font-weight: 700; font-family: inherit;
+                    ">
+                        ✅ נראה טוב! צור את הספר
+                    </button>
+                    <button id="previewRetry" style="
+                        background: transparent; color: #5C4A35;
+                        border: 2px solid rgba(0,0,0,0.1);
+                        padding: 0.7rem 1.5rem; border-radius: 100px; cursor: pointer;
+                        font-size: 0.95rem; font-weight: 600; font-family: inherit;
+                    ">
+                        🔄 נסה תמונה אחרת
+                    </button>
+                    <button id="previewCancel" style="
+                        background: transparent; color: #999;
+                        border: none; cursor: pointer;
+                        font-size: 0.9rem; font-family: inherit;
+                        padding: 0.5rem;
+                    ">
+                        ❌ ביטול
+                    </button>
+                </div>
+                
+                <div id="previewError" style="display: none; color: #C95E48; padding: 1rem;"></div>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        // פונקציה ליצירת התצוגה המקדימה
+        async function generatePreview() {
+            // הסתר אקשנים, הצג loader
+            document.getElementById('previewActions').style.display = 'none';
+            document.getElementById('previewError').style.display = 'none';
+            document.getElementById('previewImageContainer').innerHTML = `
+                <div style="text-align: center;">
+                    <div style="font-size: 2.5rem; margin-bottom: 1rem;">🎨</div>
+                    <div style="color: #5C4A35; font-weight: 600;">יוצר תמונת בדיקה...</div>
+                    <div style="color: #999; font-size: 0.85rem; margin-top: 0.5rem;">~10 שניות</div>
+                </div>
+            `;
+            
+            try {
+                const response = await fetch(`${SERVER_CONFIG.url}/api/preview-lora`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        child_name: childLora.child_name,
+                        lora_url: childLora.lora_url,
+                        trigger_word: childLora.trigger_word,
+                        lora_version: childLora.version,
+                        theme: appState.bookData.theme || 'animals'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.preview_image) {
+                    document.getElementById('previewImageContainer').innerHTML = `
+                        <img src="${data.preview_image}" 
+                             style="max-width: 100%; max-height: 400px; border-radius: 12px;"
+                             alt="תצוגה מקדימה של ${childLora.child_name}">
+                    `;
+                    document.getElementById('previewActions').style.display = 'flex';
+                } else {
+                    throw new Error(data.error || 'יצירת התצוגה נכשלה');
+                }
+            } catch (err) {
+                console.error('Preview error:', err);
+                document.getElementById('previewImageContainer').innerHTML = '';
+                document.getElementById('previewError').style.display = 'block';
+                document.getElementById('previewError').innerHTML = `
+                    <strong>⚠️ שגיאה ביצירת התצוגה</strong><br>
+                    <small>${err.message}</small>
+                `;
+                document.getElementById('previewActions').style.display = 'flex';
+            }
+        }
+        
+        // הפעלה ראשונית
+        generatePreview();
+        
+        // event handlers
+        function cleanup(result) {
+            document.body.removeChild(overlay);
+            resolve(result);
+        }
+        
+        // delegation - הכפתורים נטענים אחרי האסינכרוני
+        overlay.addEventListener('click', (e) => {
+            if (e.target.id === 'previewApprove') {
+                cleanup(true);
+            } else if (e.target.id === 'previewCancel') {
+                cleanup(false);
+            } else if (e.target.id === 'previewRetry') {
+                generatePreview();  // יצירה מחדש
+            }
+        });
+    });
 }
