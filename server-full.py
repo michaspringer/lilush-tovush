@@ -262,6 +262,14 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         for i, page in enumerate(pages):
             print(f"  🖼️  Image {i+1}/{len(pages)}...")
             
+            # 🐌 Throttle - חכה בין בקשות LoRA כדי לא להיתפס ב-rate limit
+            # Replicate עם פחות מ-$5 קרדיט: 6 בקשות לדקה = 1 כל 10 שניות
+            # אנחנו מחכים 11 שניות כדי להישאר בטוחים מתחת למגבלה
+            if use_lora and i > 0:
+                wait_seconds = 11
+                print(f"  ⏱️  Waiting {wait_seconds}s before next request (rate limit protection)...")
+                time.sleep(wait_seconds)
+            
             try:
                 if use_lora:
                     # 🎓 מסלול LoRA - הילד מצוייר ישירות בסגנון illustration
@@ -1421,13 +1429,33 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"  🎨 Generating with LoRA...")
             print(f"  📝 Prompt: {full_prompt[:150]}...")
             
+            # 🔄 Retry logic for rate limit (429) errors
+            def _run_with_retry(model_target, input_params, max_retries=3):
+                """מריץ replicate.run עם retry אוטומטי במקרה של rate limit"""
+                last_error = None
+                for attempt in range(max_retries):
+                    try:
+                        return replicate.run(model_target, input=input_params)
+                    except Exception as e:
+                        last_error = e
+                        err_str = str(e).lower()
+                        # אם זה rate limit - חכה ונסה שוב
+                        if '429' in err_str or 'throttled' in err_str or 'rate limit' in err_str:
+                            wait_time = 30 if attempt == 0 else 60
+                            print(f"  ⏸️  Rate limit hit (attempt {attempt+1}/{max_retries}), waiting {wait_time}s...")
+                            time.sleep(wait_time)
+                            continue
+                        # שגיאה אחרת - נזרק מיד
+                        raise
+                # אם הגענו לכאן - כל הניסיונות נכשלו
+                raise last_error
+            
             # 🎯 STRATEGY 1 (Preferred): Use the trained model directly
-            # זה עובד כי המודל המאומן הוא כבר FLUX+LoRA יחד
             if lora_version:
                 print(f"  📌 Using trained model directly (best quality)")
-                output = replicate.run(
+                output = _run_with_retry(
                     lora_version,  # e.g. "michaspringer/child-1778184587-lora:f3d7fd3864cfb307..."
-                    input={
+                    {
                         "prompt": full_prompt,
                         "num_outputs": 1,
                         "aspect_ratio": "4:3",
@@ -1441,11 +1469,10 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 )
             else:
                 # 🔧 STRATEGY 2 (Fallback/Legacy): Use ostris/flux-dev-lora with weights URL
-                # שמרתי לתאימות לאחור עבור LoRAs ישנים
                 print(f"  ⚠️  No version, using legacy ostris/flux-dev-lora")
-                output = replicate.run(
-                    "ostris/flux-dev-lora",  # ללא version - יקח את העדכני ביותר
-                    input={
+                output = _run_with_retry(
+                    "ostris/flux-dev-lora",
+                    {
                         "prompt": full_prompt,
                         "lora_url": lora_url,
                         "lora_scale": 1.0,
