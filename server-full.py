@@ -168,6 +168,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # 🎓 NEW: LoRA parameters
             lora_url = request_data.get('lora_url')
             trigger_word = request_data.get('trigger_word')
+            lora_version = request_data.get('lora_version')  # 🆕 NEW: trained model version
             use_lora = request_data.get('use_lora', False) and lora_url and trigger_word
             
             print(f"\n📖 Creating story for: {child_name}")
@@ -175,6 +176,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 print(f"🎓 USING TRAINED LoRA MODEL!")
                 print(f"   Trigger word: {trigger_word}")
                 print(f"   LoRA URL: {lora_url[:80]}...")
+                if lora_version:
+                    print(f"   Version: {lora_version[:80]}...")
             elif child_photo:
                 print("📸 Photo uploaded - will use FLUX face swap")
             if ai_model_id:
@@ -193,7 +196,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                     story_data,
                     child_photo,
                     lora_url=lora_url if use_lora else None,
-                    trigger_word=trigger_word if use_lora else None
+                    trigger_word=trigger_word if use_lora else None,
+                    lora_version=lora_version if use_lora else None
                 )
             
             print("✅ Story complete!")
@@ -238,7 +242,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             story_data = json.loads(clean_content)
             return story_data
     
-    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None):
+    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None, lora_version=None):
         """מוסיף תמונות לסיפור - עם LoRA אם יש, אחרת FLUX + face swap"""
         pages = story_data.get('pages', [])
         
@@ -247,6 +251,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         if use_lora:
             print(f"  🎓 Creating {len(pages)} images with LoRA model!")
             print(f"  🏷️  Trigger word: {trigger_word}")
+            if lora_version:
+                print(f"  📌 Using trained model version directly")
         elif child_photo:
             print(f"  🎨 Creating {len(pages)} images with FLUX + face swap...")
             print(f"  👤 Child will be drawn in illustration style!")
@@ -262,7 +268,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                     image_url = self.generate_image_with_lora(
                         prompt=page['illustration'],
                         lora_url=lora_url,
-                        trigger_word=trigger_word
+                        trigger_word=trigger_word,
+                        lora_version=lora_version
                     )
                     
                     # Fallback: אם LoRA נכשל, נסה FLUX רגיל
@@ -1378,8 +1385,12 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 'error': str(e)
             }, status=500)
     
-    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration"):
-        """יוצר תמונה עם LoRA מאומן - גרסה מותאמת לאחר בדיקות"""
+    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration", lora_version=None):
+        """יוצר תמונה עם LoRA מאומן.
+        
+        אם lora_version קיים - משתמשים במודל המאומן ישירות (האסטרטגיה הטובה יותר!)
+        אחרת - נופלים חזרה ל-ostris/flux-dev-lora (legacy)
+        """
         try:
             if not HAS_REPLICATE:
                 raise Exception('Replicate not configured')
@@ -1400,7 +1411,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 prompt = self.translate_to_english(prompt)
             
             # 🎯 Improved prompt structure - based on Playground testing
-            # מבנה שעובד: trigger_word כדמות מרכזית + פנים ברורות + הסצנה + סגנון
             full_prompt = (
                 f"{trigger_word} as the main character, "
                 f"clear face, recognizable features, "
@@ -1411,21 +1421,43 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"  🎨 Generating with LoRA...")
             print(f"  📝 Prompt: {full_prompt[:150]}...")
             
-            output = replicate.run(
-                "ostris/flux-dev-lora:091495765fa5ef2725a175a57b276ec30dc9d39297e6fe30e4b7dbb5376a0d1f",
-                input={
-                    "prompt": full_prompt,
-                    "lora_url": lora_url,
-                    "lora_scale": 1.0,  # 🎯 Increased from 0.8 - stronger LoRA influence
-                    "num_outputs": 1,
-                    "aspect_ratio": "4:3",
-                    "output_format": "jpg",
-                    "guidance_scale": 3.5,
-                    "output_quality": 90,
-                    "num_inference_steps": 28,
-                    "disable_safety_checker": True
-                }
-            )
+            # 🎯 STRATEGY 1 (Preferred): Use the trained model directly
+            # זה עובד כי המודל המאומן הוא כבר FLUX+LoRA יחד
+            if lora_version:
+                print(f"  📌 Using trained model directly (best quality)")
+                output = replicate.run(
+                    lora_version,  # e.g. "michaspringer/child-1778184587-lora:f3d7fd3864cfb307..."
+                    input={
+                        "prompt": full_prompt,
+                        "num_outputs": 1,
+                        "aspect_ratio": "4:3",
+                        "output_format": "jpg",
+                        "guidance_scale": 3.5,
+                        "output_quality": 90,
+                        "num_inference_steps": 28,
+                        "lora_scale": 1.0,
+                        "disable_safety_checker": True
+                    }
+                )
+            else:
+                # 🔧 STRATEGY 2 (Fallback/Legacy): Use ostris/flux-dev-lora with weights URL
+                # שמרתי לתאימות לאחור עבור LoRAs ישנים
+                print(f"  ⚠️  No version, using legacy ostris/flux-dev-lora")
+                output = replicate.run(
+                    "ostris/flux-dev-lora",  # ללא version - יקח את העדכני ביותר
+                    input={
+                        "prompt": full_prompt,
+                        "lora_url": lora_url,
+                        "lora_scale": 1.0,
+                        "num_outputs": 1,
+                        "aspect_ratio": "4:3",
+                        "output_format": "jpg",
+                        "guidance_scale": 3.5,
+                        "output_quality": 90,
+                        "num_inference_steps": 28,
+                        "disable_safety_checker": True
+                    }
+                )
             
             if output and len(output) > 0:
                 image_url = output[0]
