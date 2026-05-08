@@ -248,6 +248,24 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         
         use_lora = lora_url and trigger_word
         
+        # 🎽 NEW: בחירת ביגוד אחיד לכל הספר (כשמשתמשים ב-LoRA)
+        # זה מבטיח שהילד ילבש אותו דבר ב-12 העמודים, במקום לבוש אקראי שונה בכל עמוד
+        consistent_outfit = None
+        if use_lora:
+            import random
+            # אוסף של ביגודים שמתאימים לילדים בספרי ילדים
+            outfits = [
+                "wearing a yellow t-shirt and blue jeans",
+                "wearing a red striped shirt and khaki shorts",
+                "wearing a green hoodie and dark blue pants",
+                "wearing a white t-shirt with a pattern and beige pants",
+                "wearing an orange sweater and denim shorts",
+                "wearing a purple shirt and gray pants",
+                "wearing a blue polo shirt and brown shorts",
+            ]
+            consistent_outfit = random.choice(outfits)
+            print(f"  🎽 Outfit chosen for entire book: {consistent_outfit}")
+        
         if use_lora:
             print(f"  🎓 Creating {len(pages)} images with LoRA model!")
             print(f"  🏷️  Trigger word: {trigger_word}")
@@ -263,8 +281,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"  🖼️  Image {i+1}/{len(pages)}...")
             
             # 🐌 Throttle - חכה בין בקשות LoRA כדי לא להיתפס ב-rate limit
-            # Replicate עם פחות מ-$5 קרדיט: 6 בקשות לדקה = 1 כל 10 שניות
-            # אנחנו מחכים 11 שניות כדי להישאר בטוחים מתחת למגבלה
             if use_lora and i > 0:
                 wait_seconds = 11
                 print(f"  ⏱️  Waiting {wait_seconds}s before next request (rate limit protection)...")
@@ -277,7 +293,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                         prompt=page['illustration'],
                         lora_url=lora_url,
                         trigger_word=trigger_word,
-                        lora_version=lora_version
+                        lora_version=lora_version,
+                        outfit=consistent_outfit  # 🎽 NEW
                     )
                     
                     # Fallback: אם LoRA נכשל, נסה FLUX רגיל
@@ -986,6 +1003,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         theme = theme_names.get(data.get('theme', ''), 'הרפתקאות')
         style = style_names.get(data.get('style', ''), 'מצחיק')
         
+        # 🎯 NEW: בדיקה אם משתמשים ב-LoRA - אם כן, נשנה את הוראות התמונות
+        use_lora = bool(data.get('use_lora') and data.get('trigger_word'))
+        
         prompt = f"""צור סיפור ילדים בעברית:
 
 שם: {data.get('childName', 'ילד')}
@@ -999,7 +1019,40 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         if data.get('customInput'):
             prompt += f"פרטים: {data['customInput']}\n"
         
-        prompt += """
+        # 🎯 שתי גרסאות שונות של הוראות תיאור התמונה - תלוי אם יש LoRA
+        if use_lora:
+            # 🎓 גרסה ל-LoRA: תיאור קצר של הסצנה בלבד, ללא תיאור הילד!
+            prompt += """
+חשוב מאוד! הוראות לכתיבת הסיפור:
+
+1. הטקסט (text): בעברית, מתאים לגיל
+2. תיאור התמונה (illustration): באנגלית, קצר ופשוט, 1-2 משפטים בלבד!
+
+⚠️ כללים קריטיים לתיאור התמונה:
+- אל תתאר את המראה החיצוני של הילד (שיער, עיניים, גיל, פנים)
+- אל תתאר את הביגוד של הילד
+- אל תכתוב "a boy with..." או "a child wearing..."
+- תאר רק: הסצנה, הפעולה, הרקע, האווירה, חיות/אובייקטים סביב
+
+✅ דוגמה טובה:
+   "sitting on a colorful playground, reaching toward a butterfly, sunny afternoon"
+
+❌ דוגמה רעה:
+   "A boy with curly brown hair wearing green overalls sits on a playground"
+
+פורמט JSON:
+{
+  "pages": [
+    {
+      "text": "הטקסט בעברית כאן...",
+      "illustration": "playing with friendly lions in colorful zoo, joyful expression, bright sunny day"
+    }
+  ]
+}
+"""
+        else:
+            # גרסה רגילה: תיאור מפורט (לFLUX רגיל)
+            prompt += """
 חשוב מאוד!
 1. הטקסט (text) בעברית בלבד!
 2. תיאור התמונה (illustration) גם בעברית!
@@ -1393,11 +1446,13 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 'error': str(e)
             }, status=500)
     
-    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration", lora_version=None):
+    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration", lora_version=None, outfit=None):
         """יוצר תמונה עם LoRA מאומן.
         
         אם lora_version קיים - משתמשים במודל המאומן ישירות (האסטרטגיה הטובה יותר!)
         אחרת - נופלים חזרה ל-ostris/flux-dev-lora (legacy)
+        
+        אם outfit ניתן - הילד ילבש את אותו ביגוד בכל התמונות בספר.
         """
         try:
             if not HAS_REPLICATE:
@@ -1414,20 +1469,23 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             style_prompt = style_prompts.get(style_name, style_prompts["illustration"])
             
-            # Translate Hebrew to English if needed
+            # Translate Hebrew to English if needed (still useful for legacy/non-LoRA mode)
             if any(ord(c) > 127 for c in prompt):
                 prompt = self.translate_to_english(prompt)
             
-            # 🎯 Improved prompt structure - based on Playground testing
+            # 🎯 בניית פרומפט אופטימלית עבור LoRA
+            # מבנה: trigger_word + (ביגוד אחיד אם יש) + פנים ברורות + הסצנה + סגנון
+            outfit_part = f"{outfit}, " if outfit else ""
+            
             full_prompt = (
-                f"{trigger_word} as the main character, "
-                f"clear face, recognizable features, "
+                f"{trigger_word} {outfit_part}"
+                f"as the main character, clear face, recognizable features, "
                 f"{prompt}, "
                 f"{style_prompt}"
             )
             
             print(f"  🎨 Generating with LoRA...")
-            print(f"  📝 Prompt: {full_prompt[:150]}...")
+            print(f"  📝 Prompt: {full_prompt[:180]}...")
             
             # 🔄 Retry logic for rate limit (429) errors
             def _run_with_retry(model_target, input_params, max_retries=3):
