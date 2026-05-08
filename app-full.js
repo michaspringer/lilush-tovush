@@ -711,6 +711,7 @@ async function generateStory() {
             // 🎓 אם יש LoRA - שלח אותו לשרת!
             lora_url: childLora ? childLora.lora_url : null,
             trigger_word: childLora ? childLora.trigger_word : null,
+            lora_version: childLora ? childLora.version : null,  // 🆕 שולח גם את ה-version!
             use_lora: !!childLora
         };
         
@@ -718,6 +719,9 @@ async function generateStory() {
         console.log('📸 With photo:', uploadedPhotos.length > 0 ? 'YES ✅' : 'NO ❌');
         console.log('🤖 With AI model:', aiModel ? 'YES ✅' : 'NO ❌');
         console.log('🎓 With LoRA:', childLora ? `YES ✅ (${childLora.trigger_word})` : 'NO ❌');
+        if (childLora) {
+            console.log('   Version:', childLora.version);
+        }
         
         const response = await fetch(`${SERVER_CONFIG.url}/api/generate-story`, {
             method: 'POST',
