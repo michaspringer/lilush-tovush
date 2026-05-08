@@ -1667,13 +1667,14 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             return None
     
     def handle_generate_pdf(self):
-        """יוצר PDF"""
+        """יוצר PDF עם תמונות ועברית - גרסה משופרת"""
         try:
             from reportlab.lib.pagesizes import A4
             from reportlab.pdfgen import canvas
             from reportlab.pdfbase import pdfmetrics
             from reportlab.pdfbase.ttfonts import TTFont
-            from reportlab.lib.utils import simpleSplit
+            from reportlab.lib.utils import simpleSplit, ImageReader
+            from PIL import Image as PILImage
             
             try:
                 from bidi.algorithm import get_display
@@ -1681,15 +1682,51 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 has_bidi = True
             except:
                 has_bidi = False
+                print("  ⚠️ python-bidi/arabic-reshaper not available - Hebrew will be reversed!")
             
             def fix_hebrew(text):
+                """מסדר עברית בצורה נכונה לימין-לשמאל"""
                 if not has_bidi:
                     return text
                 try:
                     reshaped = arabic_reshaper.reshape(text)
                     return get_display(reshaped)
-                except:
+                except Exception as e:
+                    print(f"  ⚠️ Hebrew fix failed: {e}")
                     return text
+            
+            def load_image_for_pdf(image_url):
+                """מקבל URL של תמונה (יכול להיות base64 או http) ומחזיר ImageReader"""
+                if not image_url:
+                    return None
+                try:
+                    if image_url.startswith('data:image'):
+                        # base64
+                        header, b64data = image_url.split(',', 1)
+                        img_bytes = base64.b64decode(b64data)
+                    elif image_url.startswith('http'):
+                        # הורד מ-URL
+                        ctx = ssl.create_default_context()
+                        ctx.check_hostname = False
+                        ctx.verify_mode = ssl.CERT_NONE
+                        req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                            img_bytes = response.read()
+                    else:
+                        return None
+                    
+                    img_buffer = BytesIO(img_bytes)
+                    pil_img = PILImage.open(img_buffer)
+                    # Convert to RGB if needed (for transparency issues)
+                    if pil_img.mode in ('RGBA', 'LA', 'P'):
+                        pil_img = pil_img.convert('RGB')
+                    output = BytesIO()
+                    pil_img.save(output, format='JPEG', quality=85)
+                    output.seek(0)
+                    return ImageReader(output)
+                except Exception as e:
+                    print(f"  ⚠️ Could not load image: {e}")
+                    return None
             
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
@@ -1699,14 +1736,20 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             pages = story_data.get('pages', [])
             
             print(f"📄 PDF for: {child_name}")
+            print(f"   Pages: {len(pages)}")
+            print(f"   Hebrew support: {'✅' if has_bidi else '❌'}")
             
             buffer = BytesIO()
             c = canvas.Canvas(buffer, pagesize=A4)
             width, height = A4
             
+            # Register Hebrew font
             hebrew_font = 'Helvetica'
             font_paths = [
                 '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+                '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+                '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+                '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
                 'C:\\Windows\\Fonts\\arial.ttf'
             ]
             
@@ -1714,31 +1757,79 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 try:
                     pdfmetrics.registerFont(TTFont('Hebrew', font_path))
                     hebrew_font = 'Hebrew'
+                    print(f"   📝 Font registered: {font_path}")
                     break
                 except:
                     continue
             
-            # Cover
-            c.setFont(hebrew_font, 32)
+            # ====== Cover Page ======
+            c.setFillColorRGB(0.99, 0.96, 0.89)  # cream
+            c.rect(0, 0, width, height, stroke=0, fill=1)
+            c.setFillColorRGB(0.16, 0.13, 0.09)  # dark
+            c.setFont(hebrew_font, 36)
             title = fix_hebrew(f"הספר של {child_name}")
-            c.drawString((width - c.stringWidth(title, hebrew_font, 32)) / 2, height - 100, title)
+            title_width = c.stringWidth(title, hebrew_font, 36)
+            c.drawString((width - title_width) / 2, height - 200, title)
+            
+            c.setFont(hebrew_font, 16)
+            subtitle = fix_hebrew("מבית לילוש טובוש")
+            sub_width = c.stringWidth(subtitle, hebrew_font, 16)
+            c.drawString((width - sub_width) / 2, height - 240, subtitle)
             c.showPage()
             
-            # Pages
+            # ====== Story Pages ======
             for i, page in enumerate(pages):
+                print(f"   🖼️ Adding page {i+1}/{len(pages)}...")
+                
+                # Page number
+                c.setFillColorRGB(0.36, 0.29, 0.21)
                 c.setFont(hebrew_font, 10)
                 page_num = fix_hebrew(f"עמוד {i + 1}")
-                c.drawString(width - 100, height - 30, page_num)
+                c.drawString(width - 100, 30, page_num)
                 
-                c.setFont(hebrew_font, 14)
-                text = fix_hebrew(page.get('text', ''))
-                lines = simpleSplit(text, hebrew_font, 14, width - 100)
+                # ===== IMAGE =====
+                image_url = page.get('imageUrl')
+                if image_url:
+                    img_reader = load_image_for_pdf(image_url)
+                    if img_reader:
+                        # Image position - top half of page
+                        img_width = width - 80  # margin 40 each side
+                        img_height = height * 0.55  # top 55% of page
+                        img_x = 40
+                        img_y = height - img_height - 60  # 60 from top
+                        
+                        try:
+                            c.drawImage(
+                                img_reader,
+                                img_x, img_y,
+                                width=img_width,
+                                height=img_height,
+                                preserveAspectRatio=True,
+                                anchor='c'
+                            )
+                            print(f"      ✅ Image added")
+                        except Exception as img_err:
+                            print(f"      ⚠️ Image draw failed: {img_err}")
                 
-                y_position = height - 280
-                for line in lines:
-                    line_width = c.stringWidth(line, hebrew_font, 14)
+                # ===== TEXT =====
+                c.setFillColorRGB(0.16, 0.13, 0.09)
+                c.setFont(hebrew_font, 16)
+                text = page.get('text', '')
+                
+                # Split and reverse for Hebrew (each line individually)
+                if has_bidi and any(ord(ch) > 127 for ch in text):
+                    # Hebrew: split, fix each line, then layout
+                    raw_lines = simpleSplit(text, hebrew_font, 16, width - 100)
+                    text_lines = [fix_hebrew(line) for line in raw_lines]
+                else:
+                    text_lines = simpleSplit(text, hebrew_font, 16, width - 100)
+                
+                # Text in bottom half
+                y_position = height * 0.35  # ~35% from bottom
+                for line in text_lines:
+                    line_width = c.stringWidth(line, hebrew_font, 16)
                     c.drawString((width - line_width) / 2, y_position, line)
-                    y_position -= 20
+                    y_position -= 24
                 
                 c.showPage()
             
@@ -1751,18 +1842,12 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.send_header('Content-Type', 'application/pdf')
             
             # 🔧 FIX: תמיכה בשמות קבצים בעברית ע"פ RFC 5987
-            # HTTP headers תומכים רק ב-latin-1, אז בשביל עברית צריך:
-            # 1. filename ללא עברית (fallback) - תוויות בלטינית או ASCII בלבד
-            # 2. filename* עם UTF-8 encoding (תוסף RFC 5987)
             try:
-                # נסה תחילה לקודד ב-latin-1 (אם השם באנגלית - זה יעבוד)
                 child_name.encode('latin-1')
-                # אם הצליח - שמור על השם המקורי
                 self.send_header('Content-Disposition', f'attachment; filename="lilush_{child_name}.pdf"')
             except UnicodeEncodeError:
-                # אם יש תווי עברית - השתמש ב-RFC 5987
                 from urllib.parse import quote
-                ascii_fallback = "lilush_book.pdf"  # שם פשוט ללא עברית כ-fallback
+                ascii_fallback = "lilush_book.pdf"
                 utf8_filename = quote(f"lilush_{child_name}.pdf", safe='')
                 self.send_header(
                     'Content-Disposition',
