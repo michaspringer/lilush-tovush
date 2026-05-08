@@ -1142,13 +1142,18 @@ async function regenerateImage(pageIndex) {
         ? currentStory.childPhotos[0] 
         : (uploadedPhotos.length > 0 ? uploadedPhotos[0] : null);
     
-    console.log('🎭 Regenerating with child photo:', childPhoto ? 'YES ✅' : 'NO ❌');
+    // 🎓 Check if there's a LoRA for this child
+    const childLora = findLoraForChild(currentStory.childName || appState.bookData.childName);
+    
+    console.log('🎭 Regenerating image:');
+    console.log('  📸 With photo:', childPhoto ? 'YES ✅' : 'NO ❌');
+    console.log('  🎓 With LoRA:', childLora ? `YES ✅ (${childLora.trigger_word})` : 'NO ❌');
     
     // Close modal
     closeImageEditPopup();
     
     // Show loading
-    showLoadingOverlay('מייצר תמונה חדשה... ⏳');
+    showLoadingOverlay(childLora ? 'מייצר תמונה חדשה עם המודל המאומן... ⏳' : 'מייצר תמונה חדשה... ⏳');
     
     try {
         const response = await fetch(`${SERVER_CONFIG.url}/api/regenerate-image`, {
@@ -1157,7 +1162,12 @@ async function regenerateImage(pageIndex) {
             body: JSON.stringify({
                 page_text: page.illustration,
                 user_prompt: userPrompt,
-                child_photo: childPhoto
+                child_photo: childPhoto,
+                // 🎓 LoRA parameters
+                lora_url: childLora ? childLora.lora_url : null,
+                trigger_word: childLora ? childLora.trigger_word : null,
+                lora_version: childLora ? childLora.version : null,
+                outfit: currentStory.outfit || null  // לשמירה על אחידות אם נשמר
             })
         });
         
