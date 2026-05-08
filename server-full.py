@@ -327,6 +327,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             ]
             consistent_outfit = random.choice(outfits)
             print(f"  🎽 Outfit chosen for entire book: {consistent_outfit}")
+            # שמור ב-story_data כדי שה-frontend יוכל להשתמש בו ב-regenerate
+            story_data['outfit'] = consistent_outfit
         
         if use_lora:
             print(f"  🎓 Creating {len(pages)} images with LoRA model!")
@@ -1196,7 +1198,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.send_json_response({'error': str(e)}, status=500)
     
     def handle_regenerate_image(self):
-        """מייצר תמונה מחדש עם הנחיות מהמשתמש"""
+        """מייצר תמונה מחדש עם הנחיות מהמשתמש - תומך ב-LoRA"""
         try:
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
@@ -1206,7 +1208,16 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             user_prompt = data.get('user_prompt', '').strip()
             child_photo = data.get('child_photo')
             
+            # 🎓 NEW: LoRA parameters
+            lora_url = data.get('lora_url')
+            trigger_word = data.get('trigger_word')
+            lora_version = data.get('lora_version')
+            outfit = data.get('outfit')  # שמירה על אחידות הביגוד
+            use_lora = bool(lora_url and trigger_word)
+            
             print(f"\n🎨 Regenerating image...")
+            if use_lora:
+                print(f"  🎓 Using LoRA: {trigger_word}")
             if user_prompt:
                 print(f"  👤 User request: {user_prompt[:50]}...")
             
@@ -1218,14 +1229,28 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             print(f"  📝 Final prompt: {final_prompt[:100]}...")
             
-            # Generate image with FLUX + IP-Adapter
-            image_url = self.generate_image_flux_with_face(final_prompt, child_photo)
+            # 🎓 STRATEGY 1: Use LoRA if available (preferred!)
+            if use_lora:
+                image_url = self.generate_image_with_lora(
+                    prompt=final_prompt,
+                    lora_url=lora_url,
+                    trigger_word=trigger_word,
+                    lora_version=lora_version,
+                    outfit=outfit
+                )
+                
+                if not image_url:
+                    print(f"  ⚠️  LoRA failed, falling back to FLUX...")
+                    image_url = self.generate_image_flux_with_face(final_prompt, child_photo)
+            else:
+                # STRATEGY 2: Fallback to FLUX + face swap
+                image_url = self.generate_image_flux_with_face(final_prompt, child_photo)
             
             if not image_url:
-                raise Exception("Leonardo failed to generate image")
+                raise Exception("Failed to generate image")
             
-            # Apply face swap if photo available
-            if child_photo and FAL_KEY and HAS_FAL:
+            # Apply face swap only if NOT using LoRA (LoRA already includes the child)
+            if not use_lora and child_photo and FAL_KEY and HAS_FAL:
                 print(f"  👤 Applying Fal.ai face swap...")
                 face_swapped = self.apply_fal_face_swap(image_url, child_photo)
                 if face_swapped:
@@ -1724,7 +1749,26 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             self.send_response(200)
             self.send_header('Content-Type', 'application/pdf')
-            self.send_header('Content-Disposition', f'attachment; filename="lilush_{child_name}.pdf"')
+            
+            # 🔧 FIX: תמיכה בשמות קבצים בעברית ע"פ RFC 5987
+            # HTTP headers תומכים רק ב-latin-1, אז בשביל עברית צריך:
+            # 1. filename ללא עברית (fallback) - תוויות בלטינית או ASCII בלבד
+            # 2. filename* עם UTF-8 encoding (תוסף RFC 5987)
+            try:
+                # נסה תחילה לקודד ב-latin-1 (אם השם באנגלית - זה יעבוד)
+                child_name.encode('latin-1')
+                # אם הצליח - שמור על השם המקורי
+                self.send_header('Content-Disposition', f'attachment; filename="lilush_{child_name}.pdf"')
+            except UnicodeEncodeError:
+                # אם יש תווי עברית - השתמש ב-RFC 5987
+                from urllib.parse import quote
+                ascii_fallback = "lilush_book.pdf"  # שם פשוט ללא עברית כ-fallback
+                utf8_filename = quote(f"lilush_{child_name}.pdf", safe='')
+                self.send_header(
+                    'Content-Disposition',
+                    f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{utf8_filename}'
+                )
+            
             self.send_header('Content-Length', len(pdf_data))
             self.end_headers()
             self.wfile.write(pdf_data)
