@@ -149,6 +149,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.handle_test_face_swap()
         elif self.path == '/api/start-lora-training':
             self.handle_start_lora_training()
+        elif self.path == '/api/preview-lora':  # 🆕 NEW: LoRA preview check
+            self.handle_preview_lora()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -211,6 +213,66 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             import traceback
             traceback.print_exc()
             self.send_json_response({'error': str(e)}, status=500)
+    
+    def handle_preview_lora(self):
+        """
+        🆕 יוצר תמונת תצוגה מקדימה אחת של הילד עם ה-LoRA המאומן.
+        זה לפני יצירת ספר שלם - כדי שהמשתמש יראה איך הילד נראה.
+        """
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            child_name = data.get('child_name', '')
+            lora_url = data.get('lora_url')
+            trigger_word = data.get('trigger_word')
+            lora_version = data.get('lora_version')
+            theme = data.get('theme', 'animals')
+            
+            if not lora_url or not trigger_word:
+                raise Exception('LoRA not configured for this child')
+            
+            print(f"\n🔍 Generating LoRA preview for: {child_name}")
+            print(f"   Trigger: {trigger_word}")
+            
+            # פרומפט בדיקה פשוט - מותאם לנושא הספר
+            theme_scenes = {
+                'animals': 'standing in a colorful zoo with friendly animals around, happy expression',
+                'family': 'sitting in a cozy living room with family members, warm atmosphere',
+                'space': 'floating in space with stars and planets around, amazed expression',
+                'magic': 'in a magical forest with sparkles and fairy lights, wondrous look'
+            }
+            scene = theme_scenes.get(theme, theme_scenes['animals'])
+            
+            # יצירת תמונה אחת לבדיקה - close-up כדי שהמשתמש יוכל לראות את הפנים בבירור
+            preview_image = self.generate_image_with_lora(
+                prompt=f"close-up shot, {scene}",
+                lora_url=lora_url,
+                trigger_word=trigger_word,
+                lora_version=lora_version
+            )
+            
+            if not preview_image:
+                raise Exception('Failed to generate preview image')
+            
+            print(f"   ✅ Preview ready!")
+            
+            self.send_json_response({
+                'success': True,
+                'preview_image': preview_image,
+                'child_name': child_name,
+                'message': f'תצוגה מקדימה של {child_name}'
+            })
+            
+        except Exception as e:
+            print(f"❌ Preview error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': str(e)
+            }, status=500)
     
     def create_story_with_claude(self, data):
         """יוצר סיפור עם Claude"""
@@ -1034,8 +1096,14 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
 - אל תכתוב "a boy with..." או "a child wearing..."
 - תאר רק: הסצנה, הפעולה, הרקע, האווירה, חיות/אובייקטים סביב
 
-✅ דוגמה טובה:
-   "sitting on a colorful playground, reaching toward a butterfly, sunny afternoon"
+🎯 חשוב: בלפחות חצי מהעמודים תאר תמונות "close-up" או חצי-גוף
+   שבהן הילד נראה מקרוב. במילים אנגליות: "close-up shot", "medium shot",
+   "the child up close", "facing the camera"
+
+✅ דוגמאות טובות:
+   "close-up shot of joyful expression while playing with friendly lions, sunny zoo background"
+   "medium shot, reaching toward a colorful butterfly on a playground, sunny afternoon"
+   "the child up close, smiling wide, surrounded by happy puppies in a garden"
 
 ❌ דוגמה רעה:
    "A boy with curly brown hair wearing green overalls sits on a playground"
@@ -1045,7 +1113,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
   "pages": [
     {
       "text": "הטקסט בעברית כאן...",
-      "illustration": "playing with friendly lions in colorful zoo, joyful expression, bright sunny day"
+      "illustration": "close-up shot, playing with friendly lions in colorful zoo, joyful expression, sunny day"
     }
   ]
 }
@@ -1473,19 +1541,20 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             if any(ord(c) > 127 for c in prompt):
                 prompt = self.translate_to_english(prompt)
             
-            # 🎯 בניית פרומפט אופטימלית עבור LoRA
-            # מבנה: trigger_word + (ביגוד אחיד אם יש) + פנים ברורות + הסצנה + סגנון
+            # 🎯 בניית פרומפט אופטימלית עבור LoRA - דגש על הפנים
+            # מבנה: trigger_word + ביגוד + דגש על פנים + הסצנה + סגנון
             outfit_part = f"{outfit}, " if outfit else ""
             
             full_prompt = (
                 f"{trigger_word} {outfit_part}"
-                f"as the main character, clear face, recognizable features, "
+                f"detailed facial features, recognizable face, expressive eyes, "
+                f"the child is the main focus of the scene, "
                 f"{prompt}, "
                 f"{style_prompt}"
             )
             
             print(f"  🎨 Generating with LoRA...")
-            print(f"  📝 Prompt: {full_prompt[:180]}...")
+            print(f"  📝 Prompt: {full_prompt[:200]}...")
             
             # 🔄 Retry logic for rate limit (429) errors
             def _run_with_retry(model_target, input_params, max_retries=3):
@@ -1521,7 +1590,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                         "guidance_scale": 3.5,
                         "output_quality": 90,
                         "num_inference_steps": 28,
-                        "lora_scale": 1.0,
+                        "lora_scale": 1.1,  # 🎯 Boosted - stronger LoRA influence on face
                         "disable_safety_checker": True
                     }
                 )
@@ -1533,7 +1602,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                     {
                         "prompt": full_prompt,
                         "lora_url": lora_url,
-                        "lora_scale": 1.0,
+                        "lora_scale": 1.1,  # 🎯 Boosted - stronger LoRA influence on face
                         "num_outputs": 1,
                         "aspect_ratio": "4:3",
                         "output_format": "jpg",
