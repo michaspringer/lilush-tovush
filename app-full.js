@@ -899,16 +899,24 @@ function startEdit(pageIndex) {
     if (cancelBtn) cancelBtn.style.display = 'inline-block';
 }
 
-function saveEdit(pageIndex) {
+async function saveEdit(pageIndex) {
     const textDiv = document.getElementById(`text-${pageIndex}`);
     const textarea = document.getElementById(`edit-${pageIndex}`);
     
     if (textarea && currentStory && currentStory.pages[pageIndex]) {
         const newText = textarea.value.trim();
-        if (newText) {
+        const oldText = currentStory.pages[pageIndex].text;
+        
+        if (newText && newText !== oldText) {
             currentStory.pages[pageIndex].text = newText;
             if (textDiv) textDiv.textContent = newText;
             StorageManager.saveCurrentStory(currentStory);
+            
+            cancelEdit(pageIndex);
+            
+            // 🆕 שאל אם להחליף תמונה כשהטקסט השתנה
+            await askToRegenerateImage(pageIndex, oldText, newText);
+            return;
         }
     }
     
@@ -969,9 +977,10 @@ async function suggestAlternatives(pageIndex) {
     }
 }
 
-function useAlternative(pageIndex, newText) {
+async function useAlternative(pageIndex, newText) {
     if (!currentStory || !currentStory.pages[pageIndex]) return;
     
+    const oldText = currentStory.pages[pageIndex].text;
     currentStory.pages[pageIndex].text = newText;
     
     const textDiv = document.getElementById(`text-${pageIndex}`);
@@ -983,6 +992,168 @@ function useAlternative(pageIndex, newText) {
     if (altContainer) altContainer.style.display = 'none';
     
     StorageManager.saveCurrentStory(currentStory);
+    
+    // 🆕 שאל אם להחליף תמונה כשהטקסט השתנה
+    await askToRegenerateImage(pageIndex, oldText, newText);
+}
+
+// ==========================================
+// 🆕 שאל אם להחליף תמונה אחרי שינוי טקסט
+// ==========================================
+async function askToRegenerateImage(pageIndex, oldText, newText) {
+    /**
+     * אחרי שטקסט עמוד השתנה, מציג חלון שואל אם ליצור תמונה חדשה.
+     * אם ההורה מאשר - הקוד יוצר תמונה חדשה שתואמת לטקסט החדש.
+     */
+    if (!currentStory || !currentStory.pages[pageIndex]) return;
+    
+    // בודק אם השינוי מספיק משמעותי כדי להציע (יותר מ-5 תווים שונים)
+    const significantChange = Math.abs(oldText.length - newText.length) > 5 || 
+                               oldText.split(' ').slice(0, 5).join(' ') !== newText.split(' ').slice(0, 5).join(' ');
+    
+    if (!significantChange) {
+        console.log('🔍 Text change too small, not asking for new image');
+        return;
+    }
+    
+    return new Promise((resolve) => {
+        // יצירת overlay מודלי
+        const overlay = document.createElement('div');
+        overlay.id = 'imageRegenOverlay';
+        overlay.style.cssText = `
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 10000;
+            font-family: inherit;
+        `;
+        
+        overlay.innerHTML = `
+            <div style="background: #fff; border-radius: 20px; padding: 2rem; max-width: 480px; width: 90%; text-align: right; box-shadow: 0 20px 60px rgba(0,0,0,0.4);">
+                <div style="text-align: center; font-size: 2.5rem; margin-bottom: 0.8rem;">🎨</div>
+                
+                <h2 style="margin: 0 0 0.5rem 0; color: #2A2118; font-size: 1.4rem; text-align: center;">
+                    הטקסט השתנה
+                </h2>
+                <p style="color: #5C4A35; margin-bottom: 1.5rem; font-size: 0.95rem; text-align: center;">
+                    האם ליצור גם תמונה חדשה שתתאים לטקסט?
+                </p>
+                
+                <div style="background: #FBF4E4; padding: 1rem; border-radius: 12px; margin-bottom: 1rem;">
+                    <div style="font-size: 0.8rem; color: #999; margin-bottom: 0.3rem;">📝 טקסט חדש:</div>
+                    <div style="color: #2A2118; font-size: 0.95rem;">${newText.substring(0, 200)}${newText.length > 200 ? '...' : ''}</div>
+                </div>
+                
+                <div style="display: flex; gap: 0.7rem; flex-direction: column;">
+                    <button id="regenYes" style="
+                        background: #C95E48; color: white; border: none;
+                        padding: 0.9rem 2rem; border-radius: 100px; cursor: pointer;
+                        font-size: 1rem; font-weight: 700; font-family: inherit;
+                    ">
+                        ✅ כן, צור תמונה חדשה
+                    </button>
+                    <button id="regenNo" style="
+                        background: transparent; color: #5C4A35;
+                        border: 2px solid rgba(0,0,0,0.1);
+                        padding: 0.7rem 1.5rem; border-radius: 100px; cursor: pointer;
+                        font-size: 0.95rem; font-weight: 600; font-family: inherit;
+                    ">
+                        ❌ לא, השאר את התמונה הנוכחית
+                    </button>
+                </div>
+                
+                <p style="color: #999; font-size: 0.8rem; text-align: center; margin-top: 1rem;">
+                    ⏱️ יצירת תמונה לוקחת ~10 שניות
+                </p>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        function cleanup() {
+            if (document.body.contains(overlay)) {
+                document.body.removeChild(overlay);
+            }
+        }
+        
+        document.getElementById('regenYes').onclick = async () => {
+            cleanup();
+            // קריאה ל-regenerate עם הטקסט החדש
+            await regenerateImageForUpdatedText(pageIndex, newText);
+            resolve(true);
+        };
+        
+        document.getElementById('regenNo').onclick = () => {
+            cleanup();
+            resolve(false);
+        };
+    });
+}
+
+async function regenerateImageForUpdatedText(pageIndex, newText) {
+    /**
+     * יוצר תמונה חדשה בהתבסס על טקסט עודכן.
+     * משתמש ב-LoRA אם קיים + outfit שנבחר.
+     */
+    const page = currentStory.pages[pageIndex];
+    
+    // קבלת LoRA אם קיים
+    const childLora = findLoraForChild(currentStory.childName || appState.bookData.childName);
+    
+    // קבלת תמונת ילד (אם אין LoRA)
+    const childPhoto = (currentStory.childPhotos && currentStory.childPhotos.length > 0) 
+        ? currentStory.childPhotos[0] 
+        : (uploadedPhotos.length > 0 ? uploadedPhotos[0] : null);
+    
+    console.log('🔄 Regenerating image for updated text:');
+    console.log('  📝 New text:', newText.substring(0, 80));
+    console.log('  🎓 With LoRA:', childLora ? `YES ✅ (${childLora.trigger_word})` : 'NO ❌');
+    console.log('  🎽 Outfit:', currentStory.outfit || 'random');
+    
+    showLoadingOverlay('מייצר תמונה חדשה שתתאים לטקסט... ⏳');
+    
+    try {
+        const response = await fetch(`${SERVER_CONFIG.url}/api/regenerate-image`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                // 🎯 חשוב! שולחים את הטקסט העברי החדש כ-page_text
+                // השרת יתרגם אותו ויבנה פרומפט מתאים
+                page_text: newText,  // הטקסט החדש בעברית
+                user_prompt: '',     // אין הוראה מיוחדת - רק התאמה לטקסט
+                child_photo: childPhoto,
+                lora_url: childLora ? childLora.lora_url : null,
+                trigger_word: childLora ? childLora.trigger_word : null,
+                lora_version: childLora ? childLora.version : null,
+                outfit: currentStory.outfit || null
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.imageUrl) {
+            // עדכון התמונה
+            page.imageUrl = data.imageUrl;
+            
+            // עדכון התצוגה
+            const imgElement = document.querySelector(`#page-${pageIndex} .page-image`);
+            if (imgElement) {
+                imgElement.src = data.imageUrl;
+            }
+            
+            // שמירה
+            StorageManager.saveCurrentStory(currentStory);
+            hideLoadingOverlay();
+            showSuccessMessage('✅ תמונה חדשה נוצרה ומותאמת לטקסט!');
+        } else {
+            throw new Error(data.error || 'Failed to regenerate image');
+        }
+        
+    } catch (error) {
+        console.error('Image regeneration error:', error);
+        hideLoadingOverlay();
+        alert('❌ לא הצלחתי ליצור תמונה חדשה. נסי שוב.');
+    }
 }
 
 // ==========================================
