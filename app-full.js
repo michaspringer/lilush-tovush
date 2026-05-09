@@ -1110,6 +1110,16 @@ async function regenerateImageForUpdatedText(pageIndex, newText) {
     console.log('  🎓 With LoRA:', childLora ? `YES ✅ (${childLora.trigger_word})` : 'NO ❌');
     console.log('  🎽 Outfit:', currentStory.outfit || 'random');
     
+    // 🎯 NEW: בנה Character descriptions מ-Character Bible אם יש
+    const characterDescriptions = [];
+    if (currentStory.character_bible && page.characters_in_scene) {
+        page.characters_in_scene.forEach(name => {
+            if (currentStory.character_bible[name]) {
+                characterDescriptions.push(currentStory.character_bible[name]);
+            }
+        });
+    }
+    
     showLoadingOverlay('מייצר תמונה חדשה שתתאים לטקסט... ⏳');
     
     try {
@@ -1125,7 +1135,8 @@ async function regenerateImageForUpdatedText(pageIndex, newText) {
                 lora_url: childLora ? childLora.lora_url : null,
                 trigger_word: childLora ? childLora.trigger_word : null,
                 lora_version: childLora ? childLora.version : null,
-                outfit: currentStory.outfit || null
+                outfit: currentStory.outfit || null,
+                character_descriptions: characterDescriptions  // 🆕
             })
         });
         
@@ -1316,9 +1327,20 @@ async function regenerateImage(pageIndex) {
     // 🎓 Check if there's a LoRA for this child
     const childLora = findLoraForChild(currentStory.childName || appState.bookData.childName);
     
+    // 🎯 NEW: בנה Character descriptions מ-Character Bible אם יש
+    const characterDescriptions = [];
+    if (currentStory.character_bible && page.characters_in_scene) {
+        page.characters_in_scene.forEach(name => {
+            if (currentStory.character_bible[name]) {
+                characterDescriptions.push(currentStory.character_bible[name]);
+            }
+        });
+    }
+    
     console.log('🎭 Regenerating image:');
     console.log('  📸 With photo:', childPhoto ? 'YES ✅' : 'NO ❌');
     console.log('  🎓 With LoRA:', childLora ? `YES ✅ (${childLora.trigger_word})` : 'NO ❌');
+    console.log('  📖 Characters:', characterDescriptions.length);
     
     // Close modal
     closeImageEditPopup();
@@ -1338,7 +1360,8 @@ async function regenerateImage(pageIndex) {
                 lora_url: childLora ? childLora.lora_url : null,
                 trigger_word: childLora ? childLora.trigger_word : null,
                 lora_version: childLora ? childLora.version : null,
-                outfit: currentStory.outfit || null  // לשמירה על אחידות אם נשמר
+                outfit: currentStory.outfit || null,
+                character_descriptions: characterDescriptions  // 🆕
             })
         });
         
