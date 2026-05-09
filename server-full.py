@@ -310,12 +310,24 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         
         use_lora = lora_url and trigger_word
         
-        # 🎽 NEW: בחירת ביגוד אחיד לכל הספר (כשמשתמשים ב-LoRA)
-        # זה מבטיח שהילד ילבש אותו דבר ב-12 העמודים, במקום לבוש אקראי שונה בכל עמוד
+        # 📖 NEW: Character Bible - מילון דמויות שClaude יצר
+        characters = story_data.get('characters', [])
+        char_dict = {}  # name -> english_description
+        for char in characters:
+            name = char.get('name', '').strip()
+            desc = char.get('english_description', '').strip()
+            if name and desc:
+                char_dict[name] = desc
+        
+        if char_dict:
+            print(f"  📖 Character Bible: {len(char_dict)} characters")
+            for name, desc in char_dict.items():
+                print(f"     - {name}: {desc[:60]}...")
+        
+        # 🎽 בחירת ביגוד אחיד לכל הספר
         consistent_outfit = None
         if use_lora:
             import random
-            # אוסף של ביגודים שמתאימים לילדים בספרי ילדים
             outfits = [
                 "wearing a yellow t-shirt and blue jeans",
                 "wearing a red striped shirt and khaki shorts",
@@ -327,8 +339,10 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             ]
             consistent_outfit = random.choice(outfits)
             print(f"  🎽 Outfit chosen for entire book: {consistent_outfit}")
-            # שמור ב-story_data כדי שה-frontend יוכל להשתמש בו ב-regenerate
             story_data['outfit'] = consistent_outfit
+        
+        # שמירת ה-Character Bible כך שיהיה זמין לrenegerate
+        story_data['character_bible'] = char_dict
         
         if use_lora:
             print(f"  🎓 Creating {len(pages)} images with LoRA model!")
@@ -342,30 +356,42 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"  🎨 Creating {len(pages)} images with FLUX (no child)...")
         
         for i, page in enumerate(pages):
-            print(f"  🖼️  Image {i+1}/{len(pages)}...")
+            print(f"\n  🖼️  Image {i+1}/{len(pages)}...")
             
-            # 🐌 Throttle - חכה בין בקשות LoRA כדי לא להיתפס ב-rate limit
-            if use_lora and i > 0:
-                wait_seconds = 11
-                print(f"  ⏱️  Waiting {wait_seconds}s before next request (rate limit protection)...")
+            # 🐌 Throttle - חכה בין בקשות LoRA
+            # 🎯 NEW: גם לפני הראשון! כי Claude קרא ל-API קודם וצורך 1 בקשה
+            if use_lora:
+                wait_seconds = 12 if i > 0 else 8  # Wait less before first since Claude was earlier
+                print(f"  ⏱️  Waiting {wait_seconds}s (rate limit protection)...")
                 time.sleep(wait_seconds)
             
             try:
                 if use_lora:
-                    # 🎓 מסלול LoRA - הילד מצוייר ישירות בסגנון illustration
+                    # 🎓 מסלול LoRA עם Character Bible
+                    illustration = page.get('illustration', '')
+                    chars_in_scene = page.get('characters_in_scene', [])
+                    
+                    # 🎯 בנה description עם Character Bible
+                    # אם יש דמויות - צרף את התיאורים שלהן לפני התיאור
+                    char_descriptions = []
+                    for char_name in chars_in_scene:
+                        if char_name in char_dict:
+                            char_descriptions.append(char_dict[char_name])
+                    
                     image_url = self.generate_image_with_lora(
-                        prompt=page['illustration'],
+                        prompt=illustration,
                         lora_url=lora_url,
                         trigger_word=trigger_word,
                         lora_version=lora_version,
-                        outfit=consistent_outfit  # 🎽 NEW
+                        outfit=consistent_outfit,
+                        character_descriptions=char_descriptions  # 🆕
                     )
                     
-                    # Fallback: אם LoRA נכשל, נסה FLUX רגיל
+                    # Fallback אם נכשל
                     if not image_url:
-                        print(f"  ⚠️  LoRA failed, falling back to FLUX...")
+                        print(f"  ⚠️  LoRA failed after retries, falling back to FLUX...")
                         image_url = self.generate_image_flux_with_face(
-                            page['illustration'],
+                            illustration,
                             child_photo
                         )
                 else:
@@ -1148,40 +1174,63 @@ Return ONLY the English description, nothing else."""
         
         # 🎯 שתי גרסאות שונות של הוראות תיאור התמונה - תלוי אם יש LoRA
         if use_lora:
-            # 🎓 גרסה ל-LoRA: תיאור קצר של הסצנה בלבד, ללא תיאור הילד!
+            # 🎓 גרסה ל-LoRA: Character Bible + הוראות מחמירות לדמות יחידה
             prompt += """
 חשוב מאוד! הוראות לכתיבת הסיפור:
 
-1. הטקסט (text): בעברית, מתאים לגיל
-2. תיאור התמונה (illustration): באנגלית, קצר ופשוט, 1-2 משפטים בלבד!
+📖 שלב ראשון - Character Bible (מילון דמויות):
+לפני העמודים, צור מילון של כל הדמויות (מלבד הילד הראשי).
+לכל דמות נוספת (חבר, חיה, יצור) - תן תיאור באנגלית קבוע ומפורט שיופיע בכל הספר.
 
-⚠️ כללים קריטיים לתיאור התמונה:
-- אל תתאר את המראה החיצוני של הילד (שיער, עיניים, גיל, פנים)
-- אל תתאר את הביגוד של הילד
-- אל תכתוב "a boy with..." או "a child wearing..."
-- תאר רק: הסצנה, הפעולה, הרקע, האווירה, חיות/אובייקטים סביב
+🚫 כללים קריטיים:
+1. אל תתאר את הילד הראשי בכלל - יש לו מודל מאומן!
+2. דמויות אחרות חייבות להיות בעלות תיאור באנגלית מפורט
+3. לכל סצנה - בחר אם הילד לבד או עם דמות אחת אחרת (לא יותר!)
 
-🎯 חשוב: בלפחות חצי מהעמודים תאר תמונות "close-up" או חצי-גוף
-   שבהן הילד נראה מקרוב. במילים אנגליות: "close-up shot", "medium shot",
-   "the child up close", "facing the camera"
+📝 מבנה הסיפור:
+- text (עברית): טקסט מתאים לגיל
+- illustration (אנגלית): SHORT description (10-15 words max)
+
+⚠️ כללים לתיאור תמונה:
+✓ אם רק הילד בסצנה: "alone, [scene], close-up shot"
+✓ אם יש דמות נוספת: "with [character description from bible], [scene]"
+✗ אל תכתוב על הילד: "boy with brown hair", "wearing blue", וכו'
+✗ אל תוסיף "another child" או "second kid" - גורם ל-AI לשכפל פנים!
 
 ✅ דוגמאות טובות:
-   "close-up shot of joyful expression while playing with friendly lions, sunny zoo background"
-   "medium shot, reaching toward a colorful butterfly on a playground, sunny afternoon"
-   "the child up close, smiling wide, surrounded by happy puppies in a garden"
+   "alone, close-up shot of joyful expression in colorful zoo, sunny day"
+   "with [the dog flick: small brown dog with floppy ears], playing in garden"
+   "alone, medium shot, reaching toward a butterfly, sunny afternoon"
 
-❌ דוגמה רעה:
-   "A boy with curly brown hair wearing green overalls sits on a playground"
+❌ דוגמאות רעות:
+   "with another child" → גורם לכפילות פנים!
+   "boy with friend playing" → AI ייצור 2 ילדים זהים!
+   "A boy wearing green plays with dog" → תיאור מיותר של הילד
 
-פורמט JSON:
+פורמט JSON מדויק:
 {
+  "characters": [
+    {
+      "name": "פליק",
+      "english_description": "small brown dog with floppy ears, fluffy fur, friendly eyes",
+      "type": "dog"
+    }
+  ],
   "pages": [
     {
-      "text": "הטקסט בעברית כאן...",
-      "illustration": "close-up shot, playing with friendly lions in colorful zoo, joyful expression, sunny day"
+      "text": "הטקסט בעברית...",
+      "illustration": "alone, playing in colorful zoo, joyful expression, close-up shot",
+      "characters_in_scene": []
+    },
+    {
+      "text": "דולב פגש את פליק...",
+      "illustration": "with the dog flick, sitting in green garden, sunny afternoon",
+      "characters_in_scene": ["פליק"]
     }
   ]
 }
+
+חשוב: אם characters ריק - הילד לבד בכל הסיפור (פשוט יותר ובטוח יותר).
 """
         else:
             # גרסה רגילה: תיאור מפורט (לFLUX רגיל)
@@ -1271,24 +1320,24 @@ Return ONLY the English description, nothing else."""
             user_prompt = data.get('user_prompt', '').strip()
             child_photo = data.get('child_photo')
             
-            # 🎓 NEW: LoRA parameters
+            # 🎓 LoRA parameters
             lora_url = data.get('lora_url')
             trigger_word = data.get('trigger_word')
             lora_version = data.get('lora_version')
-            outfit = data.get('outfit')  # שמירה על אחידות הביגוד
+            outfit = data.get('outfit')
+            character_descriptions = data.get('character_descriptions', [])  # 🆕
             use_lora = bool(lora_url and trigger_word)
             
             print(f"\n🎨 Regenerating image...")
             if use_lora:
                 print(f"  🎓 Using LoRA: {trigger_word}")
+            if character_descriptions:
+                print(f"  📖 Characters in scene: {len(character_descriptions)}")
             if user_prompt:
                 print(f"  👤 User request: {user_prompt[:50]}...")
             print(f"  📖 Page text: {page_text[:80]}...")
             
             # 🎯 NEW: אם הטקסט בעברית - בקש מ-Claude להפוך אותו לתיאור תמונה
-            # זה חשוב כי טקסט סיפור הוא לא בהכרח תיאור תמונה טוב!
-            # למשל: "ציפור צהובה התקרבה לדולב והגישה לו פרח" 
-            #     → תיאור תמונה: "yellow bird offering flower to child, garden, sunny day"
             if any(ord(c) > 127 for c in page_text):
                 print(f"  🔄 Converting Hebrew story text to image description...")
                 image_description = self._story_to_image_description(page_text)
@@ -1311,7 +1360,8 @@ Return ONLY the English description, nothing else."""
                     lora_url=lora_url,
                     trigger_word=trigger_word,
                     lora_version=lora_version,
-                    outfit=outfit
+                    outfit=outfit,
+                    character_descriptions=character_descriptions  # 🆕
                 )
                 
                 if not image_url:
@@ -1614,13 +1664,14 @@ Return ONLY the English description, nothing else."""
                 'error': str(e)
             }, status=500)
     
-    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration", lora_version=None, outfit=None):
+    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration", lora_version=None, outfit=None, character_descriptions=None):
         """יוצר תמונה עם LoRA מאומן.
         
         אם lora_version קיים - משתמשים במודל המאומן ישירות (האסטרטגיה הטובה יותר!)
         אחרת - נופלים חזרה ל-ostris/flux-dev-lora (legacy)
         
         אם outfit ניתן - הילד ילבש את אותו ביגוד בכל התמונות בספר.
+        אם character_descriptions ניתן - מוסיפים תיאור דמויות נלוות (כלב, חבר, וכו').
         """
         try:
             if not HAS_REPLICATE:
@@ -1641,20 +1692,44 @@ Return ONLY the English description, nothing else."""
             if any(ord(c) > 127 for c in prompt):
                 prompt = self.translate_to_english(prompt)
             
-            # 🎯 בניית פרומפט אופטימלית עבור LoRA - דגש על הפנים
-            # מבנה: trigger_word + ביגוד + דגש על פנים + הסצנה + סגנון
+            # 🎯 בניית פרומפט אופטימלית עבור LoRA
             outfit_part = f"{outfit}, " if outfit else ""
             
-            full_prompt = (
-                f"{trigger_word} {outfit_part}"
-                f"detailed facial features, recognizable face, expressive eyes, "
-                f"the child is the main focus of the scene, "
-                f"{prompt}, "
-                f"{style_prompt}"
-            )
+            # 📖 NEW: הוספת Character Bible descriptions
+            char_part = ""
+            has_other_chars = False
+            if character_descriptions:
+                char_part = "with " + ", ".join(character_descriptions) + ", "
+                has_other_chars = True
+            
+            # 🎯 שני סוגי פרומפטים - אם יש דמות אחרת או רק הילד
+            if has_other_chars:
+                # יש כלב/חבר - להבהיר שאת FLUX יש רק ילד אחד!
+                full_prompt = (
+                    f"a single child {trigger_word} {outfit_part}"
+                    f"detailed facial features, recognizable face, "
+                    f"{char_part}"  # תיאור דמויות אחרות
+                    f"{prompt}, "
+                    f"{style_prompt}"
+                )
+            else:
+                # רק הילד לבד
+                full_prompt = (
+                    f"{trigger_word} {outfit_part}"
+                    f"detailed facial features, recognizable face, expressive eyes, "
+                    f"the child is the main focus of the scene, "
+                    f"{prompt}, "
+                    f"{style_prompt}"
+                )
+            
+            # 🚫 NEW: Negative prompt - אסור ב-FLUX dev אבל נשמר לתיעוד
+            # FLUX לא תומך ב-negative_prompt רשמי, אבל אפשר להוסיף "no X" בפרומפט
+            # לכן נוסיף אותם ישר לפרומפט הראשי
+            if has_other_chars:
+                full_prompt += ", only one child in the scene, no twins, no duplicate children"
             
             print(f"  🎨 Generating with LoRA...")
-            print(f"  📝 Prompt: {full_prompt[:200]}...")
+            print(f"  📝 Prompt: {full_prompt[:250]}...")
             
             # 🔄 Retry logic for rate limit (429) errors
             def _run_with_retry(model_target, input_params, max_retries=3):
@@ -1818,9 +1893,36 @@ Return ONLY the English description, nothing else."""
             c = canvas.Canvas(buffer, pagesize=A4)
             width, height = A4
             
-            # Register Hebrew font
+            # 🇮🇱 NEW: הורדה אוטומטית של פונט עברי אמיתי מ-Google Fonts
+            # זה מבטיח שעברית תיראה תקין ב-PDF, ולא ג'יבריש
+            HEBREW_FONT_PATH = '/tmp/NotoSansHebrew-Regular.ttf'
+            
+            if not os.path.exists(HEBREW_FONT_PATH):
+                try:
+                    print(f"   🌐 Downloading Hebrew font from Google Fonts...")
+                    font_url = "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansHebrew/NotoSansHebrew-Regular.ttf"
+                    
+                    ctx = ssl.create_default_context()
+                    ctx.check_hostname = False
+                    ctx.verify_mode = ssl.CERT_NONE
+                    
+                    req = urllib.request.Request(
+                        font_url,
+                        headers={'User-Agent': 'Mozilla/5.0'}
+                    )
+                    with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
+                        font_data = response.read()
+                    
+                    with open(HEBREW_FONT_PATH, 'wb') as f:
+                        f.write(font_data)
+                    print(f"   ✅ Hebrew font downloaded: {len(font_data)} bytes")
+                except Exception as font_err:
+                    print(f"   ⚠️ Failed to download Hebrew font: {font_err}")
+            
+            # Register Hebrew font - first try the downloaded one, then system fonts
             hebrew_font = 'Helvetica'
             font_paths = [
+                HEBREW_FONT_PATH,  # 🥇 First try our downloaded font
                 '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
                 '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
                 '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
@@ -1830,11 +1932,13 @@ Return ONLY the English description, nothing else."""
             
             for font_path in font_paths:
                 try:
-                    pdfmetrics.registerFont(TTFont('Hebrew', font_path))
-                    hebrew_font = 'Hebrew'
-                    print(f"   📝 Font registered: {font_path}")
-                    break
-                except:
+                    if os.path.exists(font_path):
+                        pdfmetrics.registerFont(TTFont('Hebrew', font_path))
+                        hebrew_font = 'Hebrew'
+                        print(f"   📝 Font registered: {font_path}")
+                        break
+                except Exception as e:
+                    print(f"   ⚠️ Font failed: {font_path} - {e}")
                     continue
             
             # ====== Cover Page ======
