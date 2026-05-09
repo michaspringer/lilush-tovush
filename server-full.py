@@ -1,5 +1,5 @@
 // ==========================================
-// 🌐 Server Configuration
+//  Server Configuration
 // ==========================================
 const SERVER_CONFIG = {
     url: 'https://web-production-ec858.up.railway.app'
