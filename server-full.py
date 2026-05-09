@@ -658,6 +658,69 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"  ⚠️ Translation failed: {str(e)}, using original")
             return hebrew_text
     
+    def _story_to_image_description(self, hebrew_story_text):
+        """
+        🎯 ממיר טקסט סיפור בעברית לתיאור תמונה באנגלית.
+        
+        זה שונה מ-translate_to_english:
+        - translate_to_english: תרגום ישר של תיאור תמונה
+        - _story_to_image_description: מתחקר טקסט סיפור ומחזיר תיאור ויזואלי בלבד
+        
+        דוגמה:
+        טקסט: "ציפור צהובה התקרבה לדולב והגישה לו פרח אדום"
+        חוזר: "yellow bird offering red flower, garden, sunny day"
+        """
+        try:
+            if not CLAUDE_API_KEY:
+                return hebrew_story_text
+            
+            prompt = f"""Convert this Hebrew children's story sentence into a SHORT English image description (max 15 words).
+
+CRITICAL RULES:
+1. Describe ONLY what should be VISUALLY in the image (the scene, the action, objects)
+2. DO NOT describe the child's appearance (hair, eyes, age, clothes) - we have a special model for that
+3. DO NOT mention the child's name
+4. Focus on: the action, other characters, environment, mood, colors
+
+Hebrew text: "{hebrew_story_text}"
+
+Examples of good descriptions:
+- "yellow bird offering red flower, garden, sunny day"
+- "playing with friendly puppy on grass, afternoon light"
+- "swimming with colorful fish in clear ocean"
+- "reaching up to touch the moon, starry night sky"
+
+Return ONLY the English description, nothing else."""
+            
+            claude_request = {
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 100,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'x-api-key': CLAUDE_API_KEY,
+                'anthropic-version': '2023-06-01'
+            }
+            
+            req = urllib.request.Request(
+                CLAUDE_API_URL,
+                data=json.dumps(claude_request).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response_data = json.loads(response.read().decode('utf-8'))
+                description = response_data['content'][0]['text'].strip()
+                print(f"  🎨 Image description: {description}")
+                return description
+                
+        except Exception as e:
+            print(f"  ⚠️ Story-to-image conversion failed: {str(e)}, falling back to translation")
+            return self.translate_to_english(hebrew_story_text)
+    
     def generate_image_flux_with_face(self, prompt, child_photo=None):
         """יצירת תמונה עם FLUX + InstantID - הילד מצוייר באיור!"""
         try:
@@ -1220,12 +1283,24 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 print(f"  🎓 Using LoRA: {trigger_word}")
             if user_prompt:
                 print(f"  👤 User request: {user_prompt[:50]}...")
+            print(f"  📖 Page text: {page_text[:80]}...")
             
-            # Combine user prompt with original text
-            if user_prompt:
-                final_prompt = f"{user_prompt}, {page_text}"
+            # 🎯 NEW: אם הטקסט בעברית - בקש מ-Claude להפוך אותו לתיאור תמונה
+            # זה חשוב כי טקסט סיפור הוא לא בהכרח תיאור תמונה טוב!
+            # למשל: "ציפור צהובה התקרבה לדולב והגישה לו פרח" 
+            #     → תיאור תמונה: "yellow bird offering flower to child, garden, sunny day"
+            if any(ord(c) > 127 for c in page_text):
+                print(f"  🔄 Converting Hebrew story text to image description...")
+                image_description = self._story_to_image_description(page_text)
+                print(f"  📝 Image description: {image_description[:80]}...")
             else:
-                final_prompt = page_text
+                image_description = page_text
+            
+            # Combine user prompt with image description
+            if user_prompt:
+                final_prompt = f"{user_prompt}, {image_description}"
+            else:
+                final_prompt = image_description
             
             print(f"  📝 Final prompt: {final_prompt[:100]}...")
             
