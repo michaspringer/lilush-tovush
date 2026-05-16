@@ -236,18 +236,20 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"\n🔍 Generating LoRA preview for: {child_name}")
             print(f"   Trigger: {trigger_word}")
             
-            # פרומפט בדיקה פשוט - מותאם לנושא הספר
+            # 🛡️ פרומפט בדיקה - תמיד ילד יחיד, ללא אנשים נוספים!
+            # חשוב: לא להזכיר "family members" או "friends" - גורם לשכפול דמות
             theme_scenes = {
-                'animals': 'standing in a colorful zoo with friendly animals around, happy expression',
-                'family': 'sitting in a cozy living room with family members, warm atmosphere',
-                'space': 'floating in space with stars and planets around, amazed expression',
-                'magic': 'in a magical forest with sparkles and fairy lights, wondrous look'
+                'animals': 'in a colorful zoo, friendly cartoon animals in the background, happy smile',
+                'family': 'in a cozy warm living room, soft sunlight, happy smile',
+                'space': 'floating among stars and colorful planets, amazed happy expression',
+                'magic': 'in a magical sparkling forest with glowing lights, wondrous happy look'
             }
             scene = theme_scenes.get(theme, theme_scenes['animals'])
             
-            # יצירת תמונה אחת לבדיקה - close-up כדי שהמשתמש יוכל לראות את הפנים בבירור
+            # יצירת תמונה אחת לבדיקה
+            # medium shot (לא close-up) - עקבי עם הספר, מונע שכפול וריאליזם
             preview_image = self.generate_image_with_lora(
-                prompt=f"close-up shot, {scene}",
+                prompt=f"medium shot, {scene}",
                 lora_url=lora_url,
                 trigger_word=trigger_word,
                 lora_version=lora_version
@@ -1795,10 +1797,20 @@ Return ONLY the English description, nothing else."""
                 has_other_chars = True
             
             # 🛡️ FIX 1: מניעת שכפול דמות - מילים מפורשות ל-FLUX
-            single_child_directive = (
-                "solo portrait of one single child, "
-                "exactly one child in the entire image, "
-            )
+            # שני directives שונים - תלוי אם יש דמות נוספת בסצנה
+            if has_other_chars:
+                # יש כלב/אמא וכו' - ילד אחד + הדמות, בלי לשכפל את הילד
+                single_child_directive = (
+                    "exactly one child only, the child appears once, "
+                    "no duplicate of the child, no repeated child figure, "
+                )
+            else:
+                # רק הילד - דמות יחידה לחלוטין
+                single_child_directive = (
+                    "solo portrait of one single child, "
+                    "exactly one child in the entire image, "
+                    "only one person, no duplicate figures, no repeated child, "
+                )
             
             # 🧹 FIX 2: ניקוי שוליים - למנוע רגליים/ידיים חתוכות
             clean_composition = (
@@ -1806,14 +1818,13 @@ Return ONLY the English description, nothing else."""
                 "full scene visible, no cropped people, no body parts at edges"
             )
             
-            # 🎨 FIX 3: עיגון סגנון איור - "Sandwich technique"
-            # מציבים הוראת סגנון גם בהתחלה וגם בסוף, כדי שכל העמודים
-            # יהיו עקביים ולא יסטו לריאליזם (קורה במיוחד ב-close-up shots)
-            style_anchor_start = "a flat 2D children's book illustration, hand-drawn art style, "
+            # 🎨 FIX 3: עיגון סגנון איור רך - "Sandwich technique" מאוזן
+            # מטרה: סגנון איור עקבי, אבל בלי לדחוף חזק מדי (שמחליש את ה-LoRA)
+            # עיגון רך שומר על דמיון הילד + נותן תחושת ספר ילדים
+            style_anchor_start = "a warm children's book illustration, soft digital painting style, "
             style_anchor_end = (
-                ", consistent storybook illustration art, "
-                "NOT a photograph, NOT realistic, NOT 3D render, "
-                "flat illustration with soft outlines and warm colors"
+                ", consistent storybook illustration, "
+                "painterly art style, warm soft colors, gentle lighting"
             )
             
             # 🎯 בניית הפרומפט - מבנה אחיד וברור עם עיגון סגנון
@@ -1879,7 +1890,7 @@ Return ONLY the English description, nothing else."""
                         "guidance_scale": 3.5,
                         "output_quality": 90,
                         "num_inference_steps": 28,
-                        "lora_scale": 0.95,  # 🎯 Balanced - strong enough for face, prevents duplication
+                        "lora_scale": 1.0,  # 🎯 Strong enough for recognition, soft style anchor prevents realism drift
                         "disable_safety_checker": True
                     }
                 )
@@ -1891,7 +1902,7 @@ Return ONLY the English description, nothing else."""
                     {
                         "prompt": full_prompt,
                         "lora_url": lora_url,
-                        "lora_scale": 0.95,  # 🎯 Balanced - strong enough for face, prevents duplication
+                        "lora_scale": 1.0,  # 🎯 Strong enough for recognition, soft style anchor prevents realism drift
                         "num_outputs": 1,
                         "aspect_ratio": "4:3",
                         "output_format": "jpg",
