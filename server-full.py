@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Children's Book Generator - Full Server 1
+Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 """
 
@@ -1275,16 +1275,21 @@ Return ONLY the English description, nothing else."""
 - illustration (אנגלית): description שכולל את כל האלמנטים מהטקסט (15-25 words)
 
 ⚠️ כללים לתיאור תמונה:
-✓ אם רק הילד בסצנה: "alone, [scene with all objects], close-up shot"
+✓ אם רק הילד בסצנה: "alone, [scene with all objects], medium shot"
 ✓ אם יש דמות/חיה: "with [full description], [scene with all objects]"
 ✗ אל תתאר את הילד: "boy with brown hair", "wearing blue" - אסור!
 ✗ אל תכתוב "another child" / "second kid" - גורם לשכפול פנים!
 ✗ אל תשכח אף יצור/אובייקט שמוזכר בטקסט!
 
+📏 סוג צילום - השתמש ב-"medium shot" ברוב העמודים:
+- "medium shot" - הילד נראה מהמותניים ומעלה (מומלץ ברירת מחדל)
+- "wide shot" - סצנה מלאה (טוב לעמודי פתיחה/סיום)
+- הימנע מ-"close-up" קיצוני - זה גורם לסגנון לא עקבי בין עמודים
+
 ✅ דוגמאות טובות:
-   "alone, joyful in colorful zoo with lions and giraffes, close-up shot, sunny day"
-   "with a large grey elephant lifting the child with its trunk, jungle, bright daylight"
-   "alone, holding a red balloon, reaching toward a yellow butterfly, green park"
+   "alone, joyful in colorful zoo with lions and giraffes, medium shot, sunny day"
+   "with a large grey elephant lifting the child with its trunk, jungle, wide shot"
+   "alone, holding a red balloon, reaching toward a yellow butterfly, green park, medium shot"
 
 ❌ דוגמאות רעות:
    "with another child" → גורם לכפילות פנים!
@@ -1790,7 +1795,6 @@ Return ONLY the English description, nothing else."""
                 has_other_chars = True
             
             # 🛡️ FIX 1: מניעת שכפול דמות - מילים מפורשות ל-FLUX
-            # תמיד, בכל פרומפט - להבהיר שיש ילד אחד בלבד
             single_child_directive = (
                 "solo portrait of one single child, "
                 "exactly one child in the entire image, "
@@ -1802,26 +1806,40 @@ Return ONLY the English description, nothing else."""
                 "full scene visible, no cropped people, no body parts at edges"
             )
             
-            # 🎯 בניית הפרומפט - מבנה אחיד וברור
+            # 🎨 FIX 3: עיגון סגנון איור - "Sandwich technique"
+            # מציבים הוראת סגנון גם בהתחלה וגם בסוף, כדי שכל העמודים
+            # יהיו עקביים ולא יסטו לריאליזם (קורה במיוחד ב-close-up shots)
+            style_anchor_start = "a flat 2D children's book illustration, hand-drawn art style, "
+            style_anchor_end = (
+                ", consistent storybook illustration art, "
+                "NOT a photograph, NOT realistic, NOT 3D render, "
+                "flat illustration with soft outlines and warm colors"
+            )
+            
+            # 🎯 בניית הפרומפט - מבנה אחיד וברור עם עיגון סגנון
             if has_other_chars:
                 # יש דמות נוספת (כלב/חבר) - הילד + הדמות, אבל ילד אחד בלבד
                 full_prompt = (
+                    f"{style_anchor_start}"
                     f"{single_child_directive}"
                     f"{trigger_word} {outfit_part}"
                     f"detailed facial features, recognizable face, "
                     f"{char_part}"
                     f"{prompt}, "
                     f"{style_prompt}, {clean_composition}"
+                    f"{style_anchor_end}"
                 )
             else:
                 # רק הילד לבד
                 full_prompt = (
+                    f"{style_anchor_start}"
                     f"{single_child_directive}"
                     f"{trigger_word} {outfit_part}"
                     f"detailed facial features, recognizable face, expressive eyes, "
                     f"the child is the main focus of the scene, "
                     f"{prompt}, "
                     f"{style_prompt}, {clean_composition}"
+                    f"{style_anchor_end}"
                 )
             
             print(f"  🎨 Generating with LoRA...")
