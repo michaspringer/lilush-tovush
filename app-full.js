@@ -1136,7 +1136,8 @@ async function regenerateImageForUpdatedText(pageIndex, newText) {
                 trigger_word: childLora ? childLora.trigger_word : null,
                 lora_version: childLora ? childLora.version : null,
                 outfit: currentStory.outfit || null,
-                character_descriptions: characterDescriptions  // 🆕
+                character_descriptions: characterDescriptions,
+                character_bible: currentStory.character_bible || {}  // 🆕
             })
         });
         
@@ -1361,7 +1362,8 @@ async function regenerateImage(pageIndex) {
                 trigger_word: childLora ? childLora.trigger_word : null,
                 lora_version: childLora ? childLora.version : null,
                 outfit: currentStory.outfit || null,
-                character_descriptions: characterDescriptions  // 🆕
+                character_descriptions: characterDescriptions,
+                character_bible: currentStory.character_bible || {}  // 🆕
             })
         });
         
