@@ -151,6 +151,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.handle_start_lora_training()
         elif self.path == '/api/preview-lora':  # 🆕 NEW: LoRA preview check
             self.handle_preview_lora()
+        elif self.path == '/api/preview-options':  # 🆕 NEW: 3 preview options
+            self.handle_preview_options()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -173,6 +175,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             lora_version = request_data.get('lora_version')  # 🆕 NEW: trained model version
             use_lora = request_data.get('use_lora', False) and lora_url and trigger_word
             
+            # 🎲 NEW: chosen seed - ה-seed שההורה בחר בתצוגה המקדימה
+            chosen_seed = request_data.get('chosen_seed')
+            
             print(f"\n📖 Creating story for: {child_name}")
             if use_lora:
                 print(f"🎓 USING TRAINED LoRA MODEL!")
@@ -180,6 +185,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 print(f"   LoRA URL: {lora_url[:80]}...")
                 if lora_version:
                     print(f"   Version: {lora_version[:80]}...")
+                if chosen_seed is not None:
+                    print(f"   🎲 Chosen seed: {chosen_seed} (consistent for whole book)")
             elif child_photo:
                 print("📸 Photo uploaded - will use FLUX face swap")
             if ai_model_id:
@@ -193,13 +200,14 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             if IMAGE_MODE != 'none' and story_data.get('pages'):
                 print(f"🎨 Step 2: Generating images ({IMAGE_MODE})...")
-                # 🎓 העבר את ה-LoRA לפונקציה
+                # 🎓 העבר את ה-LoRA ואת ה-seed לפונקציה
                 story_data = self.add_images_to_story(
                     story_data,
                     child_photo,
                     lora_url=lora_url if use_lora else None,
                     trigger_word=trigger_word if use_lora else None,
-                    lora_version=lora_version if use_lora else None
+                    lora_version=lora_version if use_lora else None,
+                    chosen_seed=chosen_seed  # 🎲 עקביות לכל הספר
                 )
             
             print("✅ Story complete!")
@@ -276,6 +284,94 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 'error': str(e)
             }, status=500)
     
+    def handle_preview_options(self):
+        """
+        🆕 יוצר 3 תמונות תצוגה מקדימה במקביל - כל אחת עם seed שונה.
+        ההורה יבחר את הטובה ביותר, וה-seed שלה יישמר לכל הספר (עקביות!).
+        """
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            child_name = data.get('child_name', '')
+            lora_url = data.get('lora_url')
+            trigger_word = data.get('trigger_word')
+            lora_version = data.get('lora_version')
+            theme = data.get('theme', 'animals')
+            
+            if not lora_url or not trigger_word:
+                raise Exception('LoRA not configured for this child')
+            
+            print(f"\n🎨 Generating 3 preview options for: {child_name}")
+            print(f"   Trigger: {trigger_word}")
+            
+            # 🛡️ סצנת בדיקה - תמיד ילד יחיד, ללא אנשים נוספים
+            theme_scenes = {
+                'animals': 'in a colorful zoo, friendly cartoon animals in the background, happy smile',
+                'family': 'in a cozy warm living room, soft sunlight, happy smile',
+                'space': 'floating among stars and colorful planets, amazed happy expression',
+                'magic': 'in a magical sparkling forest with glowing lights, wondrous happy look'
+            }
+            scene = theme_scenes.get(theme, theme_scenes['animals'])
+            
+            # 🎲 3 seeds קבועים ושונים - כל אחד ייתן תמונה אחרת
+            import random
+            seeds = [random.randint(1, 999999) for _ in range(3)]
+            print(f"   🎲 Seeds: {seeds}")
+            
+            # 🚀 יצירת 3 התמונות במקביל (threads)
+            import threading
+            results = [None, None, None]
+            
+            def generate_one(index, seed):
+                try:
+                    print(f"   🖼️  Option {index+1}/3 (seed={seed})...")
+                    img = self.generate_image_with_lora(
+                        prompt=f"medium shot, {scene}",
+                        lora_url=lora_url,
+                        trigger_word=trigger_word,
+                        lora_version=lora_version,
+                        seed=seed
+                    )
+                    results[index] = {'image': img, 'seed': seed}
+                except Exception as e:
+                    print(f"   ⚠️ Option {index+1} failed: {e}")
+                    results[index] = None
+            
+            threads = []
+            for i, seed in enumerate(seeds):
+                t = threading.Thread(target=generate_one, args=(i, seed))
+                threads.append(t)
+                t.start()
+            
+            # המתנה לסיום כל ה-threads
+            for t in threads:
+                t.join()
+            
+            # סינון תוצאות שהצליחו
+            options = [r for r in results if r and r.get('image')]
+            
+            if not options:
+                raise Exception('Failed to generate any preview options')
+            
+            print(f"   ✅ {len(options)}/3 preview options ready!")
+            
+            self.send_json_response({
+                'success': True,
+                'options': options,  # [{image, seed}, ...]
+                'child_name': child_name
+            })
+            
+        except Exception as e:
+            print(f"❌ Preview options error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+    
     def create_story_with_claude(self, data):
         """יוצר סיפור עם Claude"""
         prompt = self.build_story_prompt(data)
@@ -306,8 +402,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             story_data = json.loads(clean_content)
             return story_data
     
-    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None, lora_version=None):
-        """מוסיף תמונות לסיפור - עם LoRA אם יש, אחרת FLUX + face swap"""
+    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None, lora_version=None, chosen_seed=None):
+        """מוסיף תמונות לסיפור - עם LoRA אם יש, אחרת FLUX + face swap.
+        
+        chosen_seed: אם ניתן - כל עמודי הספר ישתמשו ב-seed הזה (עקביות מלאה!).
+        """
         pages = story_data.get('pages', [])
         
         use_lora = lora_url and trigger_word
@@ -400,7 +499,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                         trigger_word=trigger_word,
                         lora_version=lora_version,
                         outfit=consistent_outfit,
-                        character_descriptions=char_descriptions  # 🆕
+                        character_descriptions=char_descriptions,  # 🆕
+                        seed=chosen_seed  # 🎲 אותו seed לכל הספר - עקביות!
                     )
                     
                     # Fallback אם נכשל
@@ -1758,7 +1858,7 @@ Return ONLY the English description, nothing else."""
                 'error': str(e)
             }, status=500)
     
-    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration", lora_version=None, outfit=None, character_descriptions=None):
+    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration", lora_version=None, outfit=None, character_descriptions=None, seed=None):
         """יוצר תמונה עם LoRA מאומן.
         
         אם lora_version קיים - משתמשים במודל המאומן ישירות (האסטרטגיה הטובה יותר!)
@@ -1877,41 +1977,35 @@ Return ONLY the English description, nothing else."""
                 # אם הגענו לכאן - כל הניסיונות נכשלו
                 raise last_error
             
+            # 🎲 בניית input params - עם seed אם ניתן (לעקביות)
+            base_input = {
+                "num_outputs": 1,
+                "aspect_ratio": "4:3",
+                "output_format": "jpg",
+                "guidance_scale": 3.5,
+                "output_quality": 90,
+                "num_inference_steps": 28,
+                "disable_safety_checker": True
+            }
+            if seed is not None:
+                base_input["seed"] = int(seed)
+                print(f"  🎲 Using fixed seed: {seed}")
+            
             # 🎯 STRATEGY 1 (Preferred): Use the trained model directly
             if lora_version:
                 print(f"  📌 Using trained model directly (best quality)")
-                output = _run_with_retry(
-                    lora_version,  # e.g. "michaspringer/child-1778184587-lora:f3d7fd3864cfb307..."
-                    {
-                        "prompt": full_prompt,
-                        "num_outputs": 1,
-                        "aspect_ratio": "4:3",
-                        "output_format": "jpg",
-                        "guidance_scale": 3.5,
-                        "output_quality": 90,
-                        "num_inference_steps": 28,
-                        "lora_scale": 1.0,  # 🎯 Strong enough for recognition, soft style anchor prevents realism drift
-                        "disable_safety_checker": True
-                    }
-                )
+                strategy1_input = dict(base_input)
+                strategy1_input["prompt"] = full_prompt
+                strategy1_input["lora_scale"] = 1.0
+                output = _run_with_retry(lora_version, strategy1_input)
             else:
                 # 🔧 STRATEGY 2 (Fallback/Legacy): Use ostris/flux-dev-lora with weights URL
                 print(f"  ⚠️  No version, using legacy ostris/flux-dev-lora")
-                output = _run_with_retry(
-                    "ostris/flux-dev-lora",
-                    {
-                        "prompt": full_prompt,
-                        "lora_url": lora_url,
-                        "lora_scale": 1.0,  # 🎯 Strong enough for recognition, soft style anchor prevents realism drift
-                        "num_outputs": 1,
-                        "aspect_ratio": "4:3",
-                        "output_format": "jpg",
-                        "guidance_scale": 3.5,
-                        "output_quality": 90,
-                        "num_inference_steps": 28,
-                        "disable_safety_checker": True
-                    }
-                )
+                strategy2_input = dict(base_input)
+                strategy2_input["prompt"] = full_prompt
+                strategy2_input["lora_url"] = lora_url
+                strategy2_input["lora_scale"] = 1.0
+                output = _run_with_retry("ostris/flux-dev-lora", strategy2_input)
             
             if output and len(output) > 0:
                 image_url = output[0]
