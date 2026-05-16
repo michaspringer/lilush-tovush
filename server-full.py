@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Children's Book Generator - Full Server
+Children's Book Generator - Full Server 1
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 """
 
@@ -369,14 +369,28 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 if use_lora:
                     # 🎓 מסלול LoRA עם Character Bible
                     illustration = page.get('illustration', '')
+                    page_text = page.get('text', '')  # הטקסט העברי של העמוד
                     chars_in_scene = page.get('characters_in_scene', [])
                     
+                    # 🛡️ FIX: זיהוי אוטומטי של דמויות בעמוד
+                    # לא סומכים רק על characters_in_scene של Claude!
+                    # סורקים את הטקסט והתיאור - אם שם דמות מופיע, מוסיפים אותה
+                    detected_chars = set(chars_in_scene)
+                    for char_name in char_dict.keys():
+                        # בדיקה אם שם הדמות מופיע בטקסט העברי או בתיאור
+                        if char_name in page_text or char_name in illustration:
+                            if char_name not in detected_chars:
+                                detected_chars.add(char_name)
+                                print(f"  🔍 Auto-detected character '{char_name}' in page text")
+                    
                     # 🎯 בנה description עם Character Bible
-                    # אם יש דמויות - צרף את התיאורים שלהן לפני התיאור
                     char_descriptions = []
-                    for char_name in chars_in_scene:
+                    for char_name in detected_chars:
                         if char_name in char_dict:
                             char_descriptions.append(char_dict[char_name])
+                    
+                    if char_descriptions:
+                        print(f"  📖 Using {len(char_descriptions)} character description(s) from Bible")
                     
                     image_url = self.generate_image_with_lora(
                         prompt=illustration,
@@ -644,16 +658,28 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             return None
     
     def translate_to_english(self, hebrew_text):
-        """תרגום תיאור תמונה מעברית לאנגלית"""
+        """תרגום תיאור תמונה מעברית לאנגלית - מודע להקשר של ספרי ילדים"""
         try:
             if not CLAUDE_API_KEY:
                 return hebrew_text  # Fallback
             
-            prompt = f"""תרגם את התיאור הבא לאנגלית בצורה מדויקת ומפורטת:
+            prompt = f"""You are translating a scene description for a children's book illustration from Hebrew to English.
 
-"{hebrew_text}"
+Hebrew description: "{hebrew_text}"
 
-תן רק את התרגום באנגלית, ללא הסברים."""
+CRITICAL translation rules:
+1. This is a CHILDREN'S BOOK scene - translate concretely and literally
+2. Watch for animal body parts - translate them EXACTLY:
+   - "חדק" = "trunk" (elephant's trunk) - NEVER "snake"!
+   - "זנב" = "tail"
+   - "כנף" = "wing"
+   - "טלף" = "hoof"
+   - "קרן" = "horn"
+3. If an animal is mentioned, ALWAYS name the animal explicitly in English
+4. Translate every object and creature mentioned - don't drop anything
+5. Be vivid and specific so an illustrator can draw it accurately
+
+Return ONLY the English translation, no explanations."""
             
             claude_request = {
                 "model": "claude-sonnet-4-20250514",
@@ -677,20 +703,22 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             with urllib.request.urlopen(req, timeout=30) as response:
                 response_data = json.loads(response.read().decode('utf-8'))
                 english_text = response_data['content'][0]['text'].strip()
-                print(f"  🌐 Translated: {english_text[:50]}...")
+                print(f"  🌐 Translated: {english_text[:60]}...")
                 return english_text
                 
         except Exception as e:
             print(f"  ⚠️ Translation failed: {str(e)}, using original")
             return hebrew_text
     
-    def _story_to_image_description(self, hebrew_story_text):
+    def _story_to_image_description(self, hebrew_story_text, character_bible=None):
         """
         🎯 ממיר טקסט סיפור בעברית לתיאור תמונה באנגלית.
         
         זה שונה מ-translate_to_english:
         - translate_to_english: תרגום ישר של תיאור תמונה
         - _story_to_image_description: מתחקר טקסט סיפור ומחזיר תיאור ויזואלי בלבד
+        
+        character_bible: מילון {שם: תיאור אנגלי} - עוזר לזהות דמויות בעלות שם.
         
         דוגמה:
         טקסט: "ציפור צהובה התקרבה לדולב והגישה לו פרח אדום"
@@ -700,21 +728,39 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             if not CLAUDE_API_KEY:
                 return hebrew_story_text
             
-            prompt = f"""Convert this Hebrew children's story sentence into a SHORT English image description (max 15 words).
+            # 🔑 בניית הקשר דמויות - אם יש Character Bible
+            character_context = ""
+            if character_bible:
+                lines = []
+                for name, desc in character_bible.items():
+                    lines.append(f'- "{name}" is: {desc}')
+                if lines:
+                    character_context = (
+                        "\n\nKNOWN CHARACTERS (use these descriptions if the name appears):\n"
+                        + "\n".join(lines)
+                        + "\n(If the text mentions a character name, use its full description above!)"
+                    )
+            
+            prompt = f"""Convert this Hebrew children's story sentence into an English image description (15-25 words).
 
 CRITICAL RULES:
-1. Describe ONLY what should be VISUALLY in the image (the scene, the action, objects)
-2. DO NOT describe the child's appearance (hair, eyes, age, clothes) - we have a special model for that
+1. Describe what should be VISUALLY in the image (scene, action, objects, creatures)
+2. DO NOT describe the child's appearance (hair, eyes, age, clothes) - we have a special model
 3. DO NOT mention the child's name
-4. Focus on: the action, other characters, environment, mood, colors
+4. INCLUDE every animal, object, and creature mentioned in the text - don't drop anything!
+
+⚠️ ANIMAL BODY PARTS - translate EXACTLY:
+- "חדק" = "trunk" (elephant trunk) - NEVER translate as "snake"!
+- "זנב" = "tail",  "כנף" = "wing",  "טלף" = "hoof",  "קרן" = "horn"
+- When an animal is mentioned, NAME the animal explicitly (elephant, dog, bird...){character_context}
 
 Hebrew text: "{hebrew_story_text}"
 
 Examples of good descriptions:
 - "yellow bird offering red flower, garden, sunny day"
-- "playing with friendly puppy on grass, afternoon light"
-- "swimming with colorful fish in clear ocean"
-- "reaching up to touch the moon, starry night sky"
+- "large grey elephant wrapping its trunk gently around child, jungle background"
+- "small brown puppy jumping near child on green grass, afternoon light"
+- "reaching up toward the moon, starry night sky"
 
 Return ONLY the English description, nothing else."""
             
@@ -1187,25 +1233,63 @@ Return ONLY the English description, nothing else."""
 2. דמויות אחרות חייבות להיות בעלות תיאור באנגלית מפורט
 3. לכל סצנה - בחר אם הילד לבד או עם דמות אחת אחרת (לא יותר!)
 
+🔑 כלל זהב - דמויות בעלות שם:
+אם דמות יש לה שם (למשל "פיצי הפיל", "פליק הכלב") - בכל עמוד שהיא מופיעה,
+ה-illustration חייב לכלול את **סוג** הדמות, לא רק את השם!
+
+❌ טעות נפוצה:
+   עמוד 1: text="פיצי הפיל שיחק" / illustration="elephant playing"  ✓
+   עמוד 5: text="פיצי חיבק את דולב" / illustration="pitzi hugging child"  ✗
+   (בעמוד 5 ה-AI לא יודע ש"פיצי" = פיל! יצייר משהו אקראי!)
+
+✅ נכון:
+   עמוד 5: text="פיצי חיבק את דולב" / illustration="the elephant hugging 
+   the child with its trunk, jungle"
+   (תמיד "elephant", גם אם הטקסט אומר רק "פיצי")
+
+📌 חוק: ב-illustration תמיד תכתוב את הסוג (elephant/dog/lion),
+   אף פעם לא רק את השם הפרטי (פיצי/פליק).
+
+⭐ הכלל הכי חשוב - סנכרון טקסט-תמונה:
+כל יצור, חיה, אובייקט או אלמנט שמוזכר ב-text (העברית)
+חייב להופיע גם ב-illustration (האנגלית)!
+
+דוגמה:
+❌ טעות: text="הפיל חיבק את דולב בחדק" / illustration="hugging in jungle"
+   (אין פיל בתיאור! התמונה תצא בלי פיל!)
+✅ נכון: text="הפיל חיבק את דולב בחדק" / illustration="a large grey elephant 
+   wrapping its trunk around the child, jungle background"
+
+לפני שאתה כותב illustration - עבור על ה-text ושאל:
+"אילו דברים מוזכרים? פיל? עץ? כדור? כולם חייבים להיות ב-illustration!"
+
+⚠️ זהירות עם איברי גוף של חיות - תרגם נכון לאנגלית:
+- חדק של פיל = "elephant trunk" (לא snake! לא נחש!)
+- זנב = "tail",  כנף = "wing",  טלף = "hoof",  קרן = "horn"
+- תמיד תכתוב את שם החיה במפורש: "elephant", "dog", "lion"
+דוגמה: "הפיל הרים את דולב בחדק" → "an elephant lifting the child with its trunk"
+(שים לב: trunk, ולא snake!)
+
 📝 מבנה הסיפור:
 - text (עברית): טקסט מתאים לגיל
-- illustration (אנגלית): SHORT description (10-15 words max)
+- illustration (אנגלית): description שכולל את כל האלמנטים מהטקסט (15-25 words)
 
 ⚠️ כללים לתיאור תמונה:
-✓ אם רק הילד בסצנה: "alone, [scene], close-up shot"
-✓ אם יש דמות נוספת: "with [character description from bible], [scene]"
-✗ אל תכתוב על הילד: "boy with brown hair", "wearing blue", וכו'
-✗ אל תוסיף "another child" או "second kid" - גורם ל-AI לשכפל פנים!
+✓ אם רק הילד בסצנה: "alone, [scene with all objects], close-up shot"
+✓ אם יש דמות/חיה: "with [full description], [scene with all objects]"
+✗ אל תתאר את הילד: "boy with brown hair", "wearing blue" - אסור!
+✗ אל תכתוב "another child" / "second kid" - גורם לשכפול פנים!
+✗ אל תשכח אף יצור/אובייקט שמוזכר בטקסט!
 
 ✅ דוגמאות טובות:
-   "alone, close-up shot of joyful expression in colorful zoo, sunny day"
-   "with [the dog flick: small brown dog with floppy ears], playing in garden"
-   "alone, medium shot, reaching toward a butterfly, sunny afternoon"
+   "alone, joyful in colorful zoo with lions and giraffes, close-up shot, sunny day"
+   "with a large grey elephant lifting the child with its trunk, jungle, bright daylight"
+   "alone, holding a red balloon, reaching toward a yellow butterfly, green park"
 
 ❌ דוגמאות רעות:
    "with another child" → גורם לכפילות פנים!
-   "boy with friend playing" → AI ייצור 2 ילדים זהים!
-   "A boy wearing green plays with dog" → תיאור מיותר של הילד
+   "playing happily" → איפה הפיל/הכלב שמוזכר בטקסט?!
+   "A boy wearing green" → תיאור מיותר ואסור של הילד
 
 פורמט JSON מדויק:
 {
@@ -1219,18 +1303,19 @@ Return ONLY the English description, nothing else."""
   "pages": [
     {
       "text": "הטקסט בעברית...",
-      "illustration": "alone, playing in colorful zoo, joyful expression, close-up shot",
+      "illustration": "alone, playing in colorful zoo with lions, joyful, close-up shot",
       "characters_in_scene": []
     },
     {
-      "text": "דולב פגש את פליק...",
-      "illustration": "with the dog flick, sitting in green garden, sunny afternoon",
+      "text": "דולב פגש את פליק הכלב ליד עץ גדול...",
+      "illustration": "with the dog flick beside a big oak tree, green garden, sunny afternoon",
       "characters_in_scene": ["פליק"]
     }
   ]
 }
 
 חשוב: אם characters ריק - הילד לבד בכל הסיפור (פשוט יותר ובטוח יותר).
+זכור: כל מה שבטקסט - חייב להיות גם בתיאור התמונה!
 """
         else:
             # גרסה רגילה: תיאור מפורט (לFLUX רגיל)
@@ -1326,6 +1411,7 @@ Return ONLY the English description, nothing else."""
             lora_version = data.get('lora_version')
             outfit = data.get('outfit')
             character_descriptions = data.get('character_descriptions', [])  # 🆕
+            character_bible = data.get('character_bible', {})  # 🆕 מילון מלא
             use_lora = bool(lora_url and trigger_word)
             
             print(f"\n🎨 Regenerating image...")
@@ -1338,9 +1424,10 @@ Return ONLY the English description, nothing else."""
             print(f"  📖 Page text: {page_text[:80]}...")
             
             # 🎯 NEW: אם הטקסט בעברית - בקש מ-Claude להפוך אותו לתיאור תמונה
+            # מעבירים גם את ה-Character Bible כדי שידע ש"פיצי" = פיל
             if any(ord(c) > 127 for c in page_text):
                 print(f"  🔄 Converting Hebrew story text to image description...")
-                image_description = self._story_to_image_description(page_text)
+                image_description = self._story_to_image_description(page_text, character_bible)
                 print(f"  📝 Image description: {image_description[:80]}...")
             else:
                 image_description = page_text
@@ -1695,41 +1782,50 @@ Return ONLY the English description, nothing else."""
             # 🎯 בניית פרומפט אופטימלית עבור LoRA
             outfit_part = f"{outfit}, " if outfit else ""
             
-            # 📖 NEW: הוספת Character Bible descriptions
+            # 📖 הוספת Character Bible descriptions
             char_part = ""
             has_other_chars = False
             if character_descriptions:
-                char_part = "with " + ", ".join(character_descriptions) + ", "
+                char_part = "alongside " + ", ".join(character_descriptions) + ", "
                 has_other_chars = True
             
-            # 🎯 שני סוגי פרומפטים - אם יש דמות אחרת או רק הילד
+            # 🛡️ FIX 1: מניעת שכפול דמות - מילים מפורשות ל-FLUX
+            # תמיד, בכל פרומפט - להבהיר שיש ילד אחד בלבד
+            single_child_directive = (
+                "solo portrait of one single child, "
+                "exactly one child in the entire image, "
+            )
+            
+            # 🧹 FIX 2: ניקוי שוליים - למנוע רגליים/ידיים חתוכות
+            clean_composition = (
+                "clean composition, well-framed, centered subject, "
+                "full scene visible, no cropped people, no body parts at edges"
+            )
+            
+            # 🎯 בניית הפרומפט - מבנה אחיד וברור
             if has_other_chars:
-                # יש כלב/חבר - להבהיר שאת FLUX יש רק ילד אחד!
+                # יש דמות נוספת (כלב/חבר) - הילד + הדמות, אבל ילד אחד בלבד
                 full_prompt = (
-                    f"a single child {trigger_word} {outfit_part}"
+                    f"{single_child_directive}"
+                    f"{trigger_word} {outfit_part}"
                     f"detailed facial features, recognizable face, "
-                    f"{char_part}"  # תיאור דמויות אחרות
+                    f"{char_part}"
                     f"{prompt}, "
-                    f"{style_prompt}"
+                    f"{style_prompt}, {clean_composition}"
                 )
             else:
                 # רק הילד לבד
                 full_prompt = (
+                    f"{single_child_directive}"
                     f"{trigger_word} {outfit_part}"
                     f"detailed facial features, recognizable face, expressive eyes, "
                     f"the child is the main focus of the scene, "
                     f"{prompt}, "
-                    f"{style_prompt}"
+                    f"{style_prompt}, {clean_composition}"
                 )
             
-            # 🚫 NEW: Negative prompt - אסור ב-FLUX dev אבל נשמר לתיעוד
-            # FLUX לא תומך ב-negative_prompt רשמי, אבל אפשר להוסיף "no X" בפרומפט
-            # לכן נוסיף אותם ישר לפרומפט הראשי
-            if has_other_chars:
-                full_prompt += ", only one child in the scene, no twins, no duplicate children"
-            
             print(f"  🎨 Generating with LoRA...")
-            print(f"  📝 Prompt: {full_prompt[:250]}...")
+            print(f"  📝 Prompt: {full_prompt[:280]}...")
             
             # 🔄 Retry logic for rate limit (429) errors
             def _run_with_retry(model_target, input_params, max_retries=3):
@@ -1765,7 +1861,7 @@ Return ONLY the English description, nothing else."""
                         "guidance_scale": 3.5,
                         "output_quality": 90,
                         "num_inference_steps": 28,
-                        "lora_scale": 1.1,  # 🎯 Boosted - stronger LoRA influence on face
+                        "lora_scale": 0.95,  # 🎯 Balanced - strong enough for face, prevents duplication
                         "disable_safety_checker": True
                     }
                 )
@@ -1777,7 +1873,7 @@ Return ONLY the English description, nothing else."""
                     {
                         "prompt": full_prompt,
                         "lora_url": lora_url,
-                        "lora_scale": 1.1,  # 🎯 Boosted - stronger LoRA influence on face
+                        "lora_scale": 0.95,  # 🎯 Balanced - strong enough for face, prevents duplication
                         "num_outputs": 1,
                         "aspect_ratio": "4:3",
                         "output_format": "jpg",
@@ -1834,8 +1930,39 @@ Return ONLY the English description, nothing else."""
                 has_bidi = False
                 print("  ⚠️ python-bidi/arabic-reshaper not available - Hebrew will be reversed!")
             
+            def clean_text_for_pdf(text):
+                """מנקה תווים מיוחדים שהפונט NotoSansHebrew לא תומך בהם"""
+                if not text:
+                    return text
+                # מילון החלפות - תווים בעייתיים → תווים רגילים שיש בכל פונט
+                replacements = {
+                    # ציטוטים מתולתלים → ציטוטים רגילים
+                    '\u201C': '"',  # left double quotation mark "
+                    '\u201D': '"',  # right double quotation mark "
+                    '\u2018': "'",  # left single quotation mark '
+                    '\u2019': "'",  # right single quotation mark '
+                    # גרש וגרשיים עבריים → תווים רגילים
+                    '\u05F3': "'",  # Hebrew geresh
+                    '\u05F4': '"',  # Hebrew gershayim
+                    # נקודות, מקפים מיוחדים
+                    '\u2026': '...',  # ellipsis
+                    '\u2013': '-',    # en dash
+                    '\u2014': '-',    # em dash
+                    '\u00A0': ' ',    # non-breaking space
+                    '\u200E': '',     # left-to-right mark (invisible)
+                    '\u200F': '',     # right-to-left mark (invisible)
+                    '\u2028': ' ',    # line separator
+                    '\u2029': ' ',    # paragraph separator
+                }
+                for old, new in replacements.items():
+                    text = text.replace(old, new)
+                return text
+            
             def fix_hebrew(text):
-                """מסדר עברית בצורה נכונה לימין-לשמאל"""
+                """מסדר עברית בצורה נכונה לימין-לשמאל + ניקוי תווים בעייתיים"""
+                # 🆕 ניקוי תווים מיוחדים לפני הכל
+                text = clean_text_for_pdf(text)
+                
                 if not has_bidi:
                     return text
                 try:
