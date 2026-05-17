@@ -179,6 +179,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             chosen_seed = request_data.get('chosen_seed')
             # 💪 NEW: chosen lora_scale - האיזון שההורה בחר (דמיון מול איור)
             chosen_lora_scale = request_data.get('chosen_lora_scale', 1.0)
+            # 🎨 NEW: chosen style - הסגנון שההורה בחר (חמים-ריאליסטי/קלאסי/רך)
+            chosen_style = request_data.get('chosen_style', 'classic_illustration')
             
             print(f"\n📖 Creating story for: {child_name}")
             if use_lora:
@@ -190,6 +192,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 if chosen_seed is not None:
                     print(f"   🎲 Chosen seed: {chosen_seed} (consistent for whole book)")
                 print(f"   💪 Chosen lora_scale: {chosen_lora_scale}")
+                print(f"   🎨 Chosen style: {chosen_style}")
             elif child_photo:
                 print("📸 Photo uploaded - will use FLUX face swap")
             if ai_model_id:
@@ -203,7 +206,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             if IMAGE_MODE != 'none' and story_data.get('pages'):
                 print(f"🎨 Step 2: Generating images ({IMAGE_MODE})...")
-                # 🎓 העבר את ה-LoRA, ה-seed וה-scale לפונקציה
+                # 🎓 העבר את ה-LoRA, ה-seed, ה-scale וה-style לפונקציה
                 story_data = self.add_images_to_story(
                     story_data,
                     child_photo,
@@ -211,7 +214,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                     trigger_word=trigger_word if use_lora else None,
                     lora_version=lora_version if use_lora else None,
                     chosen_seed=chosen_seed,  # 🎲 עקביות לכל הספר
-                    chosen_lora_scale=chosen_lora_scale  # 💪 האיזון שנבחר
+                    chosen_lora_scale=chosen_lora_scale,  # 💪 האיזון שנבחר
+                    chosen_style=chosen_style,  # 🎨 הסגנון שנבחר
+                    child_gender='girl' if request_data.get('childGender') == 'girl' else 'boy'  # 🚻
                 )
             
             print("✅ Story complete!")
@@ -307,6 +312,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             if not lora_url or not trigger_word:
                 raise Exception('LoRA not configured for this child')
             
+            child_gender = data.get('child_gender', 'boy')  # 🚻 מגדר - מונע החלקה מגדרית
+            
             print(f"\n🎨 Generating 3 preview options for: {child_name}")
             print(f"   Trigger: {trigger_word}")
             
@@ -316,12 +323,15 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 "plain clean background, happy smile, looking at viewer"
             )
             
-            # 🎨 3 וריאציות עם lora_scale שונה - גיוון אמיתי!
-            # מ"דמיון מקסימלי" עד "איור רך"
+            # 🎨 3 וריאציות עדינות - ההבדל בא מהסגנון, לא מ-lora_scale קיצוני!
+            # lora_scale נשאר יציב (0.92-1.0) כדי למנוע עיוותים
             variations = [
-                {'seed': None, 'lora_scale': 1.05, 'label': 'max_similarity'},
-                {'seed': None, 'lora_scale': 0.95, 'label': 'balanced'},
-                {'seed': None, 'lora_scale': 0.82, 'label': 'soft_illustration'},
+                {'seed': None, 'lora_scale': 1.0,  'style': 'warm_realistic',
+                 'label': 'warm_realistic'},
+                {'seed': None, 'lora_scale': 0.95, 'style': 'classic_illustration',
+                 'label': 'classic_illustration'},
+                {'seed': None, 'lora_scale': 0.92, 'style': 'soft_illustration',
+                 'label': 'soft_illustration'},
             ]
             
             import random
@@ -338,19 +348,23 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 try:
                     seed = variation['seed']
                     scale = variation['lora_scale']
-                    print(f"   🖼️  Option {index+1}/3 (seed={seed}, scale={scale})...")
+                    style = variation['style']
+                    print(f"   🖼️  Option {index+1}/3 (style={style}, scale={scale})...")
                     img = self.generate_image_with_lora(
                         prompt=f"medium shot, {clean_scene}",
                         lora_url=lora_url,
                         trigger_word=trigger_word,
                         lora_version=lora_version,
+                        style_name=style,
                         seed=seed,
-                        lora_scale=scale
+                        lora_scale=scale,
+                        child_gender=child_gender
                     )
                     results[index] = {
                         'image': img,
                         'seed': seed,
                         'lora_scale': scale,
+                        'style': style,
                         'label': variation['label']
                     }
                 except Exception as e:
@@ -420,10 +434,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             story_data = json.loads(clean_content)
             return story_data
     
-    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None, lora_version=None, chosen_seed=None, chosen_lora_scale=1.0):
+    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None, lora_version=None, chosen_seed=None, chosen_lora_scale=1.0, chosen_style='classic_illustration', child_gender='boy'):
         """מוסיף תמונות לסיפור - עם LoRA אם יש, אחרת FLUX + face swap.
         
         chosen_seed: אם ניתן - כל עמודי הספר ישתמשו ב-seed הזה (עקביות מלאה!).
+        child_gender: 'boy' או 'girl' - מונע החלקה מגדרית.
         """
         pages = story_data.get('pages', [])
         
@@ -516,10 +531,12 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                         lora_url=lora_url,
                         trigger_word=trigger_word,
                         lora_version=lora_version,
+                        style_name=chosen_style,  # 🎨 הסגנון שההורה בחר
                         outfit=consistent_outfit,
                         character_descriptions=char_descriptions,  # 🆕
                         seed=chosen_seed,  # 🎲 אותו seed לכל הספר - עקביות!
-                        lora_scale=chosen_lora_scale  # 💪 אותו scale שההורה בחר
+                        lora_scale=chosen_lora_scale,  # 💪 אותו scale שההורה בחר
+                        child_gender=child_gender  # 🚻 מונע החלקה מגדרית
                     )
                     
                     # Fallback אם נכשל
@@ -1887,7 +1904,7 @@ floppy ears, dark eyes, red collar"
                 'error': str(e)
             }, status=500)
     
-    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration", lora_version=None, outfit=None, character_descriptions=None, seed=None, lora_scale=1.0):
+    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration", lora_version=None, outfit=None, character_descriptions=None, seed=None, lora_scale=1.0, child_gender='boy'):
         """יוצר תמונה עם LoRA מאומן.
         
         אם lora_version קיים - משתמשים במודל המאומן ישירות (האסטרטגיה הטובה יותר!)
@@ -1933,24 +1950,56 @@ floppy ears, dark eyes, red collar"
                 "full scene visible, no cropped people, no body parts at edges"
             )
             
-            # 🎨 עיגון סגנון איור רך - "Sandwich technique" מאוזן
-            style_anchor_start = "a warm children's book illustration, soft digital painting style, "
-            style_anchor_end = (
-                ", consistent storybook illustration, "
-                "painterly art style, warm soft colors, gentle lighting"
-            )
+            # 🎨 עיגון סגנון - 3 וריאציות עדינות לפי style_name
+            # ההבדל בא מ-prompt (לא מ-lora_scale קיצוני!)
+            style_anchors = {
+                # חמים וריאליסטי - איור עם נגיעות ריאליסטיות, חמים
+                'warm_realistic': {
+                    'start': "a warm heartfelt illustration with soft realistic details, ",
+                    'end': (
+                        ", semi-realistic children's illustration, "
+                        "warm natural lighting, soft realistic textures, "
+                        "gentle and lifelike, cozy atmosphere"
+                    )
+                },
+                # איור קלאסי - ספר ילדים סטנדרטי
+                'classic_illustration': {
+                    'start': "a classic children's book illustration, ",
+                    'end': (
+                        ", traditional storybook illustration art, "
+                        "warm colors, clean illustration style, "
+                        "professional children's book art"
+                    )
+                },
+                # איור רך - עדין, חלומי, painterly
+                'soft_illustration': {
+                    'start': "a soft gentle painterly children's illustration, ",
+                    'end': (
+                        ", dreamy soft illustration, delicate painterly style, "
+                        "pastel warm colors, gentle soft lighting, "
+                        "tender storybook art"
+                    )
+                },
+            }
+            # ברירת מחדל - איור קלאסי
+            anchor = style_anchors.get(style_name, style_anchors['classic_illustration'])
+            style_anchor_start = anchor['start']
+            style_anchor_end = anchor['end']
             
             # 🎯 בניית הפרומפט - מבנה מובנה עם הפרדה ברורה בין דמויות
+            # 🚻 מילת מגדר - מונעת "החלקה" של הילד למגדר אחר
+            gender_word = "young girl" if child_gender == 'girl' else "young boy"
+            
             if has_other_chars:
                 # 🐕 יש דמות נוספת (כלב/חבר) - מבנה מפורש שמפריד ביניהן
                 # חשוב: מתארים את הילד כיחידה סגורה, ואז הדמות כיחידה נפרדת
                 # כדי שה-outfit לא "ידלוף" לכלב
                 child_block = (
-                    f"ONE human child as main character "
+                    f"ONE human {gender_word} as main character "
                     f"({trigger_word}), the child wearing {outfit_part}, "
                     f"detailed facial features, recognizable face"
                     if outfit_part else
-                    f"ONE human child as main character "
+                    f"ONE human {gender_word} as main character "
                     f"({trigger_word}), detailed facial features, recognizable face"
                 )
                 full_prompt = (
@@ -1969,7 +2018,7 @@ floppy ears, dark eyes, red collar"
                 outfit_clause = f"the child wearing {outfit_part}, " if outfit_part else ""
                 full_prompt = (
                     f"{style_anchor_start}"
-                    f"solo portrait of ONE single human child, "
+                    f"solo portrait of ONE single human {gender_word}, "
                     f"exactly one child in the entire image, "
                     f"only one person, no duplicate figures, "
                     f"{trigger_word}, {outfit_clause}"
@@ -2075,12 +2124,12 @@ floppy ears, dark eyes, red collar"
             from PIL import Image as PILImage
             
             try:
+                # עברית צריכה רק bidi - לא arabic_reshaper!
                 from bidi.algorithm import get_display
-                import arabic_reshaper
                 has_bidi = True
             except:
                 has_bidi = False
-                print("  ⚠️ python-bidi/arabic-reshaper not available - Hebrew will be reversed!")
+                print("  ⚠️ python-bidi not available - Hebrew will be reversed!")
             
             def clean_text_for_pdf(text):
                 """מנקה תווים מיוחדים שהפונט NotoSansHebrew לא תומך בהם"""
@@ -2089,10 +2138,12 @@ floppy ears, dark eyes, red collar"
                 # מילון החלפות - תווים בעייתיים → תווים רגילים שיש בכל פונט
                 replacements = {
                     # ציטוטים מתולתלים → ציטוטים רגילים
-                    '\u201C': '"',  # left double quotation mark "
-                    '\u201D': '"',  # right double quotation mark "
-                    '\u2018': "'",  # left single quotation mark '
-                    '\u2019': "'",  # right single quotation mark '
+                    '\u201C': '"',  # left double quotation mark
+                    '\u201D': '"',  # right double quotation mark
+                    '\u2018': "'",  # left single quotation mark
+                    '\u2019': "'",  # right single quotation mark
+                    '\u201E': '"',  # double low-9 quotation mark
+                    '\u201A': "'",  # single low-9 quotation mark
                     # גרש וגרשיים עבריים → תווים רגילים
                     '\u05F3': "'",  # Hebrew geresh
                     '\u05F4': '"',  # Hebrew gershayim
@@ -2100,28 +2151,41 @@ floppy ears, dark eyes, red collar"
                     '\u2026': '...',  # ellipsis
                     '\u2013': '-',    # en dash
                     '\u2014': '-',    # em dash
+                    '\u2012': '-',    # figure dash
+                    '\u2015': '-',    # horizontal bar
                     '\u00A0': ' ',    # non-breaking space
                     '\u200E': '',     # left-to-right mark (invisible)
                     '\u200F': '',     # right-to-left mark (invisible)
+                    '\u200B': '',     # zero-width space
+                    '\u200C': '',     # zero-width non-joiner
+                    '\u200D': '',     # zero-width joiner
                     '\u2028': ' ',    # line separator
                     '\u2029': ' ',    # paragraph separator
+                    '\uFEFF': '',     # byte order mark
+                    '\u061C': '',     # arabic letter mark
                 }
                 for old, new in replacements.items():
                     text = text.replace(old, new)
                 return text
             
             def fix_hebrew(text):
-                """מסדר עברית בצורה נכונה לימין-לשמאל + ניקוי תווים בעייתיים"""
-                # 🆕 ניקוי תווים מיוחדים לפני הכל
+                """מסדר עברית לימין-לשמאל.
+                
+                ⚠️ חשוב: עברית צריכה רק bidi (סידור RTL), ולא arabic_reshaper!
+                arabic_reshaper מיועד לערבית - שם האותיות משנות צורה לפי מיקום.
+                עברית לא עושה את זה. הרצת reshaper על עברית מוסיפה תווים
+                מיוחדים שהפונט לא תומך בהם → ריבועים בפלט!
+                """
+                # ניקוי תווים מיוחדים תחילה
                 text = clean_text_for_pdf(text)
                 
                 if not has_bidi:
                     return text
                 try:
-                    reshaped = arabic_reshaper.reshape(text)
-                    return get_display(reshaped)
+                    # רק bidi - בלי reshaper! זה הפתרון לריבועים.
+                    return get_display(text)
                 except Exception as e:
-                    print(f"  ⚠️ Hebrew fix failed: {e}")
+                    print(f"  ⚠️ Hebrew bidi failed: {e}")
                     return text
             
             def load_image_for_pdf(image_url):
