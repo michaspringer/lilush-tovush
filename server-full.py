@@ -177,6 +177,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             # 🎲 NEW: chosen seed - ה-seed שההורה בחר בתצוגה המקדימה
             chosen_seed = request_data.get('chosen_seed')
+            # 💪 NEW: chosen lora_scale - האיזון שההורה בחר (דמיון מול איור)
+            chosen_lora_scale = request_data.get('chosen_lora_scale', 1.0)
             
             print(f"\n📖 Creating story for: {child_name}")
             if use_lora:
@@ -187,6 +189,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                     print(f"   Version: {lora_version[:80]}...")
                 if chosen_seed is not None:
                     print(f"   🎲 Chosen seed: {chosen_seed} (consistent for whole book)")
+                print(f"   💪 Chosen lora_scale: {chosen_lora_scale}")
             elif child_photo:
                 print("📸 Photo uploaded - will use FLUX face swap")
             if ai_model_id:
@@ -200,14 +203,15 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             if IMAGE_MODE != 'none' and story_data.get('pages'):
                 print(f"🎨 Step 2: Generating images ({IMAGE_MODE})...")
-                # 🎓 העבר את ה-LoRA ואת ה-seed לפונקציה
+                # 🎓 העבר את ה-LoRA, ה-seed וה-scale לפונקציה
                 story_data = self.add_images_to_story(
                     story_data,
                     child_photo,
                     lora_url=lora_url if use_lora else None,
                     trigger_word=trigger_word if use_lora else None,
                     lora_version=lora_version if use_lora else None,
-                    chosen_seed=chosen_seed  # 🎲 עקביות לכל הספר
+                    chosen_seed=chosen_seed,  # 🎲 עקביות לכל הספר
+                    chosen_lora_scale=chosen_lora_scale  # 💪 האיזון שנבחר
                 )
             
             print("✅ Story complete!")
@@ -286,8 +290,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
     
     def handle_preview_options(self):
         """
-        🆕 יוצר 3 תמונות תצוגה מקדימה במקביל - כל אחת עם seed שונה.
-        ההורה יבחר את הטובה ביותר, וה-seed שלה יישמר לכל הספר (עקביות!).
+        🆕 יוצר 3 תמונות תצוגה מקדימה במקביל.
+        כל אחת עם seed שונה + lora_scale שונה (גיוון אמיתי).
+        רקע נקי - כדי שההורה יוכל לבדוק בקלות את זיהוי הילד.
         """
         try:
             content_length = int(self.headers['Content-Length'])
@@ -298,7 +303,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             lora_url = data.get('lora_url')
             trigger_word = data.get('trigger_word')
             lora_version = data.get('lora_version')
-            theme = data.get('theme', 'animals')
             
             if not lora_url or not trigger_word:
                 raise Exception('LoRA not configured for this child')
@@ -306,42 +310,56 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             print(f"\n🎨 Generating 3 preview options for: {child_name}")
             print(f"   Trigger: {trigger_word}")
             
-            # 🛡️ סצנת בדיקה - תמיד ילד יחיד, ללא אנשים נוספים
-            theme_scenes = {
-                'animals': 'in a colorful zoo, friendly cartoon animals in the background, happy smile',
-                'family': 'in a cozy warm living room, soft sunlight, happy smile',
-                'space': 'floating among stars and colorful planets, amazed happy expression',
-                'magic': 'in a magical sparkling forest with glowing lights, wondrous happy look'
-            }
-            scene = theme_scenes.get(theme, theme_scenes['animals'])
+            # 🎯 רקע נקי ופשוט - בלי חיות/ילדים, כדי לבדוק זיהוי בקלות
+            clean_scene = (
+                "standing against a simple soft pastel background, "
+                "plain clean background, happy smile, looking at viewer"
+            )
             
-            # 🎲 3 seeds קבועים ושונים - כל אחד ייתן תמונה אחרת
+            # 🎨 3 וריאציות עם lora_scale שונה - גיוון אמיתי!
+            # מ"דמיון מקסימלי" עד "איור רך"
+            variations = [
+                {'seed': None, 'lora_scale': 1.05, 'label': 'max_similarity'},
+                {'seed': None, 'lora_scale': 0.95, 'label': 'balanced'},
+                {'seed': None, 'lora_scale': 0.82, 'label': 'soft_illustration'},
+            ]
+            
             import random
-            seeds = [random.randint(1, 999999) for _ in range(3)]
-            print(f"   🎲 Seeds: {seeds}")
+            for v in variations:
+                v['seed'] = random.randint(1, 999999)
+            
+            print(f"   🎨 Variations: {[(v['label'], v['lora_scale']) for v in variations]}")
             
             # 🚀 יצירת 3 התמונות במקביל (threads)
             import threading
             results = [None, None, None]
             
-            def generate_one(index, seed):
+            def generate_one(index, variation):
                 try:
-                    print(f"   🖼️  Option {index+1}/3 (seed={seed})...")
+                    seed = variation['seed']
+                    scale = variation['lora_scale']
+                    print(f"   🖼️  Option {index+1}/3 (seed={seed}, scale={scale})...")
                     img = self.generate_image_with_lora(
-                        prompt=f"medium shot, {scene}",
+                        prompt=f"medium shot, {clean_scene}",
                         lora_url=lora_url,
                         trigger_word=trigger_word,
                         lora_version=lora_version,
-                        seed=seed
+                        seed=seed,
+                        lora_scale=scale
                     )
-                    results[index] = {'image': img, 'seed': seed}
+                    results[index] = {
+                        'image': img,
+                        'seed': seed,
+                        'lora_scale': scale,
+                        'label': variation['label']
+                    }
                 except Exception as e:
                     print(f"   ⚠️ Option {index+1} failed: {e}")
                     results[index] = None
             
             threads = []
-            for i, seed in enumerate(seeds):
-                t = threading.Thread(target=generate_one, args=(i, seed))
+            for i, variation in enumerate(variations):
+                t = threading.Thread(target=generate_one, args=(i, variation))
                 threads.append(t)
                 t.start()
             
@@ -359,7 +377,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             self.send_json_response({
                 'success': True,
-                'options': options,  # [{image, seed}, ...]
+                'options': options,  # [{image, seed, lora_scale, label}, ...]
                 'child_name': child_name
             })
             
@@ -402,7 +420,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             story_data = json.loads(clean_content)
             return story_data
     
-    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None, lora_version=None, chosen_seed=None):
+    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None, lora_version=None, chosen_seed=None, chosen_lora_scale=1.0):
         """מוסיף תמונות לסיפור - עם LoRA אם יש, אחרת FLUX + face swap.
         
         chosen_seed: אם ניתן - כל עמודי הספר ישתמשו ב-seed הזה (עקביות מלאה!).
@@ -500,7 +518,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                         lora_version=lora_version,
                         outfit=consistent_outfit,
                         character_descriptions=char_descriptions,  # 🆕
-                        seed=chosen_seed  # 🎲 אותו seed לכל הספר - עקביות!
+                        seed=chosen_seed,  # 🎲 אותו seed לכל הספר - עקביות!
+                        lora_scale=chosen_lora_scale  # 💪 אותו scale שההורה בחר
                     )
                     
                     # Fallback אם נכשל
@@ -1868,7 +1887,7 @@ floppy ears, dark eyes, red collar"
                 'error': str(e)
             }, status=500)
     
-    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration", lora_version=None, outfit=None, character_descriptions=None, seed=None):
+    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration", lora_version=None, outfit=None, character_descriptions=None, seed=None, lora_scale=1.0):
         """יוצר תמונה עם LoRA מאומן.
         
         אם lora_version קיים - משתמשים במודל המאומן ישירות (האסטרטגיה הטובה יותר!)
@@ -1999,12 +2018,14 @@ floppy ears, dark eyes, red collar"
                 base_input["seed"] = int(seed)
                 print(f"  🎲 Using fixed seed: {seed}")
             
+            print(f"  💪 LoRA scale: {lora_scale}")
+            
             # 🎯 STRATEGY 1 (Preferred): Use the trained model directly
             if lora_version:
                 print(f"  📌 Using trained model directly (best quality)")
                 strategy1_input = dict(base_input)
                 strategy1_input["prompt"] = full_prompt
-                strategy1_input["lora_scale"] = 1.0
+                strategy1_input["lora_scale"] = lora_scale
                 output = _run_with_retry(lora_version, strategy1_input)
             else:
                 # 🔧 STRATEGY 2 (Fallback/Legacy): Use ostris/flux-dev-lora with weights URL
@@ -2012,7 +2033,7 @@ floppy ears, dark eyes, red collar"
                 strategy2_input = dict(base_input)
                 strategy2_input["prompt"] = full_prompt
                 strategy2_input["lora_url"] = lora_url
-                strategy2_input["lora_scale"] = 1.0
+                strategy2_input["lora_scale"] = lora_scale
                 output = _run_with_retry("ostris/flux-dev-lora", strategy2_input)
             
             if output and len(output) > 0:
