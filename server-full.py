@@ -1330,10 +1330,20 @@ Return ONLY the English description, nothing else."""
 לפני העמודים, צור מילון של כל הדמויות (מלבד הילד הראשי).
 לכל דמות נוספת (חבר, חיה, יצור) - תן תיאור באנגלית קבוע ומפורט שיופיע בכל הספר.
 
+⚠️ התיאור חייב להיות מאוד ספציפי - לעקביות לאורך הספר:
+- גזע מדויק (golden retriever puppy / black labrador / tabby cat)
+- צבע מדויק (golden-brown fur / black and white)
+- גודל (small / medium / large)
+- מאפיינים ייחודיים (floppy ears, fluffy tail, blue collar)
+דוגמה טובה: "a small golden retriever puppy, fluffy golden-brown fur, 
+floppy ears, dark eyes, red collar"
+דוגמה רעה: "a dog" (כללי מדי - ייצא שונה בכל עמוד!)
+
 🚫 כללים קריטיים:
 1. אל תתאר את הילד הראשי בכלל - יש לו מודל מאומן!
-2. דמויות אחרות חייבות להיות בעלות תיאור באנגלית מפורט
+2. דמויות אחרות חייבות להיות בעלות תיאור באנגלית מפורט וספציפי
 3. לכל סצנה - בחר אם הילד לבד או עם דמות אחת אחרת (לא יותר!)
+4. חיות לא לובשות בגדים! אל תזכיר ביגוד עבור חיות.
 
 🔑 כלל זהב - דמויות בעלות שם:
 אם דמות יש לה שם (למשל "פיצי הפיל", "פליק הכלב") - בכל עמוד שהיא מופיעה,
@@ -1887,65 +1897,63 @@ Return ONLY the English description, nothing else."""
                 prompt = self.translate_to_english(prompt)
             
             # 🎯 בניית פרומפט אופטימלית עבור LoRA
-            outfit_part = f"{outfit}, " if outfit else ""
+            outfit_part = f"{outfit}" if outfit else ""
             
             # 📖 הוספת Character Bible descriptions
             char_part = ""
             has_other_chars = False
             if character_descriptions:
-                char_part = "alongside " + ", ".join(character_descriptions) + ", "
+                # הפרדה ברורה: כל דמות מתוארת בנפרד
+                char_list = ". ".join(character_descriptions)
+                char_part = char_list
                 has_other_chars = True
             
-            # 🛡️ FIX 1: מניעת שכפול דמות - מילים מפורשות ל-FLUX
-            # שני directives שונים - תלוי אם יש דמות נוספת בסצנה
-            if has_other_chars:
-                # יש כלב/אמא וכו' - ילד אחד + הדמות, בלי לשכפל את הילד
-                single_child_directive = (
-                    "exactly one child only, the child appears once, "
-                    "no duplicate of the child, no repeated child figure, "
-                )
-            else:
-                # רק הילד - דמות יחידה לחלוטין
-                single_child_directive = (
-                    "solo portrait of one single child, "
-                    "exactly one child in the entire image, "
-                    "only one person, no duplicate figures, no repeated child, "
-                )
-            
-            # 🧹 FIX 2: ניקוי שוליים - למנוע רגליים/ידיים חתוכות
+            # 🧹 ניקוי שוליים - למנוע רגליים/ידיים חתוכות
             clean_composition = (
-                "clean composition, well-framed, centered subject, "
+                "clean composition, well-framed, centered subjects, "
                 "full scene visible, no cropped people, no body parts at edges"
             )
             
-            # 🎨 FIX 3: עיגון סגנון איור רך - "Sandwich technique" מאוזן
-            # מטרה: סגנון איור עקבי, אבל בלי לדחוף חזק מדי (שמחליש את ה-LoRA)
-            # עיגון רך שומר על דמיון הילד + נותן תחושת ספר ילדים
+            # 🎨 עיגון סגנון איור רך - "Sandwich technique" מאוזן
             style_anchor_start = "a warm children's book illustration, soft digital painting style, "
             style_anchor_end = (
                 ", consistent storybook illustration, "
                 "painterly art style, warm soft colors, gentle lighting"
             )
             
-            # 🎯 בניית הפרומפט - מבנה אחיד וברור עם עיגון סגנון
+            # 🎯 בניית הפרומפט - מבנה מובנה עם הפרדה ברורה בין דמויות
             if has_other_chars:
-                # יש דמות נוספת (כלב/חבר) - הילד + הדמות, אבל ילד אחד בלבד
+                # 🐕 יש דמות נוספת (כלב/חבר) - מבנה מפורש שמפריד ביניהן
+                # חשוב: מתארים את הילד כיחידה סגורה, ואז הדמות כיחידה נפרדת
+                # כדי שה-outfit לא "ידלוף" לכלב
+                child_block = (
+                    f"ONE human child as main character "
+                    f"({trigger_word}), the child wearing {outfit_part}, "
+                    f"detailed facial features, recognizable face"
+                    if outfit_part else
+                    f"ONE human child as main character "
+                    f"({trigger_word}), detailed facial features, recognizable face"
+                )
                 full_prompt = (
                     f"{style_anchor_start}"
-                    f"{single_child_directive}"
-                    f"{trigger_word} {outfit_part}"
-                    f"detailed facial features, recognizable face, "
-                    f"{char_part}"
-                    f"{prompt}, "
+                    f"a scene with exactly two characters: "
+                    f"FIRST: {child_block}. "
+                    f"SECOND: an animal companion - {char_part}. "
+                    f"The animal is a separate creature, the animal wears no clothes. "
+                    f"Only one human child in the image, no duplicate child. "
+                    f"Scene: {prompt}, "
                     f"{style_prompt}, {clean_composition}"
                     f"{style_anchor_end}"
                 )
             else:
-                # רק הילד לבד
+                # 👤 רק הילד לבד
+                outfit_clause = f"the child wearing {outfit_part}, " if outfit_part else ""
                 full_prompt = (
                     f"{style_anchor_start}"
-                    f"{single_child_directive}"
-                    f"{trigger_word} {outfit_part}"
+                    f"solo portrait of ONE single human child, "
+                    f"exactly one child in the entire image, "
+                    f"only one person, no duplicate figures, "
+                    f"{trigger_word}, {outfit_clause}"
                     f"detailed facial features, recognizable face, expressive eyes, "
                     f"the child is the main focus of the scene, "
                     f"{prompt}, "
