@@ -721,7 +721,9 @@ async function generateStory() {
             lora_version: childLora ? childLora.version : null,
             use_lora: !!childLora,
             // 🎲 ה-seed שההורה בחר בתצוגה המקדימה (עקביות לכל הספר)
-            chosen_seed: appState.bookData.chosen_seed || null
+            chosen_seed: appState.bookData.chosen_seed || null,
+            // 💪 ה-lora_scale שההורה בחר (האיזון בין דמיון לאיור)
+            chosen_lora_scale: appState.bookData.chosen_lora_scale || 1.0
         };
         
         console.log('📤 Sending story request');
@@ -1796,12 +1798,19 @@ async function showLoraPreview(childLora) {
                             border: 3px solid transparent; transition: all 0.2s;
                             background: #FBF4E4;
                         `;
+                        // תווית מסבירה לפי סוג הווריאציה
+                        const labelText = {
+                            'max_similarity': '✨ הכי דומה',
+                            'balanced': '⚖️ מאוזן',
+                            'soft_illustration': '🎨 איור רך'
+                        }[option.label] || `אפשרות ${idx + 1}`;
+                        
                         card.innerHTML = `
                             <img src="${option.image}" 
                                  style="width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block;"
-                                 alt="אפשרות ${idx + 1}">
+                                 alt="${labelText}">
                             <div style="padding: 0.5rem; font-size: 0.85rem; color: #5C4A35; font-weight: 600;">
-                                אפשרות ${idx + 1}
+                                ${labelText}
                             </div>
                         `;
                         
@@ -1815,9 +1824,10 @@ async function showLoraPreview(childLora) {
                         });
                         
                         card.addEventListener('click', () => {
-                            // 🎲 שמירת ה-seed הנבחר!
+                            // 🎲 שמירת ה-seed + ה-lora_scale הנבחרים!
                             appState.bookData.chosen_seed = option.seed;
-                            console.log(`✅ Parent chose option ${idx + 1}, seed=${option.seed}`);
+                            appState.bookData.chosen_lora_scale = option.lora_scale;
+                            console.log(`✅ Parent chose option ${idx + 1}: seed=${option.seed}, lora_scale=${option.lora_scale}`);
                             cleanup(true);
                         });
                         
