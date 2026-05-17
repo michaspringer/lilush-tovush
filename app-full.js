@@ -723,7 +723,9 @@ async function generateStory() {
             // 🎲 ה-seed שההורה בחר בתצוגה המקדימה (עקביות לכל הספר)
             chosen_seed: appState.bookData.chosen_seed || null,
             // 💪 ה-lora_scale שההורה בחר (האיזון בין דמיון לאיור)
-            chosen_lora_scale: appState.bookData.chosen_lora_scale || 1.0
+            chosen_lora_scale: appState.bookData.chosen_lora_scale || 1.0,
+            // 🎨 הסגנון שההורה בחר (חמים-ריאליסטי/קלאסי/רך)
+            chosen_style: appState.bookData.chosen_style || 'classic_illustration'
         };
         
         console.log('📤 Sending story request');
@@ -1781,7 +1783,8 @@ async function showLoraPreview(childLora) {
                         lora_url: childLora.lora_url,
                         trigger_word: childLora.trigger_word,
                         lora_version: childLora.version,
-                        theme: appState.bookData.theme || 'animals'
+                        theme: appState.bookData.theme || 'animals',
+                        child_gender: appState.bookData.childGender === 'girl' ? 'girl' : 'boy'
                     })
                 });
                 
@@ -1800,9 +1803,9 @@ async function showLoraPreview(childLora) {
                         `;
                         // תווית מסבירה לפי סוג הווריאציה
                         const labelText = {
-                            'max_similarity': '✨ הכי דומה',
-                            'balanced': '⚖️ מאוזן',
-                            'soft_illustration': '🎨 איור רך'
+                            'warm_realistic': '🌟 חמים וריאליסטי',
+                            'classic_illustration': '🎨 איור קלאסי',
+                            'soft_illustration': '✏️ איור רך'
                         }[option.label] || `אפשרות ${idx + 1}`;
                         
                         card.innerHTML = `
@@ -1824,10 +1827,11 @@ async function showLoraPreview(childLora) {
                         });
                         
                         card.addEventListener('click', () => {
-                            // 🎲 שמירת ה-seed + ה-lora_scale הנבחרים!
+                            // 🎲 שמירת seed + lora_scale + style הנבחרים!
                             appState.bookData.chosen_seed = option.seed;
                             appState.bookData.chosen_lora_scale = option.lora_scale;
-                            console.log(`✅ Parent chose option ${idx + 1}: seed=${option.seed}, lora_scale=${option.lora_scale}`);
+                            appState.bookData.chosen_style = option.style;
+                            console.log(`✅ Parent chose: style=${option.style}, seed=${option.seed}, scale=${option.lora_scale}`);
                             cleanup(true);
                         });
                         
