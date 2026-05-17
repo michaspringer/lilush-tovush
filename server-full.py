@@ -1292,10 +1292,10 @@ Return ONLY the English description, nothing else."""
             'educational': 'חינוכי'
         }
         
-        # Full book - 6 pages!
+        # Full book - 8 pages for all ages (testing longer books)
         pages_by_age = {
-            '0-2': '4',
-            '3-5': '6',
+            '0-2': '8',
+            '3-5': '8',
             '6-8': '8',
             '9-12': '10'
         }
