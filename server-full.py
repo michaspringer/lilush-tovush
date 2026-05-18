@@ -1382,21 +1382,35 @@ floppy ears, dark eyes, red collar"
 4. חיות לא לובשות בגדים! אל תזכיר ביגוד עבור חיות.
 
 🔑 כלל זהב - דמויות בעלות שם:
-אם דמות יש לה שם (למשל "פיצי הפיל", "פליק הכלב") - בכל עמוד שהיא מופיעה,
-ה-illustration חייב לכלול את **סוג** הדמות, לא רק את השם!
+אם דמות יש לה שם (למשל "פיצי הפיל", "פליק הכלב", "סבא מיכה", "סבתא רמית") -
+בכל עמוד שהיא מופיעה, ה-illustration חייב לכלול תיאור מלא שלה!
 
-❌ טעות נפוצה:
-   עמוד 1: text="פיצי הפיל שיחק" / illustration="elephant playing"  ✓
-   עמוד 5: text="פיצי חיבק את דולב" / illustration="pitzi hugging child"  ✗
-   (בעמוד 5 ה-AI לא יודע ש"פיצי" = פיל! יצייר משהו אקראי!)
+🧓 חשוב במיוחד - בני אדם בעלי שם (סבא, סבתא, אמא, אבא, חברים):
+חובה להכניס אותם ל-Character Bible עם תיאור מפורט וקבוע:
+- סבא: "an elderly man, short grey hair, white beard, glasses,
+  warm friendly face, green shirt"
+- סבתא: "an elderly woman, short white wavy hair, kind gentle face, apron"
+התיאור חייב להיות זהה בכל עמוד - אחרת סבא ייראה אדם אחר בכל עמוד!
 
+❌ טעות נפוצה (בני אדם):
+   text="סבא מיכה צוחק" / illustration="grandfather laughing"  ✗
+   (כללי מדי - סבא ייראה שונה בכל עמוד!)
 ✅ נכון:
-   עמוד 5: text="פיצי חיבק את דולב" / illustration="the elephant hugging 
-   the child with its trunk, jungle"
-   (תמיד "elephant", גם אם הטקסט אומר רק "פיצי")
+   Character Bible: "סבא מיכה" = "an elderly man with short grey hair
+   and white beard, glasses, warm smile"
+   ובכל עמוד שמופיע סבא - משתמשים בתיאור המלא הזה.
 
-📌 חוק: ב-illustration תמיד תכתוב את הסוג (elephant/dog/lion),
-   אף פעם לא רק את השם הפרטי (פיצי/פליק).
+❌ טעות נפוצה (חיות):
+   text="פיצי חיבק את דולב" / illustration="pitzi hugging child"  ✗
+✅ נכון: illustration="the elephant hugging the child with its trunk"
+
+📌 חוק: ב-illustration תמיד תכתוב תיאור מלא (elderly man with grey beard /
+   golden retriever dog), אף פעם לא רק שם פרטי (סבא מיכה / פליק).
+
+🚨 מניעת שכפול הילד:
+אם בעמוד מופיעים הילד + דמויות נוספות (סבא, חבר) - ודא ש-illustration
+מתאר את הילד פעם אחת בלבד. אל תכתוב "children" ברבים. תמיד "the child"
+(יחיד) + הדמויות הנוספות בנפרד.
 
 ⭐ הכלל הכי חשוב - סנכרון טקסט-תמונה:
 כל יצור, חיה, אובייקט או אלמנט שמוזכר ב-text (העברית)
@@ -1567,9 +1581,18 @@ floppy ears, dark eyes, red collar"
             character_bible = data.get('character_bible', {})  # 🆕 מילון מלא
             use_lora = bool(lora_url and trigger_word)
             
+            # 🎨 NEW: הסגנון, ה-seed וה-scale שנבחרו - לעקביות עם הספר!
+            chosen_style = data.get('chosen_style', 'classic_illustration')
+            chosen_seed = data.get('chosen_seed')
+            chosen_lora_scale = data.get('chosen_lora_scale', 1.0)
+            child_gender = 'girl' if data.get('child_gender') == 'girl' else 'boy'
+            
             print(f"\n🎨 Regenerating image...")
             if use_lora:
                 print(f"  🎓 Using LoRA: {trigger_word}")
+                print(f"  🎨 Style: {chosen_style}, scale: {chosen_lora_scale}")
+                if chosen_seed is not None:
+                    print(f"  🎲 Seed: {chosen_seed}")
             if character_descriptions:
                 print(f"  📖 Characters in scene: {len(character_descriptions)}")
             if user_prompt:
@@ -1600,8 +1623,12 @@ floppy ears, dark eyes, red collar"
                     lora_url=lora_url,
                     trigger_word=trigger_word,
                     lora_version=lora_version,
+                    style_name=chosen_style,  # 🎨 אותו סגנון כמו הספר!
                     outfit=outfit,
-                    character_descriptions=character_descriptions  # 🆕
+                    character_descriptions=character_descriptions,  # 🆕
+                    seed=chosen_seed,  # 🎲 אותו seed
+                    lora_scale=chosen_lora_scale,  # 💪 אותו scale
+                    child_gender=child_gender  # 🚻
                 )
                 
                 if not image_url:
