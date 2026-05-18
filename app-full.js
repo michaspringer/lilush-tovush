@@ -1146,7 +1146,11 @@ async function regenerateImageForUpdatedText(pageIndex, newText) {
                 lora_version: childLora ? childLora.version : null,
                 outfit: currentStory.outfit || null,
                 character_descriptions: characterDescriptions,
-                character_bible: currentStory.character_bible || {}  // 🆕
+                character_bible: currentStory.character_bible || {},  // 🆕
+                chosen_style: currentStory.chosen_style || appState.bookData.chosen_style || 'classic_illustration',
+                chosen_seed: currentStory.chosen_seed || appState.bookData.chosen_seed || null,
+                chosen_lora_scale: currentStory.chosen_lora_scale || appState.bookData.chosen_lora_scale || 1.0,
+                child_gender: appState.bookData.childGender === 'girl' ? 'girl' : 'boy'
             })
         });
         
@@ -1372,7 +1376,11 @@ async function regenerateImage(pageIndex) {
                 lora_version: childLora ? childLora.version : null,
                 outfit: currentStory.outfit || null,
                 character_descriptions: characterDescriptions,
-                character_bible: currentStory.character_bible || {}  // 🆕
+                character_bible: currentStory.character_bible || {},  // 🆕
+                chosen_style: currentStory.chosen_style || appState.bookData.chosen_style || 'classic_illustration',
+                chosen_seed: currentStory.chosen_seed || appState.bookData.chosen_seed || null,
+                chosen_lora_scale: currentStory.chosen_lora_scale || appState.bookData.chosen_lora_scale || 1.0,
+                child_gender: appState.bookData.childGender === 'girl' ? 'girl' : 'boy'
             })
         });
         
@@ -1728,7 +1736,7 @@ async function showLoraPreview(childLora) {
                     <div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 2rem;">
                         <div style="font-size: 2.5rem; margin-bottom: 1rem;">🎨</div>
                         <div style="color: #5C4A35; font-weight: 600;">יוצר 3 תמונות...</div>
-                        <div style="color: #999; font-size: 0.85rem; margin-top: 0.5rem;">~15 שניות</div>
+                        <div style="color: #999; font-size: 0.85rem; margin-top: 0.5rem;">60-90 שניות</div>
                     </div>
                 </div>
                 
@@ -1770,7 +1778,7 @@ async function showLoraPreview(childLora) {
                 <div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 2rem;">
                     <div style="font-size: 2.5rem; margin-bottom: 1rem;">🎨</div>
                     <div style="color: #5C4A35; font-weight: 600;">יוצר 3 תמונות...</div>
-                    <div style="color: #999; font-size: 0.85rem; margin-top: 0.5rem;">~15 שניות</div>
+                    <div style="color: #999; font-size: 0.85rem; margin-top: 0.5rem;">60-90 שניות</div>
                 </div>
             `;
             
