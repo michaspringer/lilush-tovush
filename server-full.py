@@ -1917,8 +1917,13 @@ floppy ears, dark eyes, red collar"
             if not HAS_REPLICATE:
                 raise Exception('Replicate not configured')
             
-            # Style-specific prompts
+            # Style-specific prompts - מותאם ל-3 הסגנונות החדשים
             style_prompts = {
+                # 3 הסגנונות החדשים
+                "warm_realistic": "high quality, detailed, warm tones",
+                "classic_illustration": "children's book illustration style, warm colors, soft lighting, detailed",
+                "soft_illustration": "soft painterly style, pastel colors, gentle, detailed",
+                # legacy
                 "illustration": "children's book illustration style, warm colors, soft lighting, detailed",
                 "watercolor": "watercolor painting, soft colors, artistic, gentle",
                 "cartoon": "cartoon style, bold colors, playful, fun",
@@ -1926,7 +1931,7 @@ floppy ears, dark eyes, red collar"
                 "comic": "comic book style, bold lines, vibrant"
             }
             
-            style_prompt = style_prompts.get(style_name, style_prompts["illustration"])
+            style_prompt = style_prompts.get(style_name, style_prompts["classic_illustration"])
             
             # Translate Hebrew to English if needed (still useful for legacy/non-LoRA mode)
             if any(ord(c) > 127 for c in prompt):
@@ -1950,19 +1955,19 @@ floppy ears, dark eyes, red collar"
                 "full scene visible, no cropped people, no body parts at edges"
             )
             
-            # 🎨 עיגון סגנון - 3 וריאציות עדינות לפי style_name
-            # ההבדל בא מ-prompt (לא מ-lora_scale קיצוני!)
+            # 🎨 עיגון סגנון - 3 וריאציות מובחנות לפי style_name
+            # מ"צילום ריאליסטי" עד "איור רך"
             style_anchors = {
-                # חמים וריאליסטי - איור עם נגיעות ריאליסטיות, חמים
+                # 📷 ריאליסטי - נראה כמו צילום אמיתי של הילד
                 'warm_realistic': {
-                    'start': "a warm heartfelt illustration with soft realistic details, ",
+                    'start': "a realistic photograph, professional portrait photography, ",
                     'end': (
-                        ", semi-realistic children's illustration, "
-                        "warm natural lighting, soft realistic textures, "
-                        "gentle and lifelike, cozy atmosphere"
+                        ", photorealistic, natural skin texture, realistic lighting, "
+                        "shot on DSLR camera, sharp focus, lifelike, "
+                        "real photograph quality, warm natural tones"
                     )
                 },
-                # איור קלאסי - ספר ילדים סטנדרטי
+                # 🎨 איור קלאסי - ספר ילדים סטנדרטי
                 'classic_illustration': {
                     'start': "a classic children's book illustration, ",
                     'end': (
@@ -1971,7 +1976,7 @@ floppy ears, dark eyes, red collar"
                         "professional children's book art"
                     )
                 },
-                # איור רך - עדין, חלומי, painterly
+                # ✏️ איור רך - עדין, חלומי, painterly
                 'soft_illustration': {
                     'start': "a soft gentle painterly children's illustration, ",
                     'end': (
