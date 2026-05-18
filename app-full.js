@@ -1803,7 +1803,7 @@ async function showLoraPreview(childLora) {
                         `;
                         // תווית מסבירה לפי סוג הווריאציה
                         const labelText = {
-                            'warm_realistic': '🌟 חמים וריאליסטי',
+                            'warm_realistic': '📷 ריאליסטי',
                             'classic_illustration': '🎨 איור קלאסי',
                             'soft_illustration': '✏️ איור רך'
                         }[option.label] || `אפשרות ${idx + 1}`;
