@@ -299,20 +299,15 @@ function previewPhotosInline() {
 }
 
 function showProfileCreation() {
+    // 🤖 פישוט: בלי popups. אם יש מודל - לסיפור; אם לא - להעלאת תמונות.
+    // (ה-init ב-DOMContentLoaded כבר עושה את זה, אבל הפונקציה הזו עוד נקראת
+    // מכפתורי "התחל מחדש" וכו', אז כדאי שתעבוד גם בנפרד.)
     const existingModel = AITrainingManager.loadModel();
-    
     if (existingModel) {
-        console.log('Found existing model:', existingModel);
-        const createdDate = new Date(existingModel.created_at).toLocaleDateString('he-IL');
-        
-        if (confirm(`יש לכם כבר פרופיל AI! 🤖\n\nנוצר ב: ${createdDate}\nתמונות: ${existingModel.photo_count}\n\nרוצים ליצור ספר עם הפרופיל הקיים?`)) {
-            startCreation();
-        } else if (confirm('רוצים ליצור פרופיל חדש?\n\n(זה ידרוס את הפרופיל הקיים)')) {
-            AITrainingManager.deleteModel();
-            showScreen('profileScreen');
-        }
+        console.log('Found existing model - going to story creation');
+        startCreation();
     } else {
-        console.log('No existing model found');
+        console.log('No existing model - going to photo upload');
         showScreen('profileScreen');
     }
 }
@@ -410,65 +405,159 @@ async function startTraining() {
             throw new Error(data.error || 'Training failed');
         }
         
-        document.getElementById('training-process').classList.add('active');
-        document.getElementById('trainingProgressBar').style.width = '60%';
-        document.getElementById('trainingStatus').textContent = 'מאמן AI...';
+        // ✅ האימון התחיל - שמירת מצב ויציאה ממסך ההמתנה.
+        // הזרימה החדשה: אנחנו *לא* ממתינים בלולאה. שומרים את ה-training_id,
+        // ההורה יוצא, וכשהוא חוזר - בודקים סטטוס מול השרת.
+        const accessCode = localStorage.getItem('lilatov_access_code') || 'unknown';
+        const trainingState = {
+            training_id: data.training_id,
+            access_code: accessCode,
+            photo_count: photos.length,
+            started_at: new Date().toISOString()
+        };
+        localStorage.setItem('lilatov_training_pending', JSON.stringify(trainingState));
+        console.log('💾 Training state saved:', trainingState);
         
-        const trainingId = data.training_id;
-        let attempts = 0;
-        const maxAttempts = 60;
-        
-        while (attempts < maxAttempts) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            attempts++;
-            
-            const statusResponse = await fetch(`${SERVER_CONFIG.url}/api/training-status/${trainingId}`);
-            const statusData = await statusResponse.json();
-            
-            const progress = 60 + (attempts / maxAttempts) * 35;
-            document.getElementById('trainingProgressBar').style.width = progress + '%';
-            
-            if (statusData.status === 'succeeded') {
-                document.getElementById('training-done').classList.add('active');
-                document.getElementById('trainingProgressBar').style.width = '100%';
-                document.getElementById('trainingStatus').textContent = 'מוכן! 🎉';
-                
-                const modelData = {
-                    model_id: statusData.model_id,
-                    created_at: new Date().toISOString(),
-                    photo_count: photos.length
-                };
-                
-                AITrainingManager.saveModel(modelData);
-                console.log('🤖 Model saved:', modelData);
-                
-                await new Promise(resolve => setTimeout(resolve, 1500));
-                
-                alert('✅ הפרופיל מוכן!\n\nעכשיו תוכלו ליצור ספרים עם הילד בתמונות! 🌟');
-                
-                startCreation();
-                break;
-                
-            } else if (statusData.status === 'failed') {
-                throw new Error('Training failed: ' + (statusData.error || 'Unknown error'));
-            }
-        }
-        
-        if (attempts >= maxAttempts) {
-            throw new Error('Training timeout');
-        }
+        // 📺 הצגת מסך "צא וחזור עוד 25 דקות"
+        showWaitingScreen(trainingState);
         
     } catch (error) {
         console.error('Training error:', error);
-        alert('❌ שגיאה באימון: ' + error.message + '\n\nאפשר לנסות שוב או ליצור ספר רגיל.');
+        alert('❌ שגיאה באימון: ' + error.message + '\n\nאפשר לנסות שוב.');
         showScreen('profileScreen');
     }
 }
 
-function skipTraining() {
-    if (confirm('האם אתם בטוחים שרוצים לדלג?\n\nבלי פרופיל AI, הילד לא יופיע בתמונות.')) {
-        startCreation();
+// ==========================================
+// ⏳ Async Training - Waiting Screen
+// ==========================================
+
+/**
+ * מציג מסך המתנה ידידותי אחרי שהאימון נשלח.
+ * ההורה רואה הסבר ברור על 25 הדקות, יכול לעזוב, ולחזור.
+ */
+function showWaitingScreen(trainingState) {
+    // יצירת מסך המתנה דינמי - לא דורש HTML מראש
+    let waitScreen = document.getElementById('asyncWaitScreen');
+    if (!waitScreen) {
+        waitScreen = document.createElement('div');
+        waitScreen.id = 'asyncWaitScreen';
+        waitScreen.className = 'screen';
+        document.body.appendChild(waitScreen);
     }
+    
+    const startedAt = new Date(trainingState.started_at);
+    const expectedReady = new Date(startedAt.getTime() + 25 * 60 * 1000);
+    const expectedTimeStr = expectedReady.toLocaleTimeString('he-IL', {
+        hour: '2-digit', minute: '2-digit'
+    });
+    
+    waitScreen.innerHTML = `
+        <div style="max-width: 560px; margin: 2rem auto; padding: 2rem 1.5rem; text-align: center; font-family: 'Heebo', sans-serif;">
+            <div style="font-size: 4rem; margin-bottom: 1rem;">⏳</div>
+            <h1 style="font-family: 'Fredoka', sans-serif; color: #E0552F; font-size: 2rem; margin: 0 0 0.5rem;">
+                הפרופיל בתהליך יצירה!
+            </h1>
+            <p style="color: #5C4A35; font-size: 1.1rem; line-height: 1.6; margin: 1rem 0;">
+                אנחנו יוצרים את הדמות של הילד שלכם.<br>
+                זה תהליך חד-פעמי שלוקח בערך <strong>25 דקות</strong>.
+            </p>
+            
+            <div style="background: #FFF7E8; border: 2px solid #F2A91B; border-radius: 16px; padding: 1.3rem; margin: 1.5rem 0; text-align: right;">
+                <div style="font-weight: 700; color: #2A2118; margin-bottom: 0.6rem;">📍 מה לעשות עכשיו:</div>
+                <ol style="margin: 0; padding-right: 1.3rem; color: #5C4A35; line-height: 1.7;">
+                    <li>אפשר לסגור את הדף ולחזור בעוד 25 דקות</li>
+                    <li>כשתחזרו - היכנסו שוב עם אותו קוד גישה (<strong>${trainingState.access_code}</strong>)</li>
+                    <li>אם הפרופיל מוכן - תוכלו ליצור את הספר! ✨</li>
+                </ol>
+            </div>
+            
+            <div style="color: #5C4A35; font-size: 0.95rem; margin: 1.5rem 0;">
+                ⏰ הפרופיל צפוי להיות מוכן בסביבות <strong>${expectedTimeStr}</strong>
+            </div>
+            
+            <button id="checkStatusBtn" style="background: linear-gradient(135deg, #E0552F, #F2A91B); color: white; border: none; padding: 0.9rem 2rem; font-size: 1.05rem; font-weight: 700; border-radius: 50px; cursor: pointer; font-family: 'Heebo', sans-serif; box-shadow: 0 6px 18px rgba(224, 85, 47, 0.3); margin-top: 0.5rem;">
+                🔄 בדקו אם מוכן עכשיו
+            </button>
+            
+            <div id="checkStatusResult" style="margin-top: 1rem; min-height: 1.5rem; color: #5C4A35;"></div>
+        </div>
+    `;
+    
+    showScreen('asyncWaitScreen');
+    
+    document.getElementById('checkStatusBtn').onclick = () => checkTrainingStatus(trainingState);
+}
+
+/**
+ * בדיקת סטטוס אימון מול השרת.
+ * נקראת אוטומטית בעת כניסה לאפליקציה אם יש אימון ממתין,
+ * וגם בלחיצה ידנית של ההורה על "בדקו אם מוכן".
+ */
+async function checkTrainingStatus(trainingState) {
+    const resultEl = document.getElementById('checkStatusResult');
+    const btnEl = document.getElementById('checkStatusBtn');
+    
+    if (resultEl) resultEl.textContent = '⏳ בודק...';
+    if (btnEl) btnEl.disabled = true;
+    
+    try {
+        const response = await fetch(`${SERVER_CONFIG.url}/api/training-status/${trainingState.training_id}`);
+        const statusData = await response.json();
+        
+        console.log('🔍 Training status:', statusData);
+        
+        if (statusData.status === 'succeeded') {
+            // ✅ האימון הסתיים בהצלחה - שמור מודל, נקה מצב המתנה, המשך לסיפור
+            const modelData = {
+                model_id: statusData.model_id,
+                created_at: new Date().toISOString(),
+                photo_count: trainingState.photo_count
+            };
+            AITrainingManager.saveModel(modelData);
+            localStorage.removeItem('lilatov_training_pending');
+            console.log('🎉 Model saved:', modelData);
+            
+            if (resultEl) resultEl.innerHTML = '✅ <strong>מוכן! מעבירים אתכם ליצירת הספר...</strong>';
+            await new Promise(r => setTimeout(r, 1200));
+            startCreation();
+            
+        } else if (statusData.status === 'failed') {
+            // ❌ האימון נכשל
+            localStorage.removeItem('lilatov_training_pending');
+            if (resultEl) resultEl.innerHTML = '❌ האימון נכשל. אנא נסו שוב.';
+            if (btnEl) btnEl.disabled = false;
+            await new Promise(r => setTimeout(r, 2000));
+            showScreen('profileScreen');
+            
+        } else {
+            // 🕐 עדיין רץ - חישוב זמן שעבר וזמן משוער שנותר
+            const elapsedMin = Math.floor(
+                (Date.now() - new Date(trainingState.started_at).getTime()) / 60000
+            );
+            const remainingMin = Math.max(0, 25 - elapsedMin);
+            
+            if (resultEl) {
+                resultEl.innerHTML = remainingMin > 0
+                    ? `🕐 עדיין בעבודה. עברו ${elapsedMin} דק׳, עוד כ-${remainingMin} דק׳.`
+                    : '🕐 עוד מעט מוכן... נסו לרענן בעוד דקה.';
+            }
+            if (btnEl) btnEl.disabled = false;
+        }
+        
+    } catch (error) {
+        console.error('Status check error:', error);
+        if (resultEl) resultEl.innerHTML = '⚠️ לא הצלחנו לבדוק כרגע. נסו שוב בעוד רגע.';
+        if (btnEl) btnEl.disabled = false;
+    }
+}
+
+function skipTraining() {
+    // 🚫 דילוג על אימון לא נתמך עוד.
+    // הזרימה החדשה: חובה להעלות תמונות ולאמן מודל - אחרת הילד לא יופיע.
+    // נשארה הפונקציה כדי לא לשבור כפתור ב-HTML, אבל היא רק מציגה הודעה.
+    alert('כדי שהילד יופיע בספר, נדרש להעלות תמונות וליצור פרופיל. 📷');
+    showScreen('profileScreen');
 }
 
 // ==========================================
@@ -1251,18 +1340,44 @@ function startOver() {
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 App loaded');
     
-    // Check for saved story
-    const saved = StorageManager.loadCurrentStory();
-    if (saved && confirm('נמצא ספר שמור. להמשיך לעבוד עליו?')) {
-        currentStory = saved;
-        displayStory(currentStory);
-        showScreen('previewScreen');
+    // 🔐 בדיקת קוד גישה - אם אין, חזרה לדף הנחיתה
+    const accessCode = localStorage.getItem('lilatov_access_code');
+    if (!accessCode) {
+        console.log('⛔ No access code - redirecting to landing');
+        window.location.href = '/';
+        return;
     }
+    console.log('✅ Access code:', accessCode);
     
-    // Check for AI model
+    // 🤖 בדיקה אם יש כבר מודל AI מוכן
     const aiModel = AITrainingManager.loadModel();
     if (aiModel) {
-        console.log('🤖 AI Model loaded:', aiModel.model_id);
+        console.log('🤖 AI Model found:', aiModel.model_id);
+        // יש מודל - המשך ישר לסיפור
+        showScreen('creatorScreen');
+        resetForm();
+    } else {
+        // אין מודל - בודק אם יש אימון בתהליך
+        const pendingRaw = localStorage.getItem('lilatov_training_pending');
+        if (pendingRaw) {
+            try {
+                const pending = JSON.parse(pendingRaw);
+                // ודא שהאימון שייך לאותו קוד גישה
+                if (pending.access_code === accessCode) {
+                    console.log('⏳ Pending training found:', pending.training_id);
+                    showWaitingScreen(pending);
+                    // בדיקה אוטומטית מיד בכניסה
+                    setTimeout(() => checkTrainingStatus(pending), 500);
+                    return;
+                }
+            } catch (e) {
+                console.warn('Bad pending training data:', e);
+                localStorage.removeItem('lilatov_training_pending');
+            }
+        }
+        // אין כלום - מתחיל מהעלאת תמונות
+        console.log('📷 No AI Model - starting with photo upload');
+        showScreen('profileScreen');
     }
     
     // Setup event listeners
