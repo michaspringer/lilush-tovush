@@ -103,8 +103,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         elif self.path.startswith('/api/lora-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_lora_status(training_id)
-        elif self.path == '/' or self.path == '/index-full.html':
-            # Serve index-full.html
+        elif self.path == '/' or self.path == '/landing.html':
+            # 🏠 דף הנחיתה - מה שמבקר חדש רואה ראשון
+            self.serve_file('landing.html', 'text/html')
+        elif self.path == '/app' or self.path == '/app-full' or self.path == '/index-full.html':
+            # 📱 האפליקציה עצמה - לכאן מגיעים אחרי קוד גישה
             self.serve_file('index-full.html', 'text/html')
         elif self.path == '/app-full.js':
             self.serve_file('app-full.js', 'application/javascript')
@@ -1366,14 +1369,27 @@ Return ONLY the English description, nothing else."""
 לפני העמודים, צור מילון של כל הדמויות (מלבד הילד הראשי).
 לכל דמות נוספת (חבר, חיה, יצור) - תן תיאור באנגלית קבוע ומפורט שיופיע בכל הספר.
 
-⚠️ התיאור חייב להיות מאוד ספציפי - לעקביות לאורך הספר:
-- גזע מדויק (golden retriever puppy / black labrador / tabby cat)
-- צבע מדויק (golden-brown fur / black and white)
-- גודל (small / medium / large)
-- מאפיינים ייחודיים (floppy ears, fluffy tail, blue collar)
-דוגמה טובה: "a small golden retriever puppy, fluffy golden-brown fur, 
-floppy ears, dark eyes, red collar"
-דוגמה רעה: "a dog" (כללי מדי - ייצא שונה בכל עמוד!)
+⚠️⚠️ התיאור חייב להיות מאוד ספציפי - זו הסיבה #1 לחוסר אחידות!
+חובה שכל תיאור חיה יכלול את 5 המרכיבים האלה, בסדר הזה:
+1. גזע מדויק - חובה! בלי גזע הכלב ייראה שונה לגמרי בכל עמוד.
+   (golden retriever / chocolate labrador / beagle / cocker spaniel)
+   ❌ אסור "dog" / "puppy" כללי - חייב גזע אמיתי.
+2. צבע פרווה מדויק (chocolate brown / golden / black and white)
+3. גודל (small / medium-sized / large)
+4. אורך וסוג פרווה (short smooth coat / long fluffy coat / curly coat)
+   ⚠️ קריטי! אם לא תציין - הכלב יקבל פרווה שונה בכל עמוד.
+5. מאפיינים ייחודיים קבועים (floppy ears, blue collar, white chest patch)
+
+דוגמה טובה (כלב): "a medium-sized chocolate labrador retriever, 
+short smooth chocolate-brown coat, floppy ears, dark brown eyes, 
+a blue collar with a gold tag"
+דוגמה טובה (חתול): "a small grey tabby cat, short fur, green eyes, 
+white paws, a red collar"
+דוגמה רעה: "a small brown dog with floppy ears" 
+(אין גזע! אין סוג פרווה! - ייצא כלב אחר בכל עמוד!)
+
+🔒 כלל ברזל: ברגע שבחרת גזע + צבע + סוג פרווה לדמות - 
+הם נעולים. אסור לשנות מילה. אותו תיאור מדויק חוזר בכל עמוד.
 
 🚫 כללים קריטיים:
 1. אל תתאר את הילד הראשי בכלל - יש לו מודל מאומן!
@@ -1463,7 +1479,7 @@ floppy ears, dark eyes, red collar"
   "characters": [
     {
       "name": "פליק",
-      "english_description": "small brown dog with floppy ears, fluffy fur, friendly eyes",
+      "english_description": "a medium-sized chocolate labrador retriever, short smooth chocolate-brown coat, floppy ears, dark brown eyes, a blue collar with a gold tag",
       "type": "dog"
     }
   ],
@@ -1946,12 +1962,12 @@ floppy ears, dark eyes, red collar"
             
             # Style-specific prompts - מותאם ל-3 הסגנונות החדשים
             style_prompts = {
-                # 3 הסגנונות החדשים
-                "warm_realistic": "high quality, detailed, warm tones",
-                "classic_illustration": "children's book illustration style, warm colors, soft lighting, detailed",
-                "soft_illustration": "soft painterly style, pastel colors, gentle, detailed",
+                # 3 הסגנונות החדשים - צבעים חיים ועשירים
+                "warm_realistic": "high quality, detailed, warm vivid tones, rich natural colors",
+                "classic_illustration": "children's book illustration style, vibrant saturated colors, bright cheerful palette, soft lighting, detailed",
+                "soft_illustration": "soft painterly style, vivid pastel colors, bright and luminous, gentle, detailed",
                 # legacy
-                "illustration": "children's book illustration style, warm colors, soft lighting, detailed",
+                "illustration": "children's book illustration style, vibrant colors, soft lighting, detailed",
                 "watercolor": "watercolor painting, soft colors, artistic, gentle",
                 "cartoon": "cartoon style, bold colors, playful, fun",
                 "realistic": "realistic digital art, detailed, professional",
@@ -1999,7 +2015,8 @@ floppy ears, dark eyes, red collar"
                     'start': "a classic children's book illustration, ",
                     'end': (
                         ", traditional storybook illustration art, "
-                        "warm colors, clean illustration style, "
+                        "vibrant rich colors, bright and cheerful palette, "
+                        "clean illustration style, "
                         "professional children's book art"
                     )
                 },
@@ -2008,7 +2025,8 @@ floppy ears, dark eyes, red collar"
                     'start': "a soft gentle painterly children's illustration, ",
                     'end': (
                         ", dreamy soft illustration, delicate painterly style, "
-                        "pastel warm colors, gentle soft lighting, "
+                        "luminous vivid pastel colors, bright and warm, "
+                        "gentle soft lighting, "
                         "tender storybook art"
                     )
                 },
@@ -2034,16 +2052,25 @@ floppy ears, dark eyes, red collar"
                     f"ONE human {gender_word} as main character "
                     f"({trigger_word}), detailed facial features, recognizable face"
                 )
+                # 🐕 חיזוק הדמות הנלווית: התיאור מוזכר פעמיים -
+                # פעם כהגדרה מלאה ופעם כתזכורת בסוף - כדי שה-LoRA
+                # (שמאומן בכבדות על הילד) לא "יבלע" אותה.
                 full_prompt = (
                     f"{style_anchor_start}"
-                    f"a scene with exactly two characters: "
+                    f"a scene with exactly ONE human child and ONE animal: "
                     f"FIRST: {child_block}. "
                     f"SECOND: an animal companion - {char_part}. "
+                    f"The animal MUST look exactly like this description "
+                    f"in every detail: {char_part}. "
                     f"The animal is a separate creature, the animal wears no clothes. "
-                    f"Only one human child in the image, no duplicate child. "
+                    f"IMPORTANT: only ONE single human child in the entire image, "
+                    f"absolutely no second child, no duplicate child, "
+                    f"no other kids, no children in the background. "
                     f"Scene: {prompt}, "
                     f"{style_prompt}, {clean_composition}"
-                    f"{style_anchor_end}"
+                    f"{style_anchor_end}, "
+                    f"consistent animal appearance: {char_part}, "
+                    f"exactly one human child only"
                 )
             else:
                 # 👤 רק הילד לבד
@@ -2053,12 +2080,14 @@ floppy ears, dark eyes, red collar"
                     f"solo portrait of ONE single human {gender_word}, "
                     f"exactly one child in the entire image, "
                     f"only one person, no duplicate figures, "
+                    f"no second child, no twin, no other kids in the background, "
                     f"{trigger_word}, {outfit_clause}"
                     f"detailed facial features, recognizable face, expressive eyes, "
                     f"the child is the main focus of the scene, "
                     f"{prompt}, "
                     f"{style_prompt}, {clean_composition}"
-                    f"{style_anchor_end}"
+                    f"{style_anchor_end}, "
+                    f"exactly one human child only, single child"
                 )
             
             print(f"  🎨 Generating with LoRA...")
@@ -2198,7 +2227,21 @@ floppy ears, dark eyes, red collar"
                 }
                 for old, new in replacements.items():
                     text = text.replace(old, new)
-                return text
+                
+                # 🛡️ שלב הגנה אחרון - מסיר כל תו שהפונט העברי לא מכיר.
+                # NotoSansHebrew תומך בעברית + לטינית בסיסית + פיסוק נפוץ,
+                # אבל תווים אחרים (סמלים, אמוג'י, פיסוק נדיר) יוצאים ריבועים.
+                # נשמור רק: עברית, לטינית בסיסית, ספרות, רווחים ופיסוק נפוץ.
+                allowed_punct = set(' .,!?;:\'"()[]{}-/\n\t<>=+*%&@#~`^|\\$_')
+                cleaned_chars = []
+                for ch in text:
+                    code = ord(ch)
+                    is_hebrew = 0x0590 <= code <= 0x05FF
+                    is_basic_latin = code < 0x0080
+                    if is_hebrew or is_basic_latin or ch in allowed_punct:
+                        cleaned_chars.append(ch)
+                    # אחרת - מדלגים על התו (במקום להציג ריבוע)
+                return ''.join(cleaned_chars)
             
             def fix_hebrew(text):
                 """מסדר עברית לימין-לשמאל.
