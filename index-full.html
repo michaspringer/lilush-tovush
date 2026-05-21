@@ -260,7 +260,27 @@
                     </div>
                 </div>
                 
-                <div class="form-nav" style="display: flex; gap: 1rem; justify-content: center;">
+                <!-- 🆕 הסבר על תהליך האימון - חשוב שההורה יבין את לוח הזמנים -->
+                <div class="training-info-box" style="background: linear-gradient(135deg, #fff8e1 0%, #fff3e0 100%); border: 2px solid #ffb74d; padding: 1.3rem 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;">
+                    <div style="display: flex; align-items: start; gap: 0.8rem;">
+                        <div style="font-size: 1.8rem; flex-shrink: 0;">⏰</div>
+                        <div style="font-size: 0.95rem; line-height: 1.6; color: #5d4037;">
+                            <strong>שימו לב:</strong> תהליך האימון לוקח כ-25 דקות.<br>
+                            לאחר העלאת התמונות תוכלו לצאת מהאתר ולחזור אליו בזמן שנוח לכם —
+                            הפרופיל המאומן יחכה לכם. כדי לחזור, פשוט היכנסו שוב עם
+                            <strong>אותו קוד הגישה</strong>.
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-nav" style="display: flex; gap: 0.8rem; justify-content: center; flex-wrap: wrap;">
+                    <!-- 🆕 כפתור מחיקת תמונות - מופיע רק כשיש תמונות -->
+                    <button class="btn btn-secondary" 
+                            onclick="clearTrainingPhotos()" 
+                            id="clearPhotosBtn"
+                            style="font-size: 1rem; padding: 0.9rem 1.5rem; display: none;">
+                        🗑️ מחק תמונות
+                    </button>
                     <button class="btn btn-success" 
                             onclick="startTraining()" 
                             id="startTrainingBtn" 
