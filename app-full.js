@@ -145,157 +145,20 @@ const appState = {
 // ==========================================
 
 let uploadedPhotos = []; // Store uploaded photos globally
-let photoOption = 'generic'; // 'generic' or 'real'
+// 🎯 מסלול יחיד בזרימה החדשה: הילד תמיד מ-LoRA מאומן.
+// המשתנה נשאר כדי שקוד ישן ימשיך לעבוד, אבל הערך קבוע.
+let photoOption = 'real';
 
 function selectPhotoOption(option) {
-    photoOption = option;
-    
-    // Update button styles
-    document.querySelectorAll('.photo-option-btn').forEach(btn => {
-        btn.style.border = '3px solid #ddd';
-        btn.style.background = 'white';
-        btn.style.transform = 'scale(1)';
-    });
-    
-    const selectedBtn = document.getElementById(option === 'generic' ? 'optionGeneric' : 'optionReal');
-    selectedBtn.style.border = '3px solid #667eea';
-    selectedBtn.style.background = 'linear-gradient(135deg, #f5f7ff 0%, #e8ecff 100%)';
-    selectedBtn.style.transform = 'scale(1.02)';
-    
-    // Show/hide upload section
-    const uploadSection = document.getElementById('photoUploadSection');
-    const infoBox = document.getElementById('optionInfoBox');
-    
-    if (option === 'real') {
-        uploadSection.style.display = 'block';
-        infoBox.style.display = 'block';
-        infoBox.innerHTML = `
-            <div style="display: flex; align-items: start; gap: 1rem;">
-                <div style="font-size: 2rem;">💡</div>
-                <div>
-                    <div style="font-weight: bold; color: #667eea; margin-bottom: 0.5rem;">איך זה עובד?</div>
-                    <div style="font-size: 0.9rem; color: #666; line-height: 1.6;">
-                        1. העלו 5-10 תמונות ברורות של הילד<br>
-                        2. ה-AI ילמד את הפנים של הילד (10 דקות)<br>
-                        3. הילד יופיע בכל תמונה בספר!<br>
-                        <br>
-                        <strong>💰 עלות:</strong> ₪349 לספר הראשון (כולל אימון AI)<br>
-                        <strong>🎁 ספרים נוספים:</strong> רק ₪149 (בלי אימון מחדש!)
-                    </div>
-                </div>
-            </div>
-        `;
-    } else {
-        uploadSection.style.display = 'none';
-        uploadedPhotos = [];
-        document.getElementById('photoPreviewInline').innerHTML = '';
-        infoBox.style.display = 'block';
-        infoBox.innerHTML = `
-            <div style="display: flex; align-items: start; gap: 1rem;">
-                <div style="font-size: 2rem;">✨</div>
-                <div>
-                    <div style="font-weight: bold; color: #667eea; margin-bottom: 0.5rem;">ספר עם דמות יפה ועקבית</div>
-                    <div style="font-size: 0.9rem; color: #666; line-height: 1.6;">
-                        נשתמש ב-AI כדי ליצור דמות יפה ועקבית שתופיע בכל התמונות.<br>
-                        הדמות לא תהיה הילד שלכם, אבל תהיה חמודה ועקבית!<br>
-                        <br>
-                        <strong>💰 עלות:</strong> ₪149 בלבד<br>
-                        <strong>⚡ זמן:</strong> 2-3 דקות
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-    
-    console.log('📸 Photo option selected:', option);
+    // 🚫 לא בשימוש בזרימה החדשה - הזרימה כעת חד-מסלולית (LoRA בלבד).
+    // הפונקציה נשארת רק כדי לא לשבור onclick ישנים ב-HTML שאולי נשארו.
+    photoOption = 'real';
 }
 
 function previewPhotosInline() {
-    const input = document.getElementById('childPhotosInline');
-    const preview = document.getElementById('photoPreviewInline');
-    
-    if (!preview) return;
-    
-    preview.innerHTML = '';
-    uploadedPhotos = [];
-    
-    if (!input.files || input.files.length === 0) {
-        return;
-    }
-    
-    // For InstantID - 1 photo is enough!
-    if (input.files.length > 10) {
-        alert('⚠️ מקסימום 10 תמונות');
-        input.value = '';
-        return;
-    }
-    
-    console.log(`📸 Processing ${input.files.length} photo(s)...`);
-    
-    // Convert to base64 and store
-    const promises = Array.from(input.files).map(file => {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                uploadedPhotos.push(e.target.result);
-                resolve(e.target.result);
-            };
-            reader.readAsDataURL(file);
-        });
-    });
-    
-    Promise.all(promises).then((results) => {
-        // Clear and show preview container
-        preview.innerHTML = '';
-        preview.style.display = 'grid';
-        
-        results.forEach((src, i) => {
-            const div = document.createElement('div');
-            div.style.cssText = 'position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 3px solid #667eea;';
-            
-            const img = document.createElement('img');
-            img.src = src;
-            img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
-            
-            const badge = document.createElement('div');
-            badge.textContent = i + 1;
-            badge.style.cssText = 'position: absolute; top: 8px; right: 8px; background: #667eea; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.3);';
-            
-            div.appendChild(img);
-            div.appendChild(badge);
-            preview.appendChild(div);
-        });
-        
-        // Add success message
-        const successMsg = document.createElement('div');
-        successMsg.style.cssText = 'grid-column: 1/-1; text-align: center; padding: 1rem; color: white; font-weight: bold; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-top: 0.5rem; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);';
-        successMsg.innerHTML = `✅ ${uploadedPhotos.length} תמונות מוכנות!`;
-        preview.appendChild(successMsg);
-        
-        // Add test button
-        const testBtn = document.createElement('button');
-        testBtn.style.cssText = 'grid-column: 1/-1; padding: 0.75rem 1.5rem; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 0.95rem; box-shadow: 0 4px 12px rgba(245, 87, 108, 0.4); transition: transform 0.2s;';
-        testBtn.innerHTML = '🧪 בדוק המרה לאיור (15 שניות)';
-        testBtn.onmouseover = () => testBtn.style.transform = 'scale(1.05)';
-        testBtn.onmouseout = () => testBtn.style.transform = 'scale(1)';
-        testBtn.onclick = testFaceSwap;
-        preview.appendChild(testBtn);
-        
-        // Add LoRA upgrade button
-        const loraBtn = document.createElement('button');
-        loraBtn.style.cssText = 'grid-column: 1/-1; padding: 0.75rem 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 0.95rem; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); transition: transform 0.2s; margin-top: 0.5rem;';
-        loraBtn.innerHTML = '🎓 שדרג ל-LoRA מאומן<br><span style="font-size: 0.85rem; font-weight: normal;">דמיון מושלם • 10 דקות אימון חד-פעמי</span>';
-        loraBtn.onmouseover = () => loraBtn.style.transform = 'scale(1.05)';
-        loraBtn.onmouseout = () => loraBtn.style.transform = 'scale(1)';
-        loraBtn.onclick = startLoraTraining;
-        preview.appendChild(loraBtn);
-        
-        console.log(`✅ Uploaded ${uploadedPhotos.length} photos successfully`);
-        console.log(`📸 Preview displayed with ${results.length} images`);
-        
-        // Re-validate to enable "Next" button
-        validateStep1();
-    });
+    // 🚫 לא בשימוש בזרימה החדשה - העלאת התמונות עברה ל-profileScreen.
+    // הפונקציה נשארת רק כדי לא לשבור onchange ישן ב-HTML שאולי נשאר.
+    return;
 }
 
 function showProfileCreation() {
@@ -358,12 +221,41 @@ function previewTrainingPhotos() {
         reader.readAsDataURL(file);
     });
     
-    btn.disabled = false;
+    // 🆕 לא מפעיל ישירות את הכפתור - דורש גם שם
+    validateProfileStep();
+}
+
+/**
+ * בודק אם יש גם שם וגם 5+ תמונות, ומפעיל את כפתור "התחל אימון" בהתאם.
+ * נקרא מ-oninput של שדה השם וגם מ-previewTrainingPhotos.
+ */
+function validateProfileStep() {
+    const btn = document.getElementById('startTrainingBtn');
+    const nameInput = document.getElementById('profileChildName');
+    const photosInput = document.getElementById('trainingPhotos');
+    
+    if (!btn) return;
+    
+    const hasName = nameInput && nameInput.value.trim().length >= 2;
+    const hasEnoughPhotos = photosInput && photosInput.files &&
+                            photosInput.files.length >= 5 && photosInput.files.length <= 10;
+    
+    btn.disabled = !(hasName && hasEnoughPhotos);
 }
 
 async function startTraining() {
     const input = document.getElementById('trainingPhotos');
     const files = input.files;
+    
+    // 🆕 קריאת שם הילד שהוקלד ב-profileScreen
+    const childNameInput = document.getElementById('profileChildName');
+    const childName = childNameInput ? childNameInput.value.trim() : '';
+    
+    if (!childName || childName.length < 2) {
+        alert('נא להזין את שם הילד');
+        if (childNameInput) childNameInput.focus();
+        return;
+    }
     
     if (!files || files.length < 5) {
         alert('נא להעלות לפחות 5 תמונות');
@@ -390,27 +282,35 @@ async function startTraining() {
         document.getElementById('trainingProgressBar').style.width = '30%';
         document.getElementById('trainingStatus').textContent = 'שולח לשרת...';
         
-        const response = await fetch(`${SERVER_CONFIG.url}/api/train-model`, {
+        // 🎯 משתמשים ב-endpoint התקין של LoRA (לא ב-train-model הישן והשבור).
+        // שמות הפרמטרים: child_photos + child_name (לא photos!)
+        const accessCode = localStorage.getItem('lilatov_access_code') || 'unknown';
+        
+        // 💾 שמירת השם של הילד ב-localStorage - יישמש בטופס הסיפור
+        localStorage.setItem('lilatov_child_name', childName);
+        console.log('💾 Child name saved:', childName);
+        
+        const response = await fetch(`${SERVER_CONFIG.url}/api/start-lora-training`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                photos: photos,
-                child_name: 'child_' + Date.now()
+                child_photos: photos,
+                child_name: childName  // 🆕 השם האמיתי, לא child_<code>
             })
         });
         
         const data = await response.json();
         
-        if (!response.ok) {
+        if (!response.ok || !data.success) {
             throw new Error(data.error || 'Training failed');
         }
         
         // ✅ האימון התחיל - שמירת מצב ויציאה ממסך ההמתנה.
         // הזרימה החדשה: אנחנו *לא* ממתינים בלולאה. שומרים את ה-training_id,
         // ההורה יוצא, וכשהוא חוזר - בודקים סטטוס מול השרת.
-        const accessCode = localStorage.getItem('lilatov_access_code') || 'unknown';
         const trainingState = {
             training_id: data.training_id,
+            trigger_word: data.trigger_word,  // חשוב! נצטרך אותו בעתיד ליצירת תמונות
             access_code: accessCode,
             photo_count: photos.length,
             started_at: new Date().toISOString()
@@ -502,21 +402,37 @@ async function checkTrainingStatus(trainingState) {
     if (btnEl) btnEl.disabled = true;
     
     try {
-        const response = await fetch(`${SERVER_CONFIG.url}/api/training-status/${trainingState.training_id}`);
+        // 🎯 קוראים ל-lora-status (התקין) ולא ל-training-status (הישן)
+        const response = await fetch(`${SERVER_CONFIG.url}/api/lora-status/${trainingState.training_id}`);
         const statusData = await response.json();
         
         console.log('🔍 Training status:', statusData);
         
         if (statusData.status === 'succeeded') {
-            // ✅ האימון הסתיים בהצלחה - שמור מודל, נקה מצב המתנה, המשך לסיפור
-            const modelData = {
-                model_id: statusData.model_id,
+            // ✅ האימון הסתיים בהצלחה - שמור LoRA מלא (כולל URL ו-version)
+            const loraModel = {
+                child_name: trainingState.access_code,  // קוד הגישה
+                trigger_word: trainingState.trigger_word,
+                lora_url: statusData.lora_url,
+                version: statusData.version,
                 created_at: new Date().toISOString(),
                 photo_count: trainingState.photo_count
             };
-            AITrainingManager.saveModel(modelData);
+            // saveLoraModel קיים בקוד הישן ושומר ב-localStorage תחת המפתח הנכון
+            if (typeof saveLoraModel === 'function') {
+                saveLoraModel(loraModel);
+            } else {
+                // fallback - שמירה ידנית
+                AITrainingManager.saveModel({
+                    model_id: statusData.version,
+                    created_at: loraModel.created_at,
+                    photo_count: trainingState.photo_count,
+                    lora_url: statusData.lora_url,
+                    trigger_word: trainingState.trigger_word
+                });
+            }
             localStorage.removeItem('lilatov_training_pending');
-            console.log('🎉 Model saved:', modelData);
+            console.log('🎉 LoRA Model saved:', loraModel);
             
             if (resultEl) resultEl.innerHTML = '✅ <strong>מוכן! מעבירים אתכם ליצירת הספר...</strong>';
             await new Promise(r => setTimeout(r, 1200));
@@ -580,8 +496,11 @@ function startCreation() {
 }
 
 function resetForm() {
+    // 🆕 שימוש בשם השמור מ-localStorage (הוקלד ב-profileScreen לפני האימון)
+    const savedChildName = localStorage.getItem('lilatov_child_name') || '';
+    
     appState.bookData = {
-        childName: '',
+        childName: savedChildName,
         childAge: '',
         childGender: '',
         theme: '',
@@ -590,7 +509,7 @@ function resetForm() {
     };
     
     const nameInput = document.getElementById('childName');
-    if (nameInput) nameInput.value = '';
+    if (nameInput) nameInput.value = savedChildName;
     
     document.querySelectorAll('.age-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.gender-btn').forEach(btn => btn.classList.remove('active'));
@@ -601,6 +520,11 @@ function resetForm() {
     if (customInput) customInput.value = '';
     
     showFormStep(1);
+    
+    // 🆕 הפעלת validateStep1 כדי שהכפתור "המשך" יופעל אם יש כבר שם
+    if (typeof validateStep1 === 'function') {
+        validateStep1();
+    }
 }
 
 function showFormStep(step) {
