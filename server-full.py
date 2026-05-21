@@ -1,2701 +1,1984 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Children's Book Generator - Full Server
-Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
-"""
+// ==========================================
+// 🌐 Server Configuration
+// ==========================================
+const SERVER_CONFIG = {
+    url: 'https://web-production-ec858.up.railway.app'
+};
 
-from http.server import HTTPServer, SimpleHTTPRequestHandler
-import json
-import urllib.request
-import urllib.error
-from io import BytesIO
-import base64
-import os
-import re
-import time
-import ssl
-
-
-def safe_slug(name, fallback_prefix="child"):
-    """
-    ממיר שם בעברית/לטינית ל-slug בטוח ל-URL ול-Replicate.
-    Replicate דורש: רק אותיות לטיניות קטנות, מספרים, ומקפים.
-    """
-    if not name:
-        return f"{fallback_prefix}-{int(time.time())}"
+// ==========================================
+// 🤖 AI Training Manager
+// ==========================================
+const AITrainingManager = {
+    MODEL_KEY: 'lilush_ai_model',
     
-    name = name.strip().lower()
-    
-    # אם השם כבר באנגלית בלבד - נקה ושמור
-    if re.match(r'^[a-z0-9\s_-]+$', name):
-        slug = re.sub(r'[\s_]+', '-', name)
-        slug = re.sub(r'-+', '-', slug).strip('-')
-        return slug if slug else f"{fallback_prefix}-{int(time.time())}"
-    
-    # אם יש תווי עברית/אחרים - השתמש ב-prefix + timestamp
-    return f"{fallback_prefix}-{int(time.time())}"
-
-# ========================================
-# API Keys
-# ========================================
-CLAUDE_API_KEY = os.environ.get('CLAUDE_API_KEY', 'YOUR_CLAUDE_KEY_HERE')
-LEONARDO_API_KEY = os.environ.get('LEONARDO_API_KEY', '')
-REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN', '')
-REPLICATE_USERNAME = os.environ.get('REPLICATE_USERNAME', '')  # Your Replicate username
-FAL_KEY = os.environ.get('FAL_KEY', '')
-IMAGE_MODE = os.environ.get('IMAGE_MODE', 'leonardo')
-
-# Cloudinary for LoRA training
-CLOUDINARY_URL = os.environ.get('CLOUDINARY_URL', '')
-CLOUDINARY_CLOUD_NAME = os.environ.get('CLOUDINARY_CLOUD_NAME', '')
-CLOUDINARY_API_KEY = os.environ.get('CLOUDINARY_API_KEY', '')
-CLOUDINARY_API_SECRET = os.environ.get('CLOUDINARY_API_SECRET', '')
-
-# Parse CLOUDINARY_URL if provided
-if CLOUDINARY_URL and not CLOUDINARY_CLOUD_NAME:
-    # Format: cloudinary://api_key:api_secret@cloud_name
-    import re
-    match = re.match(r'cloudinary://([^:]+):([^@]+)@(.+)', CLOUDINARY_URL)
-    if match:
-        CLOUDINARY_API_KEY = match.group(1)
-        CLOUDINARY_API_SECRET = match.group(2)
-        CLOUDINARY_CLOUD_NAME = match.group(3)
-        print(f"✅ Cloudinary configured from CLOUDINARY_URL: {CLOUDINARY_CLOUD_NAME}")
-
-# Try to import fal_client
-try:
-    import fal_client
-    HAS_FAL = True
-except ImportError:
-    HAS_FAL = False
-    print("⚠️ fal_client not installed - face swap disabled")
-
-# Try to import replicate
-try:
-    import replicate
-    HAS_REPLICATE = True
-    if REPLICATE_API_TOKEN:
-        os.environ["REPLICATE_API_TOKEN"] = REPLICATE_API_TOKEN
-except ImportError:
-    HAS_REPLICATE = False
-    print("⚠️ replicate not installed - LoRA training disabled")
-# ========================================
-
-CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
-
-class CORSRequestHandler(SimpleHTTPRequestHandler):
-    
-    def end_headers(self):
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        SimpleHTTPRequestHandler.end_headers(self)
-    
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.end_headers()
-    
-    def do_GET(self):
-        if self.path.startswith('/api/training-status/'):
-            training_id = self.path.split('/')[-1]
-            self.handle_training_status(training_id)
-        elif self.path.startswith('/api/lora-status/'):
-            training_id = self.path.split('/')[-1]
-            self.handle_lora_status(training_id)
-        elif self.path == '/' or self.path == '/landing.html':
-            # 🏠 דף הנחיתה - מה שמבקר חדש רואה ראשון
-            self.serve_file('landing.html', 'text/html')
-        elif self.path == '/app' or self.path == '/app-full' or self.path == '/index-full.html':
-            # 📱 האפליקציה עצמה - לכאן מגיעים אחרי קוד גישה
-            self.serve_file('index-full.html', 'text/html')
-        elif self.path == '/app-full.js':
-            self.serve_file('app-full.js', 'application/javascript')
-        elif self.path == '/styles-full.css':
-            self.serve_file('styles-full.css', 'text/css')
-        else:
-            # Try default handler
-            try:
-                SimpleHTTPRequestHandler.do_GET(self)
-            except:
-                self.send_error(404)
-    
-    def serve_file(self, filename, content_type):
-        """Serve a static file"""
-        try:
-            with open(filename, 'rb') as f:
-                content = f.read()
-            
-            self.send_response(200)
-            self.send_header('Content-Type', content_type)
-            self.send_header('Content-Length', str(len(content)))
-            self.end_headers()
-            self.wfile.write(content)
-        except FileNotFoundError:
-            self.send_error(404)
-        except Exception as e:
-            print(f"Error serving {filename}: {e}")
-            self.send_error(500)
-    
-    def do_POST(self):
-        if self.path == '/api/generate-story':
-            self.handle_generate_story()
-        elif self.path == '/api/suggest-alternative':
-            self.handle_suggest_alternative()
-        elif self.path == '/api/generate-pdf':
-            self.handle_generate_pdf()
-        elif self.path == '/api/train-model':
-            self.handle_train_model()
-        elif self.path == '/api/regenerate-image':
-            self.handle_regenerate_image()
-        elif self.path == '/api/test-face-swap':
-            self.handle_test_face_swap()
-        elif self.path == '/api/start-lora-training':
-            self.handle_start_lora_training()
-        elif self.path == '/api/preview-lora':  # 🆕 NEW: LoRA preview check
-            self.handle_preview_lora()
-        elif self.path == '/api/preview-options':  # 🆕 NEW: 3 preview options
-            self.handle_preview_options()
-        elif self.path.startswith('/api/training-status/'):
-            training_id = self.path.split('/')[-1]
-            self.handle_training_status(training_id)
-        else:
-            self.send_error(404)
-    
-    def handle_generate_story(self):
-        try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            request_data = json.loads(post_data.decode('utf-8'))
-            
-            child_name = request_data.get('childName', 'ילד')
-            child_photo = request_data.get('childPhoto')
-            ai_model_id = request_data.get('ai_model_id')
-            
-            # 🎓 NEW: LoRA parameters
-            lora_url = request_data.get('lora_url')
-            trigger_word = request_data.get('trigger_word')
-            lora_version = request_data.get('lora_version')  # 🆕 NEW: trained model version
-            use_lora = request_data.get('use_lora', False) and lora_url and trigger_word
-            
-            # 🎲 NEW: chosen seed - ה-seed שההורה בחר בתצוגה המקדימה
-            chosen_seed = request_data.get('chosen_seed')
-            # 💪 NEW: chosen lora_scale - האיזון שההורה בחר (דמיון מול איור)
-            chosen_lora_scale = request_data.get('chosen_lora_scale', 1.0)
-            # 🎨 NEW: chosen style - הסגנון שההורה בחר (חמים-ריאליסטי/קלאסי/רך)
-            chosen_style = request_data.get('chosen_style', 'classic_illustration')
-            
-            print(f"\n📖 Creating story for: {child_name}")
-            if use_lora:
-                print(f"🎓 USING TRAINED LoRA MODEL!")
-                print(f"   Trigger word: {trigger_word}")
-                print(f"   LoRA URL: {lora_url[:80]}...")
-                if lora_version:
-                    print(f"   Version: {lora_version[:80]}...")
-                if chosen_seed is not None:
-                    print(f"   🎲 Chosen seed: {chosen_seed} (consistent for whole book)")
-                print(f"   💪 Chosen lora_scale: {chosen_lora_scale}")
-                print(f"   🎨 Chosen style: {chosen_style}")
-            elif child_photo:
-                print("📸 Photo uploaded - will use FLUX face swap")
-            if ai_model_id:
-                print(f"🤖 Using trained AI model: {ai_model_id[:20]}...")
-            
-            print("📝 Step 1: Generating story with Claude...")
-            story_data = self.create_story_with_claude(request_data)
-            
-            if ai_model_id:
-                story_data['ai_model_id'] = ai_model_id
-            
-            if IMAGE_MODE != 'none' and story_data.get('pages'):
-                print(f"🎨 Step 2: Generating images ({IMAGE_MODE})...")
-                # 🎓 העבר את ה-LoRA, ה-seed, ה-scale וה-style לפונקציה
-                story_data = self.add_images_to_story(
-                    story_data,
-                    child_photo,
-                    lora_url=lora_url if use_lora else None,
-                    trigger_word=trigger_word if use_lora else None,
-                    lora_version=lora_version if use_lora else None,
-                    chosen_seed=chosen_seed,  # 🎲 עקביות לכל הספר
-                    chosen_lora_scale=chosen_lora_scale,  # 💪 האיזון שנבחר
-                    chosen_style=chosen_style,  # 🎨 הסגנון שנבחר
-                    child_gender='girl' if request_data.get('childGender') == 'girl' else 'boy'  # 🚻
-                )
-            
-            print("✅ Story complete!")
-            self.send_json_response({
-                'success': True,
-                'story': story_data
-            })
-            
-        except Exception as e:
-            print(f"❌ Error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            self.send_json_response({'error': str(e)}, status=500)
-    
-    def handle_preview_lora(self):
-        """
-        🆕 יוצר תמונת תצוגה מקדימה אחת של הילד עם ה-LoRA המאומן.
-        זה לפני יצירת ספר שלם - כדי שהמשתמש יראה איך הילד נראה.
-        """
-        try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            child_name = data.get('child_name', '')
-            lora_url = data.get('lora_url')
-            trigger_word = data.get('trigger_word')
-            lora_version = data.get('lora_version')
-            theme = data.get('theme', 'animals')
-            
-            if not lora_url or not trigger_word:
-                raise Exception('LoRA not configured for this child')
-            
-            print(f"\n🔍 Generating LoRA preview for: {child_name}")
-            print(f"   Trigger: {trigger_word}")
-            
-            # 🛡️ פרומפט בדיקה - תמיד ילד יחיד, ללא אנשים נוספים!
-            # חשוב: לא להזכיר "family members" או "friends" - גורם לשכפול דמות
-            theme_scenes = {
-                'animals': 'in a colorful zoo, friendly cartoon animals in the background, happy smile',
-                'family': 'in a cozy warm living room, soft sunlight, happy smile',
-                'space': 'floating among stars and colorful planets, amazed happy expression',
-                'magic': 'in a magical sparkling forest with glowing lights, wondrous happy look'
-            }
-            scene = theme_scenes.get(theme, theme_scenes['animals'])
-            
-            # יצירת תמונה אחת לבדיקה
-            # medium shot (לא close-up) - עקבי עם הספר, מונע שכפול וריאליזם
-            preview_image = self.generate_image_with_lora(
-                prompt=f"medium shot, {scene}",
-                lora_url=lora_url,
-                trigger_word=trigger_word,
-                lora_version=lora_version
-            )
-            
-            if not preview_image:
-                raise Exception('Failed to generate preview image')
-            
-            print(f"   ✅ Preview ready!")
-            
-            self.send_json_response({
-                'success': True,
-                'preview_image': preview_image,
-                'child_name': child_name,
-                'message': f'תצוגה מקדימה של {child_name}'
-            })
-            
-        except Exception as e:
-            print(f"❌ Preview error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            self.send_json_response({
-                'success': False,
-                'error': str(e)
-            }, status=500)
-    
-    def handle_preview_options(self):
-        """
-        🆕 יוצר 3 תמונות תצוגה מקדימה במקביל.
-        כל אחת עם seed שונה + lora_scale שונה (גיוון אמיתי).
-        רקע נקי - כדי שההורה יוכל לבדוק בקלות את זיהוי הילד.
-        """
-        try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            child_name = data.get('child_name', '')
-            lora_url = data.get('lora_url')
-            trigger_word = data.get('trigger_word')
-            lora_version = data.get('lora_version')
-            
-            if not lora_url or not trigger_word:
-                raise Exception('LoRA not configured for this child')
-            
-            child_gender = data.get('child_gender', 'boy')  # 🚻 מגדר - מונע החלקה מגדרית
-            
-            print(f"\n🎨 Generating 3 preview options for: {child_name}")
-            print(f"   Trigger: {trigger_word}")
-            
-            # 🎯 רקע נקי ופשוט - בלי חיות/ילדים, כדי לבדוק זיהוי בקלות
-            clean_scene = (
-                "standing against a simple soft pastel background, "
-                "plain clean background, happy smile, looking at viewer"
-            )
-            
-            # 🎨 3 וריאציות עדינות - ההבדל בא מהסגנון, לא מ-lora_scale קיצוני!
-            # lora_scale נשאר יציב (0.92-1.0) כדי למנוע עיוותים
-            variations = [
-                {'seed': None, 'lora_scale': 1.0,  'style': 'warm_realistic',
-                 'label': 'warm_realistic'},
-                {'seed': None, 'lora_scale': 0.95, 'style': 'classic_illustration',
-                 'label': 'classic_illustration'},
-                {'seed': None, 'lora_scale': 0.92, 'style': 'soft_illustration',
-                 'label': 'soft_illustration'},
-            ]
-            
-            import random
-            for v in variations:
-                v['seed'] = random.randint(1, 999999)
-            
-            print(f"   🎨 Variations: {[(v['label'], v['lora_scale']) for v in variations]}")
-            
-            # 🚀 יצירת 3 התמונות במקביל (threads)
-            import threading
-            results = [None, None, None]
-            
-            def generate_one(index, variation):
-                try:
-                    seed = variation['seed']
-                    scale = variation['lora_scale']
-                    style = variation['style']
-                    print(f"   🖼️  Option {index+1}/3 (style={style}, scale={scale})...")
-                    img = self.generate_image_with_lora(
-                        prompt=f"medium shot, {clean_scene}",
-                        lora_url=lora_url,
-                        trigger_word=trigger_word,
-                        lora_version=lora_version,
-                        style_name=style,
-                        seed=seed,
-                        lora_scale=scale,
-                        child_gender=child_gender
-                    )
-                    results[index] = {
-                        'image': img,
-                        'seed': seed,
-                        'lora_scale': scale,
-                        'style': style,
-                        'label': variation['label']
-                    }
-                except Exception as e:
-                    print(f"   ⚠️ Option {index+1} failed: {e}")
-                    results[index] = None
-            
-            threads = []
-            for i, variation in enumerate(variations):
-                t = threading.Thread(target=generate_one, args=(i, variation))
-                threads.append(t)
-                t.start()
-            
-            # המתנה לסיום כל ה-threads
-            for t in threads:
-                t.join()
-            
-            # סינון תוצאות שהצליחו
-            options = [r for r in results if r and r.get('image')]
-            
-            if not options:
-                raise Exception('Failed to generate any preview options')
-            
-            print(f"   ✅ {len(options)}/3 preview options ready!")
-            
-            self.send_json_response({
-                'success': True,
-                'options': options,  # [{image, seed, lora_scale, label}, ...]
-                'child_name': child_name
-            })
-            
-        except Exception as e:
-            print(f"❌ Preview options error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            self.send_json_response({
-                'success': False,
-                'error': str(e)
-            }, status=500)
-    
-    def create_story_with_claude(self, data):
-        """יוצר סיפור עם Claude"""
-        prompt = self.build_story_prompt(data)
-        
-        claude_request = {
-            "model": "claude-sonnet-4-20250514",
-            "max_tokens": 2000,
-            "messages": [{"role": "user", "content": prompt}]
-        }
-        
-        headers = {
-            'Content-Type': 'application/json',
-            'x-api-key': CLAUDE_API_KEY,
-            'anthropic-version': '2023-06-01'
-        }
-        
-        req = urllib.request.Request(
-            CLAUDE_API_URL,
-            data=json.dumps(claude_request).encode('utf-8'),
-            headers=headers,
-            method='POST'
-        )
-        
-        with urllib.request.urlopen(req, timeout=60) as response:
-            response_data = json.loads(response.read().decode('utf-8'))
-            content = response_data['content'][0]['text']
-            clean_content = content.replace('```json', '').replace('```', '').strip()
-            story_data = json.loads(clean_content)
-            return story_data
-    
-    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None, lora_version=None, chosen_seed=None, chosen_lora_scale=1.0, chosen_style='classic_illustration', child_gender='boy'):
-        """מוסיף תמונות לסיפור - עם LoRA אם יש, אחרת FLUX + face swap.
-        
-        chosen_seed: אם ניתן - כל עמודי הספר ישתמשו ב-seed הזה (עקביות מלאה!).
-        child_gender: 'boy' או 'girl' - מונע החלקה מגדרית.
-        """
-        pages = story_data.get('pages', [])
-        
-        use_lora = lora_url and trigger_word
-        
-        # 📖 NEW: Character Bible - מילון דמויות שClaude יצר
-        characters = story_data.get('characters', [])
-        char_dict = {}  # name -> english_description
-        for char in characters:
-            name = char.get('name', '').strip()
-            desc = char.get('english_description', '').strip()
-            if name and desc:
-                char_dict[name] = desc
-        
-        if char_dict:
-            print(f"  📖 Character Bible: {len(char_dict)} characters")
-            for name, desc in char_dict.items():
-                print(f"     - {name}: {desc[:60]}...")
-        
-        # 🎽 בחירת ביגוד אחיד לכל הספר
-        consistent_outfit = None
-        if use_lora:
-            import random
-            outfits = [
-                "wearing a yellow t-shirt and blue jeans",
-                "wearing a red striped shirt and khaki shorts",
-                "wearing a green hoodie and dark blue pants",
-                "wearing a white t-shirt with a pattern and beige pants",
-                "wearing an orange sweater and denim shorts",
-                "wearing a purple shirt and gray pants",
-                "wearing a blue polo shirt and brown shorts",
-            ]
-            consistent_outfit = random.choice(outfits)
-            print(f"  🎽 Outfit chosen for entire book: {consistent_outfit}")
-            story_data['outfit'] = consistent_outfit
-        
-        # שמירת ה-Character Bible כך שיהיה זמין לrenegerate
-        story_data['character_bible'] = char_dict
-        
-        if use_lora:
-            print(f"  🎓 Creating {len(pages)} images with LoRA model!")
-            print(f"  🏷️  Trigger word: {trigger_word}")
-            if lora_version:
-                print(f"  📌 Using trained model version directly")
-        elif child_photo:
-            print(f"  🎨 Creating {len(pages)} images with FLUX + face swap...")
-            print(f"  👤 Child will be drawn in illustration style!")
-        else:
-            print(f"  🎨 Creating {len(pages)} images with FLUX (no child)...")
-        
-        for i, page in enumerate(pages):
-            print(f"\n  🖼️  Image {i+1}/{len(pages)}...")
-            
-            # 🐌 Throttle - חכה בין בקשות LoRA
-            # 🎯 NEW: גם לפני הראשון! כי Claude קרא ל-API קודם וצורך 1 בקשה
-            if use_lora:
-                wait_seconds = 12 if i > 0 else 8  # Wait less before first since Claude was earlier
-                print(f"  ⏱️  Waiting {wait_seconds}s (rate limit protection)...")
-                time.sleep(wait_seconds)
-            
-            try:
-                if use_lora:
-                    # 🎓 מסלול LoRA עם Character Bible
-                    illustration = page.get('illustration', '')
-                    page_text = page.get('text', '')  # הטקסט העברי של העמוד
-                    chars_in_scene = page.get('characters_in_scene', [])
-                    
-                    # 🛡️ FIX: זיהוי אוטומטי של דמויות בעמוד
-                    # לא סומכים רק על characters_in_scene של Claude!
-                    # סורקים את הטקסט והתיאור - אם שם דמות מופיע, מוסיפים אותה
-                    detected_chars = set(chars_in_scene)
-                    for char_name in char_dict.keys():
-                        # בדיקה אם שם הדמות מופיע בטקסט העברי או בתיאור
-                        if char_name in page_text or char_name in illustration:
-                            if char_name not in detected_chars:
-                                detected_chars.add(char_name)
-                                print(f"  🔍 Auto-detected character '{char_name}' in page text")
-                    
-                    # 🎯 בנה description עם Character Bible
-                    char_descriptions = []
-                    for char_name in detected_chars:
-                        if char_name in char_dict:
-                            char_descriptions.append(char_dict[char_name])
-                    
-                    if char_descriptions:
-                        print(f"  📖 Using {len(char_descriptions)} character description(s) from Bible")
-                    
-                    image_url = self.generate_image_with_lora(
-                        prompt=illustration,
-                        lora_url=lora_url,
-                        trigger_word=trigger_word,
-                        lora_version=lora_version,
-                        style_name=chosen_style,  # 🎨 הסגנון שההורה בחר
-                        outfit=consistent_outfit,
-                        character_descriptions=char_descriptions,  # 🆕
-                        seed=chosen_seed,  # 🎲 אותו seed לכל הספר - עקביות!
-                        lora_scale=chosen_lora_scale,  # 💪 אותו scale שההורה בחר
-                        child_gender=child_gender  # 🚻 מונע החלקה מגדרית
-                    )
-                    
-                    # Fallback אם נכשל
-                    if not image_url:
-                        print(f"  ⚠️  LoRA failed after retries, falling back to FLUX...")
-                        image_url = self.generate_image_flux_with_face(
-                            illustration,
-                            child_photo
-                        )
-                else:
-                    # מסלול רגיל - FLUX + face swap
-                    image_url = self.generate_image_flux_with_face(
-                        page['illustration'],
-                        child_photo
-                    )
-                
-                page['imageUrl'] = image_url
-                
-            except Exception as e:
-                print(f"  ⚠️  Failed: {str(e)}")
-                page['imageUrl'] = None
-        
-        return story_data
-    
-    def apply_fal_face_swap(self, target_image_b64, face_image_b64):
-        """Face swap with Fal.ai - simple and working"""
-        try:
-            if not FAL_KEY or not HAS_FAL:
-                print("  ⚠️ Fal.ai not configured")
-                return None
-            
-            print(f"  🎭 Starting Fal.ai face swap...")
-            
-            # Set API key
-            os.environ["FAL_KEY"] = FAL_KEY
-            
-            # Use simple face-swap
-            handler = fal_client.submit(
-                "fal-ai/face-swap",
-                arguments={
-                    "base_image_url": target_image_b64,
-                    "swap_image_url": face_image_b64
-                }
-            )
-            
-            print(f"  ⏳ Waiting for Fal.ai...")
-            
-            result = handler.get()
-            
-            if result and 'image' in result:
-                output_url = result['image']['url']
-                
-                # Download result
-                req = urllib.request.Request(
-                    output_url,
-                    headers={'User-Agent': 'Mozilla/5.0'}
-                )
-                
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                
-                with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
-                    img_data = response.read()
-                
-                img_b64 = base64.b64encode(img_data).decode()
-                print(f"  ✅ Fal.ai face swap succeeded!")
-                return f"data:image/jpeg;base64,{img_b64}"
-            
-            print(f"  ⚠️ Fal.ai: No output")
-            return None
-            
-        except Exception as e:
-            print(f"  ⚠️ Fal.ai error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    def apply_instant_id(self, target_image_b64, face_image_b64):
-        """Face swap with working Replicate model"""
-        try:
-            if not REPLICATE_API_TOKEN:
-                print("  ⚠️ No Replicate token")
-                return None
-            
-            print(f"  🎭 Starting Face Swap...")
-            
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            
-            # Ensure data URIs
-            if not target_image_b64.startswith('data:'):
-                target_image_b64 = f"data:image/jpeg;base64,{target_image_b64}"
-            
-            if not face_image_b64.startswith('data:'):
-                face_image_b64 = f"data:image/jpeg;base64,{face_image_b64}"
-            
-            # Use simpler face swap - just swap the prediction endpoint
-            swap_data = {
-                "input": {
-                    "target_image": target_image_b64,
-                    "swap_image": face_image_b64
-                }
-            }
-            
-            headers = {
-                'Authorization': f'Token {REPLICATE_API_TOKEN}',
-                'Content-Type': 'application/json'
-            }
-            
-            # Try lucataco/faceswap - more reliable
-            req = urllib.request.Request(
-                'https://api.replicate.com/v1/models/lucataco/faceswap/predictions',
-                data=json.dumps(swap_data).encode('utf-8'),
-                headers=headers,
-                method='POST'
-            )
-            
-            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                pred_id = result['id']
-            
-            print(f"  ⏳ Face swap processing... ({pred_id})")
-            
-            # Poll for result
-            for attempt in range(60):
-                time.sleep(2)
-                
-                check_req = urllib.request.Request(
-                    f'https://api.replicate.com/v1/predictions/{pred_id}',
-                    headers=headers
-                )
-                
-                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
-                    check_result = json.loads(check_resp.read().decode('utf-8'))
-                    
-                    status = check_result['status']
-                    
-                    if status == 'succeeded':
-                        output_url = check_result['output']
-                        
-                        # Download
-                        img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
-                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
-                            img_data = img_resp.read()
-                        
-                        img_b64 = base64.b64encode(img_data).decode()
-                        print(f"  ✅ Face swap succeeded!")
-                        return f"data:image/jpeg;base64,{img_b64}"
-                    
-                    elif status == 'failed':
-                        error = check_result.get('error', 'Unknown')
-                        print(f"  ❌ Face swap failed: {error}")
-                        return None
-            
-            print(f"  ⏱️ Face swap timeout")
-            return None
-            
-        except Exception as e:
-            print(f"  ⚠️ Face swap error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
-        """מוסיף פנים של ילד לתמונה עם InstantID"""
-        try:
-            if not REPLICATE_API_TOKEN:
-                print("  ⚠️ No Replicate token")
-                return None
-            
-            print(f"  🔄 Starting InstantID...")
-            
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            
-            # InstantID expects data URIs
-            if not target_image_b64.startswith('data:'):
-                target_image_b64 = f"data:image/jpeg;base64,{target_image_b64}"
-            
-            if not face_image_b64.startswith('data:'):
-                face_image_b64 = f"data:image/jpeg;base64,{face_image_b64}"
-            
-            instant_id_data = {
-                "input": {
-                    "image": target_image_b64,
-                    "face_image": face_image_b64,
-                    "prompt": "high quality children's book illustration, colorful, friendly, detailed face",
-                    "negative_prompt": "ugly, distorted, low quality, blurry, bad anatomy, scary",
-                    "num_steps": 20,
-                    "guidance_scale": 5.0,
-                    "ip_adapter_scale": 0.8,
-                    "seed": 42
-                }
-            }
-            
-            headers = {
-                'Authorization': f'Token {REPLICATE_API_TOKEN}',
-                'Content-Type': 'application/json'
-            }
-            
-            # Use the correct InstantID model
-            req = urllib.request.Request(
-                'https://api.replicate.com/v1/models/zsxkib/instant-id/predictions',
-                data=json.dumps(instant_id_data).encode('utf-8'),
-                headers=headers,
-                method='POST'
-            )
-            
-            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                pred_id = result['id']
-            
-            print(f"  ⏳ Waiting for InstantID (prediction: {pred_id})...")
-            
-            # Wait for completion
-            for attempt in range(60):
-                time.sleep(2)
-                
-                check_req = urllib.request.Request(
-                    f'https://api.replicate.com/v1/predictions/{pred_id}',
-                    headers=headers
-                )
-                
-                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
-                    check_result = json.loads(check_resp.read().decode('utf-8'))
-                    
-                    status = check_result['status']
-                    
-                    if status == 'succeeded':
-                        output_url = check_result['output']
-                        
-                        # Download result
-                        if isinstance(output_url, list) and len(output_url) > 0:
-                            output_url = output_url[0]
-                        
-                        img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
-                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
-                            img_data = img_resp.read()
-                        
-                        img_b64 = base64.b64encode(img_data).decode()
-                        print(f"  ✅ InstantID succeeded!")
-                        return f"data:image/jpeg;base64,{img_b64}"
-                    
-                    elif status == 'failed':
-                        error = check_result.get('error', 'Unknown error')
-                        print(f"  ❌ InstantID failed: {error}")
-                        return None
-            
-            print(f"  ⏱️ InstantID timeout")
-            return None
-            
-        except Exception as e:
-            print(f"  ⚠️ InstantID error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    def translate_to_english(self, hebrew_text):
-        """תרגום תיאור תמונה מעברית לאנגלית - מודע להקשר של ספרי ילדים"""
-        try:
-            if not CLAUDE_API_KEY:
-                return hebrew_text  # Fallback
-            
-            prompt = f"""You are translating a scene description for a children's book illustration from Hebrew to English.
-
-Hebrew description: "{hebrew_text}"
-
-CRITICAL translation rules:
-1. This is a CHILDREN'S BOOK scene - translate concretely and literally
-2. Watch for animal body parts - translate them EXACTLY:
-   - "חדק" = "trunk" (elephant's trunk) - NEVER "snake"!
-   - "זנב" = "tail"
-   - "כנף" = "wing"
-   - "טלף" = "hoof"
-   - "קרן" = "horn"
-3. If an animal is mentioned, ALWAYS name the animal explicitly in English
-4. Translate every object and creature mentioned - don't drop anything
-5. Be vivid and specific so an illustrator can draw it accurately
-
-Return ONLY the English translation, no explanations."""
-            
-            claude_request = {
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 300,
-                "messages": [{"role": "user", "content": prompt}]
-            }
-            
-            headers = {
-                'Content-Type': 'application/json',
-                'x-api-key': CLAUDE_API_KEY,
-                'anthropic-version': '2023-06-01'
-            }
-            
-            req = urllib.request.Request(
-                CLAUDE_API_URL,
-                data=json.dumps(claude_request).encode('utf-8'),
-                headers=headers,
-                method='POST'
-            )
-            
-            with urllib.request.urlopen(req, timeout=30) as response:
-                response_data = json.loads(response.read().decode('utf-8'))
-                english_text = response_data['content'][0]['text'].strip()
-                print(f"  🌐 Translated: {english_text[:60]}...")
-                return english_text
-                
-        except Exception as e:
-            print(f"  ⚠️ Translation failed: {str(e)}, using original")
-            return hebrew_text
-    
-    def _story_to_image_description(self, hebrew_story_text, character_bible=None):
-        """
-        🎯 ממיר טקסט סיפור בעברית לתיאור תמונה באנגלית.
-        
-        זה שונה מ-translate_to_english:
-        - translate_to_english: תרגום ישר של תיאור תמונה
-        - _story_to_image_description: מתחקר טקסט סיפור ומחזיר תיאור ויזואלי בלבד
-        
-        character_bible: מילון {שם: תיאור אנגלי} - עוזר לזהות דמויות בעלות שם.
-        
-        דוגמה:
-        טקסט: "ציפור צהובה התקרבה לדולב והגישה לו פרח אדום"
-        חוזר: "yellow bird offering red flower, garden, sunny day"
-        """
-        try:
-            if not CLAUDE_API_KEY:
-                return hebrew_story_text
-            
-            # 🔑 בניית הקשר דמויות - אם יש Character Bible
-            character_context = ""
-            if character_bible:
-                lines = []
-                for name, desc in character_bible.items():
-                    lines.append(f'- "{name}" is: {desc}')
-                if lines:
-                    character_context = (
-                        "\n\nKNOWN CHARACTERS (use these descriptions if the name appears):\n"
-                        + "\n".join(lines)
-                        + "\n(If the text mentions a character name, use its full description above!)"
-                    )
-            
-            prompt = f"""Convert this Hebrew children's story sentence into an English image description (15-25 words).
-
-CRITICAL RULES:
-1. Describe what should be VISUALLY in the image (scene, action, objects, creatures)
-2. DO NOT describe the child's appearance (hair, eyes, age, clothes) - we have a special model
-3. DO NOT mention the child's name
-4. INCLUDE every animal, object, and creature mentioned in the text - don't drop anything!
-
-⚠️ ANIMAL BODY PARTS - translate EXACTLY:
-- "חדק" = "trunk" (elephant trunk) - NEVER translate as "snake"!
-- "זנב" = "tail",  "כנף" = "wing",  "טלף" = "hoof",  "קרן" = "horn"
-- When an animal is mentioned, NAME the animal explicitly (elephant, dog, bird...){character_context}
-
-Hebrew text: "{hebrew_story_text}"
-
-Examples of good descriptions:
-- "yellow bird offering red flower, garden, sunny day"
-- "large grey elephant wrapping its trunk gently around child, jungle background"
-- "small brown puppy jumping near child on green grass, afternoon light"
-- "reaching up toward the moon, starry night sky"
-
-Return ONLY the English description, nothing else."""
-            
-            claude_request = {
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 100,
-                "messages": [{"role": "user", "content": prompt}]
-            }
-            
-            headers = {
-                'Content-Type': 'application/json',
-                'x-api-key': CLAUDE_API_KEY,
-                'anthropic-version': '2023-06-01'
-            }
-            
-            req = urllib.request.Request(
-                CLAUDE_API_URL,
-                data=json.dumps(claude_request).encode('utf-8'),
-                headers=headers,
-                method='POST'
-            )
-            
-            with urllib.request.urlopen(req, timeout=30) as response:
-                response_data = json.loads(response.read().decode('utf-8'))
-                description = response_data['content'][0]['text'].strip()
-                print(f"  🎨 Image description: {description}")
-                return description
-                
-        except Exception as e:
-            print(f"  ⚠️ Story-to-image conversion failed: {str(e)}, falling back to translation")
-            return self.translate_to_english(hebrew_story_text)
-    
-    def generate_image_flux_with_face(self, prompt, child_photo=None):
-        """יצירת תמונה עם FLUX + InstantID - הילד מצוייר באיור!"""
-        try:
-            if not FAL_KEY or not HAS_FAL:
-                raise Exception('Fal.ai not configured')
-            
-            print(f"  🎨 FLUX + InstantID...")
-            
-            # Translate Hebrew to English if needed
-            if any(ord(c) > 127 for c in prompt):
-                prompt = self.translate_to_english(prompt)
-            
-            # FLUX prompt - emphasize illustration style
-            full_prompt = f"{prompt}, children's book illustration style, colorful, friendly, warm, high quality, professional illustration"
-            
-            negative_prompt = "realistic photo, photographic, multiple people, crowd, side view, back view, profile view, hidden face, blurry, low quality"
-            
-            print(f"  📝 Prompt: {full_prompt[:80]}...")
-            
-            # Set API key
-            os.environ["FAL_KEY"] = FAL_KEY
-            
-            # Note: InstantID requires specific Replicate model access
-            # For now, using FLUX + Face Swap as reliable fallback
-            # TODO: Get proper InstantID model access from Replicate
-            
-            # Fallback: FLUX + Face Swap
-            handler = fal_client.submit(
-                "fal-ai/flux/dev",
-                arguments={
-                    "prompt": full_prompt,
-                    "image_size": "landscape_4_3",
-                    "num_inference_steps": 28,
-                    "guidance_scale": 3.5,
-                    "num_images": 1,
-                    "enable_safety_checker": False,
-                    "negative_prompt": negative_prompt
-                }
-            )
-            
-            print(f"  ⏳ Waiting for FLUX...")
-            
-            result = handler.get()
-            
-            if result and 'images' in result and len(result['images']) > 0:
-                output_url = result['images'][0]['url']
-                
-                # Download
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                
-                req = urllib.request.Request(
-                    output_url,
-                    headers={'User-Agent': 'Mozilla/5.0'}
-                )
-                
-                with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
-                    img_data = response.read()
-                
-                img_b64 = base64.b64encode(img_data).decode()
-                image_data = f"data:image/jpeg;base64,{img_b64}"
-                
-                print(f"  ✅ FLUX done! ({len(img_data)} bytes)")
-                
-                # Apply face swap if child photo provided
-                if child_photo:
-                    print(f"  👤 Applying face swap...")
-                    face_swapped = self.apply_fal_face_swap(image_data, child_photo)
-                    if face_swapped:
-                        print(f"  ✅ Child's face added to image!")
-                        return face_swapped
-                    else:
-                        print(f"  ⚠️ Face swap failed, using original FLUX image")
-                
-                return image_data
-            
-            raise Exception("No output from FLUX")
-            
-        except Exception as e:
-            print(f"  ⚠️ Image generation error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
-            
-            # Fallback: Regular FLUX without face reference
-            handler = fal_client.submit(
-                "fal-ai/flux/dev",
-                arguments={
-                    "prompt": full_prompt,
-                    "image_size": "landscape_4_3",
-                    "num_inference_steps": 28,
-                    "guidance_scale": 3.5,
-                    "num_images": 1,
-                    "enable_safety_checker": False
-                }
-            )
-            
-            print(f"  ⏳ Waiting for FLUX...")
-            
-            result = handler.get()
-            
-            if result and 'images' in result and len(result['images']) > 0:
-                output_url = result['images'][0]['url']
-                
-                # Download
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                
-                req = urllib.request.Request(
-                    output_url,
-                    headers={'User-Agent': 'Mozilla/5.0'}
-                )
-                
-                with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
-                    img_data = response.read()
-                
-                img_b64 = base64.b64encode(img_data).decode()
-                print(f"  ✅ FLUX done! ({len(img_data)} bytes)")
-                return f"data:image/jpeg;base64,{img_b64}"
-            
-            raise Exception("No output from FLUX")
-            
-        except Exception as e:
-            print(f"  ⚠️ FLUX error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    def generate_image_leonardo(self, prompt, character_reference=None):
-        """יוצר תמונה עם Leonardo"""
-        try:
-            if not LEONARDO_API_KEY:
-                raise Exception('Leonardo API key missing')
-            
-            if character_reference:
-                print(f"  🎨 Leonardo (with character reference)...")
-            else:
-                print(f"  🎨 Leonardo...")
-            
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            
-            # Translate Hebrew to English if needed
-            if any(ord(c) > 127 for c in prompt):  # Contains non-ASCII (Hebrew)
-                prompt = self.translate_to_english(prompt)
-            
-            # Balanced prompt - clear facial features for face swap while maintaining illustration style
-            full_prompt = f"{prompt}, illustrated children's book style, character with clear visible face and distinct facial features, expressive friendly eyes, recognizable human-like face, colorful vibrant illustration, warm and inviting, professional children's book art, digital illustration"
-            
-            negative_prompt = "no face, hidden face, side view, back view, abstract, overly simplified, stick figure, blurry, distorted, scary, dark, photorealistic, realistic photo"
-            
-            gen_data = {
-                "prompt": full_prompt,
-                "negative_prompt": negative_prompt,
-                "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
-                "width": 1024,
-                "height": 1024,
-                "num_images": 1,
-                "seed": 123456789,
-                "num_inference_steps": 30,  # ← Balanced detail
-                "guidance_scale": 7.5,  # ← Balanced adherence
-                "presetStyle": "ILLUSTRATION"
-            }
-            
-            headers = {
-                'Authorization': f'Bearer {LEONARDO_API_KEY}',
-                'Content-Type': 'application/json'
-            }
-            
-            req = urllib.request.Request(
-                'https://cloud.leonardo.ai/api/rest/v1/generations',
-                data=json.dumps(gen_data).encode('utf-8'),
-                headers=headers,
-                method='POST'
-            )
-            
-            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                gen_id = result['sdGenerationJob']['generationId']
-            
-            # Wait for completion
-            for _ in range(60):
-                time.sleep(1)
-                
-                check_req = urllib.request.Request(
-                    f'https://cloud.leonardo.ai/api/rest/v1/generations/{gen_id}',
-                    headers=headers
-                )
-                
-                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
-                    check_result = json.loads(check_resp.read().decode('utf-8'))
-                    
-                    if check_result['generations_by_pk']['status'] == 'COMPLETE':
-                        img_url = check_result['generations_by_pk']['generated_images'][0]['url']
-                        
-                        # Download
-                        img_req = urllib.request.Request(img_url, headers={'User-Agent': 'Mozilla/5.0'})
-                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
-                            img_data = img_resp.read()
-                        
-                        img_b64 = base64.b64encode(img_data).decode()
-                        print(f"  ✅ Done ({len(img_data)} bytes)")
-                        
-                        return f"data:image/jpeg;base64,{img_b64}"
-            
-            raise Exception("Timeout")
-            
-        except Exception as e:
-            print(f"  ⚠️  Leonardo error: {str(e)}")
-            return None
-    
-    def generate_image_pollinations(self, prompt):
-        """יוצר תמונה עם Pollinations"""
-        try:
-            import urllib.parse
-            
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            
-            full_prompt = f"{prompt}, children's book illustration, colorful"
-            encoded = urllib.parse.quote(full_prompt)
-            url = f"https://image.pollinations.ai/prompt/{encoded}?width=1024&height=1024&nologo=true"
-            
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            
-            with urllib.request.urlopen(req, timeout=90, context=ctx) as response:
-                img_data = response.read()
-            
-            img_b64 = base64.b64encode(img_data).decode()
-            return f"data:image/jpeg;base64,{img_b64}"
-            
-        except Exception as e:
-            print(f"  ⚠️  Pollinations error: {str(e)}")
-            return None
-    
-    def generate_with_trained_model(self, prompt, model_id):
-        """יוצר תמונה עם המודל המאומן!"""
-        try:
-            if not REPLICATE_API_TOKEN:
-                raise Exception('Replicate API token missing')
-            
-            print(f"  🤖 Using trained model...")
-            
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            
-            # Enhanced prompt for children's books
-            full_prompt = f"{prompt}, children's book illustration style, colorful, friendly, warm and inviting, storybook art, high quality"
-            
-            prediction_data = {
-                "version": model_id,
-                "input": {
-                    "prompt": full_prompt,
-                    "num_outputs": 1,
-                    "aspect_ratio": "1:1",
-                    "output_format": "jpg",
-                    "output_quality": 90
-                }
-            }
-            
-            headers = {
-                'Authorization': f'Token {REPLICATE_API_TOKEN}',
-                'Content-Type': 'application/json'
-            }
-            
-            req = urllib.request.Request(
-                'https://api.replicate.com/v1/predictions',
-                data=json.dumps(prediction_data).encode('utf-8'),
-                headers=headers,
-                method='POST'
-            )
-            
-            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                prediction_id = result['id']
-            
-            # Wait for completion
-            for _ in range(60):
-                time.sleep(2)
-                
-                check_req = urllib.request.Request(
-                    f'https://api.replicate.com/v1/predictions/{prediction_id}',
-                    headers=headers
-                )
-                
-                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
-                    check_result = json.loads(check_resp.read().decode('utf-8'))
-                    
-                    if check_result['status'] == 'succeeded':
-                        output_url = check_result['output'][0] if isinstance(check_result['output'], list) else check_result['output']
-                        
-                        # Download image
-                        img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
-                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
-                            img_data = img_resp.read()
-                        
-                        img_b64 = base64.b64encode(img_data).decode()
-                        print(f"  ✅ Image with trained model received!")
-                        
-                        return f"data:image/jpeg;base64,{img_b64}"
-                    
-                    elif check_result['status'] == 'failed':
-                        raise Exception(f"Prediction failed: {check_result.get('error')}")
-            
-            raise Exception("Timeout waiting for trained model")
-            
-        except Exception as e:
-            print(f"  ⚠️ Trained model error: {str(e)}")
-            # Fallback to regular generation
-            print(f"  ⚠️ Falling back to Leonardo...")
-            return self.generate_image_leonardo(prompt)
-    
-    def apply_face_swap(self, target_image_b64, source_face_b64):
-        """החלפת פנים עם Replicate"""
-        try:
-            if not REPLICATE_API_TOKEN:
-                return None
-            
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            
-            swap_data = {
-                "version": "278a81e7ebb22db98bcba54de985d22cc1abeead2754eb1f2af717247be69b34",
-                "input": {
-                    "target_image": target_image_b64,
-                    "swap_image": source_face_b64
-                }
-            }
-            
-            headers = {
-                'Authorization': f'Token {REPLICATE_API_TOKEN}',
-                'Content-Type': 'application/json'
-            }
-            
-            req = urllib.request.Request(
-                'https://api.replicate.com/v1/predictions',
-                data=json.dumps(swap_data).encode('utf-8'),
-                headers=headers,
-                method='POST'
-            )
-            
-            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                pred_id = result['id']
-            
-            # Wait for result
-            for _ in range(60):
-                time.sleep(1)
-                
-                check_req = urllib.request.Request(
-                    f'https://api.replicate.com/v1/predictions/{pred_id}',
-                    headers=headers
-                )
-                
-                with urllib.request.urlopen(check_req, timeout=30, context=ctx) as check_resp:
-                    check_result = json.loads(check_resp.read().decode('utf-8'))
-                    
-                    if check_result['status'] == 'succeeded':
-                        output_url = check_result['output']
-                        
-                        # Download
-                        img_req = urllib.request.Request(output_url, headers={'User-Agent': 'Mozilla/5.0'})
-                        with urllib.request.urlopen(img_req, timeout=60, context=ctx) as img_resp:
-                            img_data = img_resp.read()
-                        
-                        img_b64 = base64.b64encode(img_data).decode()
-                        return f"data:image/jpeg;base64,{img_b64}"
-                    
-                    elif check_result['status'] == 'failed':
-                        return None
-            
-            return None
-            
-        except Exception as e:
-            print(f"  ⚠️  Face swap error: {str(e)}")
-            return None
-    
-    def build_story_prompt(self, data):
-        """בונה prompt ל-Claude"""
-        theme_names = {
-            'animals': 'חיות וטבע',
-            'family': 'משפחה ואהבה',
-            'space': 'חלל וכוכבים',
-            'magic': 'קסם ופנטזיה'
-        }
-        
-        style_names = {
-            'funny': 'מצחיק',
-            'educational': 'חינוכי'
-        }
-        
-        # Full book - 8 pages for all ages (testing longer books)
-        pages_by_age = {
-            '0-2': '8',
-            '3-5': '8',
-            '6-8': '8',
-            '9-12': '10'
-        }
-        
-        pages = pages_by_age.get(data.get('childAge', '3-5'), '1')
-        theme = theme_names.get(data.get('theme', ''), 'הרפתקאות')
-        style = style_names.get(data.get('style', ''), 'מצחיק')
-        
-        # 🎯 NEW: בדיקה אם משתמשים ב-LoRA - אם כן, נשנה את הוראות התמונות
-        use_lora = bool(data.get('use_lora') and data.get('trigger_word'))
-        
-        prompt = f"""צור סיפור ילדים בעברית:
-
-שם: {data.get('childName', 'ילד')}
-גיל: {data.get('childAge', '3-5')}
-מגדר: {'בת' if data.get('childGender') == 'girl' else 'בן'}
-נושא: {theme}
-סגנון: {style}
-אורך: {pages} עמודים
-"""
-        
-        if data.get('customInput'):
-            prompt += f"פרטים: {data['customInput']}\n"
-        
-        # 🎯 שתי גרסאות שונות של הוראות תיאור התמונה - תלוי אם יש LoRA
-        if use_lora:
-            # 🎓 גרסה ל-LoRA: Character Bible + הוראות מחמירות לדמות יחידה
-            prompt += """
-חשוב מאוד! הוראות לכתיבת הסיפור:
-
-📖 שלב ראשון - Character Bible (מילון דמויות):
-לפני העמודים, צור מילון של כל הדמויות (מלבד הילד הראשי).
-לכל דמות נוספת (חבר, חיה, יצור) - תן תיאור באנגלית קבוע ומפורט שיופיע בכל הספר.
-
-⚠️⚠️ התיאור חייב להיות מאוד ספציפי - זו הסיבה #1 לחוסר אחידות!
-חובה שכל תיאור חיה יכלול את 5 המרכיבים האלה, בסדר הזה:
-1. גזע מדויק - חובה! בלי גזע הכלב ייראה שונה לגמרי בכל עמוד.
-   (golden retriever / chocolate labrador / beagle / cocker spaniel)
-   ❌ אסור "dog" / "puppy" כללי - חייב גזע אמיתי.
-2. צבע פרווה מדויק (chocolate brown / golden / black and white)
-3. גודל (small / medium-sized / large)
-4. אורך וסוג פרווה (short smooth coat / long fluffy coat / curly coat)
-   ⚠️ קריטי! אם לא תציין - הכלב יקבל פרווה שונה בכל עמוד.
-5. מאפיינים ייחודיים קבועים (floppy ears, blue collar, white chest patch)
-
-דוגמה טובה (כלב): "a medium-sized chocolate labrador retriever, 
-short smooth chocolate-brown coat, floppy ears, dark brown eyes, 
-a blue collar with a gold tag"
-דוגמה טובה (חתול): "a small grey tabby cat, short fur, green eyes, 
-white paws, a red collar"
-דוגמה רעה: "a small brown dog with floppy ears" 
-(אין גזע! אין סוג פרווה! - ייצא כלב אחר בכל עמוד!)
-
-🔒 כלל ברזל: ברגע שבחרת גזע + צבע + סוג פרווה לדמות - 
-הם נעולים. אסור לשנות מילה. אותו תיאור מדויק חוזר בכל עמוד.
-
-🚫 כללים קריטיים:
-1. אל תתאר את הילד הראשי בכלל - יש לו מודל מאומן!
-2. דמויות אחרות חייבות להיות בעלות תיאור באנגלית מפורט וספציפי
-3. לכל סצנה - בחר אם הילד לבד או עם דמות אחת אחרת (לא יותר!)
-4. חיות לא לובשות בגדים! אל תזכיר ביגוד עבור חיות.
-
-🔑 כלל זהב - דמויות בעלות שם:
-אם דמות יש לה שם (למשל "פיצי הפיל", "פליק הכלב", "סבא מיכה", "סבתא רמית") -
-בכל עמוד שהיא מופיעה, ה-illustration חייב לכלול תיאור מלא שלה!
-
-🧓 חשוב במיוחד - בני אדם בעלי שם (סבא, סבתא, אמא, אבא, חברים):
-חובה להכניס אותם ל-Character Bible עם תיאור מפורט וקבוע:
-- סבא: "an elderly man, short grey hair, white beard, glasses,
-  warm friendly face, green shirt"
-- סבתא: "an elderly woman, short white wavy hair, kind gentle face, apron"
-התיאור חייב להיות זהה בכל עמוד - אחרת סבא ייראה אדם אחר בכל עמוד!
-
-❌ טעות נפוצה (בני אדם):
-   text="סבא מיכה צוחק" / illustration="grandfather laughing"  ✗
-   (כללי מדי - סבא ייראה שונה בכל עמוד!)
-✅ נכון:
-   Character Bible: "סבא מיכה" = "an elderly man with short grey hair
-   and white beard, glasses, warm smile"
-   ובכל עמוד שמופיע סבא - משתמשים בתיאור המלא הזה.
-
-❌ טעות נפוצה (חיות):
-   text="פיצי חיבק את דולב" / illustration="pitzi hugging child"  ✗
-✅ נכון: illustration="the elephant hugging the child with its trunk"
-
-📌 חוק: ב-illustration תמיד תכתוב תיאור מלא (elderly man with grey beard /
-   golden retriever dog), אף פעם לא רק שם פרטי (סבא מיכה / פליק).
-
-🚨 מניעת שכפול הילד:
-אם בעמוד מופיעים הילד + דמויות נוספות (סבא, חבר) - ודא ש-illustration
-מתאר את הילד פעם אחת בלבד. אל תכתוב "children" ברבים. תמיד "the child"
-(יחיד) + הדמויות הנוספות בנפרד.
-
-⭐ הכלל הכי חשוב - סנכרון טקסט-תמונה:
-כל יצור, חיה, אובייקט או אלמנט שמוזכר ב-text (העברית)
-חייב להופיע גם ב-illustration (האנגלית)!
-
-דוגמה:
-❌ טעות: text="הפיל חיבק את דולב בחדק" / illustration="hugging in jungle"
-   (אין פיל בתיאור! התמונה תצא בלי פיל!)
-✅ נכון: text="הפיל חיבק את דולב בחדק" / illustration="a large grey elephant 
-   wrapping its trunk around the child, jungle background"
-
-לפני שאתה כותב illustration - עבור על ה-text ושאל:
-"אילו דברים מוזכרים? פיל? עץ? כדור? כולם חייבים להיות ב-illustration!"
-
-⚠️ זהירות עם איברי גוף של חיות - תרגם נכון לאנגלית:
-- חדק של פיל = "elephant trunk" (לא snake! לא נחש!)
-- זנב = "tail",  כנף = "wing",  טלף = "hoof",  קרן = "horn"
-- תמיד תכתוב את שם החיה במפורש: "elephant", "dog", "lion"
-דוגמה: "הפיל הרים את דולב בחדק" → "an elephant lifting the child with its trunk"
-(שים לב: trunk, ולא snake!)
-
-📝 מבנה הסיפור:
-- text (עברית): טקסט מתאים לגיל
-- illustration (אנגלית): description שכולל את כל האלמנטים מהטקסט (15-25 words)
-
-⚠️ כללים לתיאור תמונה:
-✓ אם רק הילד בסצנה: "alone, [scene with all objects], medium shot"
-✓ אם יש דמות/חיה: "with [full description], [scene with all objects]"
-✗ אל תתאר את הילד: "boy with brown hair", "wearing blue" - אסור!
-✗ אל תכתוב "another child" / "second kid" - גורם לשכפול פנים!
-✗ אל תשכח אף יצור/אובייקט שמוזכר בטקסט!
-
-📏 סוג צילום - השתמש ב-"medium shot" ברוב העמודים:
-- "medium shot" - הילד נראה מהמותניים ומעלה (מומלץ ברירת מחדל)
-- "wide shot" - סצנה מלאה (טוב לעמודי פתיחה/סיום)
-- הימנע מ-"close-up" קיצוני - זה גורם לסגנון לא עקבי בין עמודים
-
-✅ דוגמאות טובות:
-   "alone, joyful in colorful zoo with lions and giraffes, medium shot, sunny day"
-   "with a large grey elephant lifting the child with its trunk, jungle, wide shot"
-   "alone, holding a red balloon, reaching toward a yellow butterfly, green park, medium shot"
-
-❌ דוגמאות רעות:
-   "with another child" → גורם לכפילות פנים!
-   "playing happily" → איפה הפיל/הכלב שמוזכר בטקסט?!
-   "A boy wearing green" → תיאור מיותר ואסור של הילד
-
-פורמט JSON מדויק:
-{
-  "characters": [
-    {
-      "name": "פליק",
-      "english_description": "a medium-sized chocolate labrador retriever, short smooth chocolate-brown coat, floppy ears, dark brown eyes, a blue collar with a gold tag",
-      "type": "dog"
-    }
-  ],
-  "pages": [
-    {
-      "text": "הטקסט בעברית...",
-      "illustration": "alone, playing in colorful zoo with lions, joyful, close-up shot",
-      "characters_in_scene": []
+    saveModel(modelData) {
+        localStorage.setItem(this.MODEL_KEY, JSON.stringify(modelData));
+        console.log('🤖 AI Model saved:', modelData.model_id);
     },
-    {
-      "text": "דולב פגש את פליק הכלב ליד עץ גדול...",
-      "illustration": "with the dog flick beside a big oak tree, green garden, sunny afternoon",
-      "characters_in_scene": ["פליק"]
+    
+    loadModel() {
+        const saved = localStorage.getItem(this.MODEL_KEY);
+        return saved ? JSON.parse(saved) : null;
+    },
+    
+    hasModel() {
+        return !!this.loadModel();
+    },
+    
+    deleteModel() {
+        localStorage.removeItem(this.MODEL_KEY);
     }
-  ]
+};
+
+// ==========================================
+// 👤 Child Profile Manager
+// ==========================================
+const ChildProfileManager = {
+    PROFILE_KEY: 'lilush_child_profile',
+    
+    saveProfile(profile) {
+        localStorage.setItem(this.PROFILE_KEY, JSON.stringify(profile));
+        console.log('👤 Profile saved:', profile.childName);
+    },
+    
+    loadProfile() {
+        const saved = localStorage.getItem(this.PROFILE_KEY);
+        return saved ? JSON.parse(saved) : null;
+    },
+    
+    hasProfile() {
+        return !!this.loadProfile();
+    },
+    
+    deleteProfile() {
+        localStorage.removeItem(this.PROFILE_KEY);
+        AITrainingManager.deleteModel();
+    }
+};
+
+// ==========================================
+// 💾 LocalStorage Manager  
+// ==========================================
+const StorageManager = {
+    CURRENT_STORY_KEY: 'lilush_current_story',
+    HISTORY_KEY: 'lilush_story_history',
+    
+    saveCurrentStory(story) {
+        try {
+            localStorage.setItem(this.CURRENT_STORY_KEY, JSON.stringify(story));
+            this.updateLastSaved();
+            console.log('💾 נשמר אוטומטית');
+            return true;
+        } catch (e) {
+            console.error('❌ שגיאה בשמירה:', e);
+            return false;
+        }
+    },
+    
+    loadCurrentStory() {
+        try {
+            const saved = localStorage.getItem(this.CURRENT_STORY_KEY);
+            if (saved) {
+                return JSON.parse(saved);
+            }
+        } catch (e) {
+            console.error('❌ שגיאה בטעינה:', e);
+        }
+        return null;
+    },
+    
+    saveToHistory(story) {
+        try {
+            let history = this.getHistory();
+            const storyWithMeta = {
+                ...story,
+                id: Date.now(),
+                savedAt: new Date().toISOString()
+            };
+            history.unshift(storyWithMeta);
+            history = history.slice(0, 10);
+            localStorage.setItem(this.HISTORY_KEY, JSON.stringify(history));
+            console.log('📚 נשמר להיסטוריה');
+            return true;
+        } catch (e) {
+            console.error('❌ שגיאה בשמירה להיסטוריה:', e);
+            return false;
+        }
+    },
+    
+    getHistory() {
+        try {
+            const saved = localStorage.getItem(this.HISTORY_KEY);
+            return saved ? JSON.parse(saved) : [];
+        } catch (e) {
+            console.error('❌ שגיאה בטעינת היסטוריה:', e);
+            return [];
+        }
+    },
+    
+    updateLastSaved() {
+        const indicator = document.getElementById('lastSavedIndicator');
+        if (indicator) {
+            const now = new Date().toLocaleTimeString('he-IL');
+            indicator.textContent = `נשמר אוטומטית ב-${now}`;
+        }
+    }
+};
+
+// ==========================================
+// 🎯 Main App State
+// ==========================================
+let currentStory = null;
+const appState = {
+    bookData: {
+        childName: '',
+        childAge: '',
+        childGender: '',
+        theme: '',
+        style: '',
+        customInput: ''
+    }
+};
+
+// ==========================================
+// 🎨 AI Profile Functions
+// ==========================================
+
+let uploadedPhotos = []; // Store uploaded photos globally
+// 🎯 מסלול יחיד בזרימה החדשה: הילד תמיד מ-LoRA מאומן.
+// המשתנה נשאר כדי שקוד ישן ימשיך לעבוד, אבל הערך קבוע.
+let photoOption = 'real';
+
+function selectPhotoOption(option) {
+    // 🚫 לא בשימוש בזרימה החדשה - הזרימה כעת חד-מסלולית (LoRA בלבד).
+    // הפונקציה נשארת רק כדי לא לשבור onclick ישנים ב-HTML שאולי נשארו.
+    photoOption = 'real';
 }
 
-חשוב: אם characters ריק - הילד לבד בכל הסיפור (פשוט יותר ובטוח יותר).
-זכור: כל מה שבטקסט - חייב להיות גם בתיאור התמונה!
-"""
-        else:
-            # גרסה רגילה: תיאור מפורט (לFLUX רגיל)
-            prompt += """
-חשוב מאוד!
-1. הטקסט (text) בעברית בלבד!
-2. תיאור התמונה (illustration) גם בעברית!
-3. תאר דמויות באופן עקבי בכל העמודים
-4. דוגמה: "ילד בן 4 עם שיער קצר וחום לובש חולצה כחולה..."
-
-פורמט JSON:
-{
-  "pages": [
-    {
-      "text": "הטקסט בעברית כאן...",
-      "illustration": "ילד בן 4 עם שיער קצר חום עומד בגן חיות צבעוני..."
-    }
-  ]
+function previewPhotosInline() {
+    // 🚫 לא בשימוש בזרימה החדשה - העלאת התמונות עברה ל-profileScreen.
+    // הפונקציה נשארת רק כדי לא לשבור onchange ישן ב-HTML שאולי נשאר.
+    return;
 }
-"""
-        return prompt
-    
-    def handle_suggest_alternative(self):
-        """מציע חלופות לטקסט"""
-        try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            prompt = f"""הצע 3 חלופות:
-"{data['currentText']}"
 
-פורמט:
-1. ...
-2. ...
-3. ...
-"""
-            
-            claude_request = {
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 500,
-                "messages": [{"role": "user", "content": prompt}]
-            }
-            
-            headers = {
-                'Content-Type': 'application/json',
-                'x-api-key': CLAUDE_API_KEY,
-                'anthropic-version': '2023-06-01'
-            }
-            
-            req = urllib.request.Request(
-                CLAUDE_API_URL,
-                data=json.dumps(claude_request).encode('utf-8'),
-                headers=headers,
-                method='POST'
-            )
-            
-            with urllib.request.urlopen(req, timeout=60) as response:
-                response_data = json.loads(response.read().decode('utf-8'))
-                content = response_data['content'][0]['text']
-                
-                lines = content.strip().split('\n')
-                alternatives = []
-                for line in lines:
-                    clean = line.strip()
-                    if clean and len(clean) > 5:
-                        if clean[0].isdigit() and '. ' in clean:
-                            clean = clean.split('. ', 1)[1]
-                        alternatives.append(clean)
-                
-                self.send_json_response({
-                    'success': True,
-                    'alternatives': alternatives[:3]
-                })
-                
-        except Exception as e:
-            self.send_json_response({'error': str(e)}, status=500)
+function showProfileCreation() {
+    // 🤖 פישוט: בלי popups. אם יש מודל - לסיפור; אם לא - להעלאת תמונות.
+    // (ה-init ב-DOMContentLoaded כבר עושה את זה, אבל הפונקציה הזו עוד נקראת
+    // מכפתורי "התחל מחדש" וכו', אז כדאי שתעבוד גם בנפרד.)
+    const existingModel = AITrainingManager.loadModel();
+    if (existingModel) {
+        console.log('Found existing model - going to story creation');
+        startCreation();
+    } else {
+        console.log('No existing model - going to photo upload');
+        showScreen('profileScreen');
+    }
+}
+
+function previewTrainingPhotos() {
+    const input = document.getElementById('trainingPhotos');
+    const grid = document.getElementById('photoPreviewGrid');
+    const btn = document.getElementById('startTrainingBtn');
     
-    def handle_regenerate_image(self):
-        """מייצר תמונה מחדש עם הנחיות מהמשתמש - תומך ב-LoRA"""
-        try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            page_text = data.get('page_text', '')
-            user_prompt = data.get('user_prompt', '').strip()
-            child_photo = data.get('child_photo')
-            
-            # 🎓 LoRA parameters
-            lora_url = data.get('lora_url')
-            trigger_word = data.get('trigger_word')
-            lora_version = data.get('lora_version')
-            outfit = data.get('outfit')
-            character_descriptions = data.get('character_descriptions', [])  # 🆕
-            character_bible = data.get('character_bible', {})  # 🆕 מילון מלא
-            use_lora = bool(lora_url and trigger_word)
-            
-            # 🎨 NEW: הסגנון, ה-seed וה-scale שנבחרו - לעקביות עם הספר!
-            chosen_style = data.get('chosen_style', 'classic_illustration')
-            chosen_seed = data.get('chosen_seed')
-            chosen_lora_scale = data.get('chosen_lora_scale', 1.0)
-            child_gender = 'girl' if data.get('child_gender') == 'girl' else 'boy'
-            
-            print(f"\n🎨 Regenerating image...")
-            if use_lora:
-                print(f"  🎓 Using LoRA: {trigger_word}")
-                print(f"  🎨 Style: {chosen_style}, scale: {chosen_lora_scale}")
-                if chosen_seed is not None:
-                    print(f"  🎲 Seed: {chosen_seed}")
-            if character_descriptions:
-                print(f"  📖 Characters in scene: {len(character_descriptions)}")
-            if user_prompt:
-                print(f"  👤 User request: {user_prompt[:50]}...")
-            print(f"  📖 Page text: {page_text[:80]}...")
-            
-            # 🎯 NEW: אם הטקסט בעברית - בקש מ-Claude להפוך אותו לתיאור תמונה
-            # מעבירים גם את ה-Character Bible כדי שידע ש"פיצי" = פיל
-            if any(ord(c) > 127 for c in page_text):
-                print(f"  🔄 Converting Hebrew story text to image description...")
-                image_description = self._story_to_image_description(page_text, character_bible)
-                print(f"  📝 Image description: {image_description[:80]}...")
-            else:
-                image_description = page_text
-            
-            # Combine user prompt with image description
-            if user_prompt:
-                final_prompt = f"{user_prompt}, {image_description}"
-            else:
-                final_prompt = image_description
-            
-            print(f"  📝 Final prompt: {final_prompt[:100]}...")
-            
-            # 🎓 STRATEGY 1: Use LoRA if available (preferred!)
-            if use_lora:
-                image_url = self.generate_image_with_lora(
-                    prompt=final_prompt,
-                    lora_url=lora_url,
-                    trigger_word=trigger_word,
-                    lora_version=lora_version,
-                    style_name=chosen_style,  # 🎨 אותו סגנון כמו הספר!
-                    outfit=outfit,
-                    character_descriptions=character_descriptions,  # 🆕
-                    seed=chosen_seed,  # 🎲 אותו seed
-                    lora_scale=chosen_lora_scale,  # 💪 אותו scale
-                    child_gender=child_gender  # 🚻
-                )
-                
-                if not image_url:
-                    print(f"  ⚠️  LoRA failed, falling back to FLUX...")
-                    image_url = self.generate_image_flux_with_face(final_prompt, child_photo)
-            else:
-                # STRATEGY 2: Fallback to FLUX + face swap
-                image_url = self.generate_image_flux_with_face(final_prompt, child_photo)
-            
-            if not image_url:
-                raise Exception("Failed to generate image")
-            
-            # Apply face swap only if NOT using LoRA (LoRA already includes the child)
-            if not use_lora and child_photo and FAL_KEY and HAS_FAL:
-                print(f"  👤 Applying Fal.ai face swap...")
-                face_swapped = self.apply_fal_face_swap(image_url, child_photo)
-                if face_swapped:
-                    image_url = face_swapped
-                    print(f"  ✅ Child added to image!")
-                else:
-                    print(f"  ⚠️ Face swap failed, using original image")
-            
-            print(f"  ✅ Image regenerated successfully!")
-            
-            self.send_json_response({
-                'success': True,
-                'imageUrl': image_url
-            })
-            
-        except Exception as e:
-            error_msg = str(e)
-            print(f"  ❌ Regeneration error: {error_msg}")
-            import traceback
-            traceback.print_exc()
-            self.send_json_response({
-                'success': False,
-                'error': error_msg
-            }, status=500)
+    grid.innerHTML = '';
     
-    def handle_test_face_swap(self):
-        """בודק face swap עם תמונת בדיקה - מהיר!"""
-        try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            child_photo = data.get('child_photo')
-            child_name = data.get('child_name', 'ילד')
-            
-            if not child_photo:
-                raise Exception('No child photo provided')
-            
-            print(f"\n🧪 Testing face swap for {child_name}...")
-            
-            # Test prompt - simple scene
-            test_prompt = f"A cheerful child in a colorful playground, playing happily, sunny day"
-            
-            print(f"  📝 Test prompt: {test_prompt}")
-            
-            # Generate test image with FLUX
-            image_url = self.generate_image_flux_with_face(test_prompt, child_photo)
-            
-            if not image_url:
-                raise Exception("Failed to generate test image")
-            
-            print(f"  ✅ Test complete!")
-            
-            self.send_json_response({
-                'success': True,
-                'imageUrl': image_url,
-                'message': 'Test image generated successfully!'
-            })
-            
-        except Exception as e:
-            error_msg = str(e)
-            print(f"  ❌ Test error: {error_msg}")
-            import traceback
-            traceback.print_exc()
-            self.send_json_response({
-                'success': False,
-                'error': error_msg
-            }, status=500)
+    if (!input.files || input.files.length === 0) {
+        btn.disabled = true;
+        return;
+    }
     
-    def handle_start_lora_training(self):
-        """מתחיל אימון LoRA עם Cloudinary + Replicate - גרסה מתוקנת"""
-        try:
-            if not HAS_REPLICATE or not REPLICATE_API_TOKEN:
-                raise Exception('Replicate not configured')
-            
-            if not CLOUDINARY_CLOUD_NAME or not CLOUDINARY_API_KEY:
-                raise Exception('Cloudinary not configured')
-            
-            if not REPLICATE_USERNAME:
-                raise Exception('REPLICATE_USERNAME not configured in environment variables')
-            
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            child_photos = data.get('child_photos', [])
-            child_name_raw = data.get('child_name', '').strip()
-            
-            if not child_name_raw:
-                raise Exception('Child name required')
-            
-            if len(child_photos) < 5:
-                raise Exception(f'Need at least 5 photos, got {len(child_photos)}')
-            
-            # 🔧 FIX 1: שם בטוח ל-URL (פותר בעיית עברית בURL)
-            child_slug = safe_slug(child_name_raw)
-            
-            print(f"\n🎓 Starting LoRA training")
-            print(f"  👤 Child name (display): {child_name_raw}")
-            print(f"  🔗 Child slug (API): {child_slug}")
-            print(f"  📸 Photos: {len(child_photos)}")
-            
-            # Configure Cloudinary
-            import cloudinary
-            import cloudinary.uploader
-            
-            cloudinary.config(
-                cloud_name=CLOUDINARY_CLOUD_NAME,
-                api_key=CLOUDINARY_API_KEY,
-                api_secret=CLOUDINARY_API_SECRET
-            )
-            
-            # 🔧 FIX 2: trigger_word באנגלית בלבד
-            trigger_word = f"{child_slug.replace('-', '_')}_kid"
-            print(f"  🏷️  Trigger word: {trigger_word}")
-            
-            # Create ZIP
-            import tempfile
-            import zipfile
-            
-            temp_dir = tempfile.mkdtemp()
-            zip_path = os.path.join(temp_dir, 'training_images.zip')
-            
-            print(f"  💾 Creating ZIP...")
-            
-            with zipfile.ZipFile(zip_path, 'w') as zipf:
-                for i, photo_b64 in enumerate(child_photos):
-                    if ',' in photo_b64:
-                        photo_b64 = photo_b64.split(',')[1]
-                    
-                    photo_data = base64.b64decode(photo_b64)
-                    
-                    photo_filename = f"image_{i+1}.jpg"
-                    photo_path = os.path.join(temp_dir, photo_filename)
-                    
-                    with open(photo_path, 'wb') as f:
-                        f.write(photo_data)
-                    
-                    zipf.write(photo_path, photo_filename)
-            
-            print(f"  📦 ZIP: {os.path.getsize(zip_path)} bytes")
-            
-            # 🔧 FIX 4: העלאה ל-Cloudinary כקובץ ציבורי
-            # type="upload" + access_mode="public" מבטיחים שReplicate יוכל להוריד
-            print(f"  ☁️  Uploading to Cloudinary (public)...")
-            upload_result = cloudinary.uploader.upload(
-                zip_path,
-                resource_type="raw",
-                type="upload",
-                folder="lora_training",
-                public_id=f"{child_slug}_{int(time.time())}",
-                access_mode="public",
-                use_filename=False,
-                unique_filename=False
-            )
-            
-            zip_url = upload_result['secure_url']
-            print(f"  ✅ Uploaded: {zip_url}")
-            
-            # 🔧 FIX 5: ודא שה-URL נגיש לפני שולח ל-Replicate
-            # אם Cloudinary מחזיר 401, נכשל מהר ובהבנה
-            print(f"  🔍 Verifying URL is publicly accessible...")
-            try:
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                
-                req = urllib.request.Request(
-                    zip_url,
-                    headers={'User-Agent': 'Mozilla/5.0'},
-                    method='HEAD'
-                )
-                with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
-                    if resp.status == 200:
-                        print(f"  ✅ URL is publicly accessible (HTTP 200)")
-                    else:
-                        print(f"  ⚠️  URL returned HTTP {resp.status}")
-            except urllib.error.HTTPError as he:
-                if he.code == 401 or he.code == 403:
-                    raise Exception(
-                        f'Cloudinary URL not publicly accessible (HTTP {he.code}). '
-                        f'Check Cloudinary settings: Settings → Security → '
-                        f'"Restricted media types" should NOT include "raw", '
-                        f'and "Resource list" delivery should be allowed.'
-                    )
-                else:
-                    print(f"  ⚠️  HEAD check returned {he.code}, continuing anyway...")
-            except Exception as verify_error:
-                print(f"  ⚠️  Could not verify URL ({verify_error}), continuing anyway...")
-            
-            # 🔧 FIX 3: יצור את המודל ב-Replicate לפני training
-            # זה הפתרון לבעיית 404 "destination does not exist"
-            model_name = f"{child_slug}-lora"
-            destination = f"{REPLICATE_USERNAME}/{model_name}"
-            
-            print(f"  📍 Destination: {destination}")
-            print(f"  🏗️  Ensuring model exists at Replicate...")
-            
-            try:
-                replicate.models.create(
-                    owner=REPLICATE_USERNAME,
-                    name=model_name,
-                    visibility="private",
-                    hardware="gpu-t4",
-                    description=f"LoRA model for child book - {child_name_raw}"
-                )
-                print(f"  ✅ Model created: {destination}")
-            except Exception as model_error:
-                err_str = str(model_error).lower()
-                # אם המודל כבר קיים - זה בסדר, ממשיכים
-                if "already exists" in err_str or "already taken" in err_str or "422" in err_str:
-                    print(f"  ℹ️  Model already exists: {destination}")
-                else:
-                    print(f"  ❌ Failed to create model: {model_error}")
-                    raise Exception(f'Could not create Replicate model: {model_error}')
-            
-            # Start Replicate training
-            print(f"  🎓 Starting Replicate training...")
-            
-            training = replicate.trainings.create(
-                version="ostris/flux-dev-lora-trainer:e440909d3512c31646ee2e0c7d6f6f4923224863a6a10c494606e79fb5844497",
-                input={
-                    "input_images": zip_url,
-                    "trigger_word": trigger_word,
-                    "steps": 1000,
-                    "learning_rate": 0.0004,
-                    "resolution": "512,768,1024",
-                    "autocaption": True
-                },
-                destination=destination
-            )
-            
-            print(f"  ✅ Training started: {training.id}")
-            
-            self.send_json_response({
-                'success': True,
-                'training_id': training.id,
-                'trigger_word': trigger_word,
-                'destination': destination,
-                'child_name': child_name_raw,
-                'child_slug': child_slug,
-                'estimated_time': 600
-            })
-            
-        except Exception as e:
-            error_msg = str(e)
-            print(f"  ❌ Training error: {error_msg}")
-            import traceback
-            traceback.print_exc()
-            self.send_json_response({
-                'success': False,
-                'error': error_msg
-            }, status=500)
+    if (input.files.length < 5) {
+        alert('⚠️ נא להעלות לפחות 5 תמונות לתוצאות טובות');
+        btn.disabled = true;
+        return;
+    }
     
-    def handle_lora_status(self, training_id):
-        """בודק סטטוס אימון LoRA"""
-        try:
-            if not HAS_REPLICATE:
-                raise Exception('Replicate not configured')
-            
-            print(f"  🔍 Checking LoRA training: {training_id}")
-            
-            training = replicate.trainings.get(training_id)
-            
-            response = {
-                'training_id': training_id,
-                'status': training.status
-            }
-            
-            if training.status == 'succeeded':
-                response['lora_url'] = training.output.get('weights')
-                response['version'] = training.output.get('version')
-                print(f"  ✅ Training completed!")
-            elif training.status == 'failed':
-                response['error'] = training.error
-                print(f"  ❌ Training failed: {training.error}")
-            else:
-                print(f"  ⏳ Status: {training.status}")
-            
-            self.send_json_response(response)
-            
-        except Exception as e:
-            print(f"  ❌ Status error: {str(e)}")
-            self.send_json_response({
-                'status': 'error',
-                'error': str(e)
-            }, status=500)
+    if (input.files.length > 10) {
+        alert('⚠️ מקסימום 10 תמונות');
+        input.value = '';
+        btn.disabled = true;
+        return;
+    }
     
-    def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration", lora_version=None, outfit=None, character_descriptions=None, seed=None, lora_scale=1.0, child_gender='boy'):
-        """יוצר תמונה עם LoRA מאומן.
-        
-        אם lora_version קיים - משתמשים במודל המאומן ישירות (האסטרטגיה הטובה יותר!)
-        אחרת - נופלים חזרה ל-ostris/flux-dev-lora (legacy)
-        
-        אם outfit ניתן - הילד ילבש את אותו ביגוד בכל התמונות בספר.
-        אם character_descriptions ניתן - מוסיפים תיאור דמויות נלוות (כלב, חבר, וכו').
-        """
-        try:
-            if not HAS_REPLICATE:
-                raise Exception('Replicate not configured')
+    Array.from(input.files).forEach((file, i) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            const div = document.createElement('div');
+            div.style.cssText = 'position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);';
             
-            # Style-specific prompts - מותאם ל-3 הסגנונות החדשים
-            style_prompts = {
-                # 3 הסגנונות החדשים - צבעים חיים ועשירים
-                "warm_realistic": "high quality, detailed, warm vivid tones, rich natural colors",
-                "classic_illustration": "children's book illustration style, vibrant saturated colors, bright cheerful palette, soft lighting, detailed",
-                "soft_illustration": "soft painterly style, vivid pastel colors, bright and luminous, gentle, detailed",
-                # legacy
-                "illustration": "children's book illustration style, vibrant colors, soft lighting, detailed",
-                "watercolor": "watercolor painting, soft colors, artistic, gentle",
-                "cartoon": "cartoon style, bold colors, playful, fun",
-                "realistic": "realistic digital art, detailed, professional",
-                "comic": "comic book style, bold lines, vibrant"
-            }
+            const img = document.createElement('img');
+            img.src = e.target.result;
+            img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
             
-            style_prompt = style_prompts.get(style_name, style_prompts["classic_illustration"])
+            const badge = document.createElement('div');
+            badge.textContent = i + 1;
+            badge.style.cssText = 'position: absolute; top: 5px; right: 5px; background: #667eea; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;';
             
-            # Translate Hebrew to English if needed (still useful for legacy/non-LoRA mode)
-            if any(ord(c) > 127 for c in prompt):
-                prompt = self.translate_to_english(prompt)
-            
-            # 🎯 בניית פרומפט אופטימלית עבור LoRA
-            outfit_part = f"{outfit}" if outfit else ""
-            
-            # 📖 הוספת Character Bible descriptions
-            char_part = ""
-            has_other_chars = False
-            if character_descriptions:
-                # הפרדה ברורה: כל דמות מתוארת בנפרד
-                char_list = ". ".join(character_descriptions)
-                char_part = char_list
-                has_other_chars = True
-            
-            # 🧹 ניקוי שוליים - למנוע רגליים/ידיים חתוכות
-            clean_composition = (
-                "clean composition, well-framed, centered subjects, "
-                "full scene visible, no cropped people, no body parts at edges"
-            )
-            
-            # 🎨 עיגון סגנון - 3 וריאציות מובחנות לפי style_name
-            # מ"צילום ריאליסטי" עד "איור רך"
-            style_anchors = {
-                # 📷 ריאליסטי - נראה כמו צילום אמיתי של הילד
-                'warm_realistic': {
-                    'start': "a realistic photograph, professional portrait photography, ",
-                    'end': (
-                        ", photorealistic, natural skin texture, realistic lighting, "
-                        "shot on DSLR camera, sharp focus, lifelike, "
-                        "real photograph quality, warm natural tones"
-                    )
-                },
-                # 🎨 איור קלאסי - ספר ילדים סטנדרטי
-                'classic_illustration': {
-                    'start': "a classic children's book illustration, ",
-                    'end': (
-                        ", traditional storybook illustration art, "
-                        "vibrant rich colors, bright and cheerful palette, "
-                        "clean illustration style, "
-                        "professional children's book art"
-                    )
-                },
-                # ✏️ איור רך - עדין, חלומי, painterly
-                'soft_illustration': {
-                    'start': "a soft gentle painterly children's illustration, ",
-                    'end': (
-                        ", dreamy soft illustration, delicate painterly style, "
-                        "luminous vivid pastel colors, bright and warm, "
-                        "gentle soft lighting, "
-                        "tender storybook art"
-                    )
-                },
-            }
-            # ברירת מחדל - איור קלאסי
-            anchor = style_anchors.get(style_name, style_anchors['classic_illustration'])
-            style_anchor_start = anchor['start']
-            style_anchor_end = anchor['end']
-            
-            # 🎯 בניית הפרומפט - מבנה מובנה עם הפרדה ברורה בין דמויות
-            # 🚻 מילת מגדר - מונעת "החלקה" של הילד למגדר אחר
-            gender_word = "young girl" if child_gender == 'girl' else "young boy"
-            
-            if has_other_chars:
-                # 🐕 יש דמות נוספת (כלב/חבר) - מבנה מפורש שמפריד ביניהן
-                # חשוב: מתארים את הילד כיחידה סגורה, ואז הדמות כיחידה נפרדת
-                # כדי שה-outfit לא "ידלוף" לכלב
-                child_block = (
-                    f"ONE human {gender_word} as main character "
-                    f"({trigger_word}), the child wearing {outfit_part}, "
-                    f"detailed facial features, recognizable face"
-                    if outfit_part else
-                    f"ONE human {gender_word} as main character "
-                    f"({trigger_word}), detailed facial features, recognizable face"
-                )
-                # 🐕 חיזוק הדמות הנלווית: התיאור מוזכר פעמיים -
-                # פעם כהגדרה מלאה ופעם כתזכורת בסוף - כדי שה-LoRA
-                # (שמאומן בכבדות על הילד) לא "יבלע" אותה.
-                full_prompt = (
-                    f"{style_anchor_start}"
-                    f"a scene with exactly ONE human child and ONE animal: "
-                    f"FIRST: {child_block}. "
-                    f"SECOND: an animal companion - {char_part}. "
-                    f"The animal MUST look exactly like this description "
-                    f"in every detail: {char_part}. "
-                    f"The animal is a separate creature, the animal wears no clothes. "
-                    f"IMPORTANT: only ONE single human child in the entire image, "
-                    f"absolutely no second child, no duplicate child, "
-                    f"no other kids, no children in the background. "
-                    f"Scene: {prompt}, "
-                    f"{style_prompt}, {clean_composition}"
-                    f"{style_anchor_end}, "
-                    f"consistent animal appearance: {char_part}, "
-                    f"exactly one human child only"
-                )
-            else:
-                # 👤 רק הילד לבד
-                outfit_clause = f"the child wearing {outfit_part}, " if outfit_part else ""
-                full_prompt = (
-                    f"{style_anchor_start}"
-                    f"solo portrait of ONE single human {gender_word}, "
-                    f"exactly one child in the entire image, "
-                    f"only one person, no duplicate figures, "
-                    f"no second child, no twin, no other kids in the background, "
-                    f"{trigger_word}, {outfit_clause}"
-                    f"detailed facial features, recognizable face, expressive eyes, "
-                    f"the child is the main focus of the scene, "
-                    f"{prompt}, "
-                    f"{style_prompt}, {clean_composition}"
-                    f"{style_anchor_end}, "
-                    f"exactly one human child only, single child"
-                )
-            
-            print(f"  🎨 Generating with LoRA...")
-            print(f"  📝 Prompt: {full_prompt[:280]}...")
-            
-            # 🔄 Retry logic for rate limit (429) errors
-            def _run_with_retry(model_target, input_params, max_retries=3):
-                """מריץ replicate.run עם retry אוטומטי במקרה של rate limit"""
-                last_error = None
-                for attempt in range(max_retries):
-                    try:
-                        return replicate.run(model_target, input=input_params)
-                    except Exception as e:
-                        last_error = e
-                        err_str = str(e).lower()
-                        # אם זה rate limit - חכה ונסה שוב
-                        if '429' in err_str or 'throttled' in err_str or 'rate limit' in err_str:
-                            wait_time = 30 if attempt == 0 else 60
-                            print(f"  ⏸️  Rate limit hit (attempt {attempt+1}/{max_retries}), waiting {wait_time}s...")
-                            time.sleep(wait_time)
-                            continue
-                        # שגיאה אחרת - נזרק מיד
-                        raise
-                # אם הגענו לכאן - כל הניסיונות נכשלו
-                raise last_error
-            
-            # 🎲 בניית input params - עם seed אם ניתן (לעקביות)
-            base_input = {
-                "num_outputs": 1,
-                "aspect_ratio": "4:3",
-                "output_format": "jpg",
-                "guidance_scale": 3.5,
-                "output_quality": 90,
-                "num_inference_steps": 28,
-                "disable_safety_checker": True
-            }
-            if seed is not None:
-                base_input["seed"] = int(seed)
-                print(f"  🎲 Using fixed seed: {seed}")
-            
-            print(f"  💪 LoRA scale: {lora_scale}")
-            
-            # 🎯 STRATEGY 1 (Preferred): Use the trained model directly
-            if lora_version:
-                print(f"  📌 Using trained model directly (best quality)")
-                strategy1_input = dict(base_input)
-                strategy1_input["prompt"] = full_prompt
-                strategy1_input["lora_scale"] = lora_scale
-                output = _run_with_retry(lora_version, strategy1_input)
-            else:
-                # 🔧 STRATEGY 2 (Fallback/Legacy): Use ostris/flux-dev-lora with weights URL
-                print(f"  ⚠️  No version, using legacy ostris/flux-dev-lora")
-                strategy2_input = dict(base_input)
-                strategy2_input["prompt"] = full_prompt
-                strategy2_input["lora_url"] = lora_url
-                strategy2_input["lora_scale"] = lora_scale
-                output = _run_with_retry("ostris/flux-dev-lora", strategy2_input)
-            
-            if output and len(output) > 0:
-                image_url = output[0]
-                
-                # Download
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                
-                req = urllib.request.Request(
-                    image_url,
-                    headers={'User-Agent': 'Mozilla/5.0'}
-                )
-                
-                with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
-                    img_data = response.read()
-                
-                img_b64 = base64.b64encode(img_data).decode()
-                print(f"  ✅ LoRA image generated! ({len(img_data)} bytes)")
-                return f"data:image/jpeg;base64,{img_b64}"
-            
-            raise Exception("No output from LoRA generation")
-            
-        except Exception as e:
-            print(f"  ❌ LoRA generation error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
+            div.appendChild(img);
+            div.appendChild(badge);
+            grid.appendChild(div);
+        };
+        reader.readAsDataURL(file);
+    });
     
-    def handle_generate_pdf(self):
-        """יוצר PDF עם תמונות ועברית - גרסה משופרת"""
-        try:
-            from reportlab.lib.pagesizes import A4
-            from reportlab.pdfgen import canvas
-            from reportlab.pdfbase import pdfmetrics
-            from reportlab.pdfbase.ttfonts import TTFont
-            from reportlab.lib.utils import simpleSplit, ImageReader
-            from PIL import Image as PILImage
-            
-            try:
-                # עברית צריכה רק bidi - לא arabic_reshaper!
-                from bidi.algorithm import get_display
-                has_bidi = True
-            except:
-                has_bidi = False
-                print("  ⚠️ python-bidi not available - Hebrew will be reversed!")
-            
-            def clean_text_for_pdf(text):
-                """מנקה תווים מיוחדים שהפונט NotoSansHebrew לא תומך בהם"""
-                if not text:
-                    return text
-                # מילון החלפות - תווים בעייתיים → תווים רגילים שיש בכל פונט
-                replacements = {
-                    # ציטוטים מתולתלים → ציטוטים רגילים
-                    '\u201C': '"',  # left double quotation mark
-                    '\u201D': '"',  # right double quotation mark
-                    '\u2018': "'",  # left single quotation mark
-                    '\u2019': "'",  # right single quotation mark
-                    '\u201E': '"',  # double low-9 quotation mark
-                    '\u201A': "'",  # single low-9 quotation mark
-                    # גרש וגרשיים עבריים → תווים רגילים
-                    '\u05F3': "'",  # Hebrew geresh
-                    '\u05F4': '"',  # Hebrew gershayim
-                    # נקודות, מקפים מיוחדים
-                    '\u2026': '...',  # ellipsis
-                    '\u2013': '-',    # en dash
-                    '\u2014': '-',    # em dash
-                    '\u2012': '-',    # figure dash
-                    '\u2015': '-',    # horizontal bar
-                    '\u00A0': ' ',    # non-breaking space
-                    '\u200E': '',     # left-to-right mark (invisible)
-                    '\u200F': '',     # right-to-left mark (invisible)
-                    '\u200B': '',     # zero-width space
-                    '\u200C': '',     # zero-width non-joiner
-                    '\u200D': '',     # zero-width joiner
-                    '\u2028': ' ',    # line separator
-                    '\u2029': ' ',    # paragraph separator
-                    '\uFEFF': '',     # byte order mark
-                    '\u061C': '',     # arabic letter mark
+    // 🆕 לא מפעיל ישירות את הכפתור - דורש גם שם
+    validateProfileStep();
+}
+
+/**
+ * בודק אם יש גם שם וגם 5+ תמונות, ומפעיל את כפתור "התחל אימון" בהתאם.
+ * נקרא מ-oninput של שדה השם וגם מ-previewTrainingPhotos.
+ */
+function validateProfileStep() {
+    const btn = document.getElementById('startTrainingBtn');
+    const nameInput = document.getElementById('profileChildName');
+    const photosInput = document.getElementById('trainingPhotos');
+    const clearBtn = document.getElementById('clearPhotosBtn');
+    
+    if (!btn) return;
+    
+    const hasName = nameInput && nameInput.value.trim().length >= 2;
+    const photoCount = photosInput && photosInput.files ? photosInput.files.length : 0;
+    const hasEnoughPhotos = photoCount >= 5 && photoCount <= 10;
+    
+    btn.disabled = !(hasName && hasEnoughPhotos);
+    
+    // 🆕 כפתור "מחק תמונות" מופיע רק כשיש לפחות תמונה אחת שנבחרה
+    if (clearBtn) {
+        clearBtn.style.display = photoCount > 0 ? 'inline-block' : 'none';
+    }
+}
+
+/**
+ * 🆕 מנקה את התמונות שנבחרו ואת התצוגה המקדימה.
+ * מאפשר להורה להתחיל מחדש בלי לרענן את הדף.
+ */
+function clearTrainingPhotos() {
+    if (!confirm('למחוק את כל התמונות שהעלית?')) return;
+    
+    const input = document.getElementById('trainingPhotos');
+    const preview = document.getElementById('photoPreviewGrid');
+    
+    if (input) input.value = '';
+    if (preview) preview.innerHTML = '';
+    
+    validateProfileStep();
+    console.log('🗑️ Training photos cleared');
+}
+
+/**
+ * דוחס תמונה בצד הלקוח לרוחב מקסימלי + איכות JPEG.
+ * חיוני לפני שליחה לשרת - תמונות מטלפון (4000px, 3-5MB) יוצרות
+ * ZIP של 15+ MB שעובר את מגבלת 10MB של Cloudinary.
+ * 
+ * @param {File} file - קובץ התמונה המקורי
+ * @param {number} maxWidth - רוחב מקסימלי בפיקסלים (ברירת מחדל 1024)
+ * @param {number} quality - איכות JPEG 0-1 (ברירת מחדל 0.85)
+ * @returns {Promise<string>} - data URL של התמונה המכווצת
+ */
+function compressImage(file, maxWidth = 1024, quality = 0.85) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onerror = () => reject(new Error('Failed to load image'));
+            img.onload = () => {
+                // חישוב מימדים חדשים תוך שמירה על יחס
+                let { width, height } = img;
+                if (width > maxWidth) {
+                    height = Math.round(height * maxWidth / width);
+                    width = maxWidth;
                 }
-                for old, new in replacements.items():
-                    text = text.replace(old, new)
                 
-                # 🛡️ שלב הגנה אחרון - מסיר כל תו שהפונט העברי לא מכיר.
-                # NotoSansHebrew תומך בעברית + לטינית בסיסית + פיסוק נפוץ,
-                # אבל תווים אחרים (סמלים, אמוג'י, פיסוק נדיר) יוצאים ריבועים.
-                # נשמור רק: עברית, לטינית בסיסית, ספרות, רווחים ופיסוק נפוץ.
-                allowed_punct = set(' .,!?;:\'"()[]{}-/\n\t<>=+*%&@#~`^|\\$_')
-                cleaned_chars = []
-                for ch in text:
-                    code = ord(ch)
-                    is_hebrew = 0x0590 <= code <= 0x05FF
-                    is_basic_latin = code < 0x0080
-                    if is_hebrew or is_basic_latin or ch in allowed_punct:
-                        cleaned_chars.append(ch)
-                    # אחרת - מדלגים על התו (במקום להציג ריבוע)
-                return ''.join(cleaned_chars)
+                // ציור על canvas והמרה ל-JPEG דחוס
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                // תמיד JPEG (גם אם המקור PNG) - יותר קטן באופן משמעותי
+                const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                resolve(dataUrl);
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
+}
+
+async function startTraining() {
+    const input = document.getElementById('trainingPhotos');
+    const files = input.files;
+    
+    // 🆕 קריאת שם הילד שהוקלד ב-profileScreen
+    const childNameInput = document.getElementById('profileChildName');
+    const childName = childNameInput ? childNameInput.value.trim() : '';
+    
+    if (!childName || childName.length < 2) {
+        alert('נא להזין את שם הילד');
+        if (childNameInput) childNameInput.focus();
+        return;
+    }
+    
+    if (!files || files.length < 5) {
+        alert('נא להעלות לפחות 5 תמונות');
+        return;
+    }
+    
+    showScreen('trainingScreen');
+    
+    try {
+        document.getElementById('trainingStatus').textContent = 'מכווץ תמונות...';
+        document.getElementById('trainingProgressBar').style.width = '5%';
+        
+        // 🗜️ דחיסת תמונות בצד הלקוח - תמונות מטלפון יוצרות ZIP > 10MB
+        // (המגבלה של Cloudinary). דוחסים ל-1024px רוחב + JPEG quality 85
+        // שזה איכות מצוינת ל-LoRA training, ומקטין כל תמונה פי 10.
+        const photos = await Promise.all(
+            Array.from(files).map((file, i) => compressImage(file, 1024, 0.85))
+        );
+        
+        // לוג גודל כולל לאבחון
+        const totalKB = photos.reduce((sum, p) => sum + Math.ceil(p.length * 0.75 / 1024), 0);
+        console.log(`🗜️ Compressed ${photos.length} photos, total ~${totalKB} KB`);
+        
+        document.getElementById('training-upload').classList.add('active');
+        document.getElementById('trainingProgressBar').style.width = '30%';
+        document.getElementById('trainingStatus').textContent = 'שולח לשרת...';
+        
+        // 🎯 משתמשים ב-endpoint התקין של LoRA (לא ב-train-model הישן והשבור).
+        // שמות הפרמטרים: child_photos + child_name (לא photos!)
+        const accessCode = localStorage.getItem('lilatov_access_code') || 'unknown';
+        
+        // 💾 שמירת השם של הילד ב-localStorage - יישמש בטופס הסיפור
+        localStorage.setItem('lilatov_child_name', childName);
+        console.log('💾 Child name saved:', childName);
+        
+        const response = await fetch(`${SERVER_CONFIG.url}/api/start-lora-training`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                child_photos: photos,
+                child_name: childName  // 🆕 השם האמיתי, לא child_<code>
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok || !data.success) {
+            throw new Error(data.error || 'Training failed');
+        }
+        
+        // ✅ האימון התחיל - שמירת מצב ויציאה ממסך ההמתנה.
+        // הזרימה החדשה: אנחנו *לא* ממתינים בלולאה. שומרים את ה-training_id,
+        // ההורה יוצא, וכשהוא חוזר - בודקים סטטוס מול השרת.
+        const trainingState = {
+            training_id: data.training_id,
+            trigger_word: data.trigger_word,  // חשוב! נצטרך אותו בעתיד ליצירת תמונות
+            access_code: accessCode,
+            photo_count: photos.length,
+            started_at: new Date().toISOString()
+        };
+        localStorage.setItem('lilatov_training_pending', JSON.stringify(trainingState));
+        console.log('💾 Training state saved:', trainingState);
+        
+        // 📺 הצגת מסך "צא וחזור עוד 25 דקות"
+        showWaitingScreen(trainingState);
+        
+    } catch (error) {
+        console.error('Training error:', error);
+        alert('❌ שגיאה באימון: ' + error.message + '\n\nאפשר לנסות שוב.');
+        showScreen('profileScreen');
+    }
+}
+
+// ==========================================
+// ⏳ Async Training - Waiting Screen
+// ==========================================
+
+/**
+ * מציג מסך המתנה ידידותי אחרי שהאימון נשלח.
+ * ההורה רואה הסבר ברור על 25 הדקות, יכול לעזוב, ולחזור.
+ */
+function showWaitingScreen(trainingState) {
+    // יצירת מסך המתנה דינמי - לא דורש HTML מראש
+    let waitScreen = document.getElementById('asyncWaitScreen');
+    if (!waitScreen) {
+        waitScreen = document.createElement('div');
+        waitScreen.id = 'asyncWaitScreen';
+        waitScreen.className = 'screen';
+        document.body.appendChild(waitScreen);
+    }
+    
+    const startedAt = new Date(trainingState.started_at);
+    const expectedReady = new Date(startedAt.getTime() + 25 * 60 * 1000);
+    const expectedTimeStr = expectedReady.toLocaleTimeString('he-IL', {
+        hour: '2-digit', minute: '2-digit'
+    });
+    
+    waitScreen.innerHTML = `
+        <div style="max-width: 560px; margin: 2rem auto; padding: 2rem 1.5rem; text-align: center; font-family: 'Heebo', sans-serif;">
+            <div style="font-size: 4rem; margin-bottom: 1rem;">⏳</div>
+            <h1 style="font-family: 'Fredoka', sans-serif; color: #E0552F; font-size: 2rem; margin: 0 0 0.5rem;">
+                הפרופיל בתהליך יצירה!
+            </h1>
+            <p style="color: #5C4A35; font-size: 1.1rem; line-height: 1.6; margin: 1rem 0;">
+                אנחנו יוצרים את הדמות של הילד שלכם.<br>
+                זה תהליך חד-פעמי שלוקח בערך <strong>25 דקות</strong>.
+            </p>
             
-            def fix_hebrew(text):
-                """מסדר עברית לימין-לשמאל.
-                
-                ⚠️ חשוב: עברית צריכה רק bidi (סידור RTL), ולא arabic_reshaper!
-                arabic_reshaper מיועד לערבית - שם האותיות משנות צורה לפי מיקום.
-                עברית לא עושה את זה. הרצת reshaper על עברית מוסיפה תווים
-                מיוחדים שהפונט לא תומך בהם → ריבועים בפלט!
-                """
-                # ניקוי תווים מיוחדים תחילה
-                text = clean_text_for_pdf(text)
-                
-                if not has_bidi:
-                    return text
-                try:
-                    # רק bidi - בלי reshaper! זה הפתרון לריבועים.
-                    return get_display(text)
-                except Exception as e:
-                    print(f"  ⚠️ Hebrew bidi failed: {e}")
-                    return text
+            <div style="background: #FFF7E8; border: 2px solid #F2A91B; border-radius: 16px; padding: 1.3rem; margin: 1.5rem 0; text-align: right;">
+                <div style="font-weight: 700; color: #2A2118; margin-bottom: 0.6rem;">📍 מה לעשות עכשיו:</div>
+                <ol style="margin: 0; padding-right: 1.3rem; color: #5C4A35; line-height: 1.7;">
+                    <li>אפשר לסגור את הדף ולחזור בעוד 25 דקות</li>
+                    <li>כשתחזרו - היכנסו שוב עם אותו קוד גישה (<strong>${trainingState.access_code}</strong>)</li>
+                    <li>אם הפרופיל מוכן - תוכלו ליצור את הספר! ✨</li>
+                </ol>
+            </div>
             
-            def load_image_for_pdf(image_url):
-                """מקבל URL של תמונה (יכול להיות base64 או http) ומחזיר ImageReader"""
-                if not image_url:
-                    return None
-                try:
-                    if image_url.startswith('data:image'):
-                        # base64
-                        header, b64data = image_url.split(',', 1)
-                        img_bytes = base64.b64decode(b64data)
-                    elif image_url.startswith('http'):
-                        # הורד מ-URL
-                        ctx = ssl.create_default_context()
-                        ctx.check_hostname = False
-                        ctx.verify_mode = ssl.CERT_NONE
-                        req = urllib.request.Request(image_url, headers={'User-Agent': 'Mozilla/5.0'})
-                        with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
-                            img_bytes = response.read()
-                    else:
-                        return None
+            <div style="color: #5C4A35; font-size: 0.95rem; margin: 1.5rem 0;">
+                ⏰ הפרופיל צפוי להיות מוכן בסביבות <strong>${expectedTimeStr}</strong>
+            </div>
+            
+            <button id="checkStatusBtn" style="background: linear-gradient(135deg, #E0552F, #F2A91B); color: white; border: none; padding: 0.9rem 2rem; font-size: 1.05rem; font-weight: 700; border-radius: 50px; cursor: pointer; font-family: 'Heebo', sans-serif; box-shadow: 0 6px 18px rgba(224, 85, 47, 0.3); margin-top: 0.5rem;">
+                🔄 בדקו אם מוכן עכשיו
+            </button>
+            
+            <div id="checkStatusResult" style="margin-top: 1rem; min-height: 1.5rem; color: #5C4A35;"></div>
+        </div>
+    `;
+    
+    showScreen('asyncWaitScreen');
+    
+    document.getElementById('checkStatusBtn').onclick = () => checkTrainingStatus(trainingState);
+}
+
+/**
+ * בדיקת סטטוס אימון מול השרת.
+ * נקראת אוטומטית בעת כניסה לאפליקציה אם יש אימון ממתין,
+ * וגם בלחיצה ידנית של ההורה על "בדקו אם מוכן".
+ */
+async function checkTrainingStatus(trainingState) {
+    const resultEl = document.getElementById('checkStatusResult');
+    const btnEl = document.getElementById('checkStatusBtn');
+    
+    if (resultEl) resultEl.textContent = '⏳ בודק...';
+    if (btnEl) btnEl.disabled = true;
+    
+    try {
+        // 🎯 קוראים ל-lora-status (התקין) ולא ל-training-status (הישן)
+        const response = await fetch(`${SERVER_CONFIG.url}/api/lora-status/${trainingState.training_id}`);
+        const statusData = await response.json();
+        
+        console.log('🔍 Training status:', statusData);
+        
+        if (statusData.status === 'succeeded') {
+            // ✅ האימון הסתיים בהצלחה - שמור LoRA מלא (כולל URL ו-version)
+            // 🐛 תיקון באג: שומרים תחת שם הילד האמיתי שההורה הקליד,
+            // לא תחת קוד הגישה. אחרת findLoraForChild(childName) לא ימצא
+            // את ה-LoRA, וההורה לא יקבל את 3 התמונות לבחירה.
+            const savedChildName = localStorage.getItem('lilatov_child_name') || trainingState.access_code;
+            const loraModel = {
+                child_name: savedChildName,  // ✅ "מיכה" - לא "100"
+                trigger_word: trainingState.trigger_word,
+                lora_url: statusData.lora_url,
+                version: statusData.version,
+                created_at: new Date().toISOString(),
+                photo_count: trainingState.photo_count
+            };
+            // saveLoraModel קיים בקוד הישן ושומר ב-localStorage תחת המפתח הנכון
+            if (typeof saveLoraModel === 'function') {
+                saveLoraModel(loraModel);
+            } else {
+                // fallback - שמירה ידנית
+                AITrainingManager.saveModel({
+                    model_id: statusData.version,
+                    created_at: loraModel.created_at,
+                    photo_count: trainingState.photo_count,
+                    lora_url: statusData.lora_url,
+                    trigger_word: trainingState.trigger_word
+                });
+            }
+            localStorage.removeItem('lilatov_training_pending');
+            console.log('🎉 LoRA Model saved:', loraModel);
+            
+            if (resultEl) resultEl.innerHTML = '✅ <strong>מוכן! מעבירים אתכם ליצירת הספר...</strong>';
+            await new Promise(r => setTimeout(r, 1200));
+            startCreation();
+            
+        } else if (statusData.status === 'failed') {
+            // ❌ האימון נכשל
+            localStorage.removeItem('lilatov_training_pending');
+            if (resultEl) resultEl.innerHTML = '❌ האימון נכשל. אנא נסו שוב.';
+            if (btnEl) btnEl.disabled = false;
+            await new Promise(r => setTimeout(r, 2000));
+            showScreen('profileScreen');
+            
+        } else {
+            // 🕐 עדיין רץ - חישוב זמן שעבר וזמן משוער שנותר
+            const elapsedMin = Math.floor(
+                (Date.now() - new Date(trainingState.started_at).getTime()) / 60000
+            );
+            const remainingMin = Math.max(0, 25 - elapsedMin);
+            
+            if (resultEl) {
+                resultEl.innerHTML = remainingMin > 0
+                    ? `🕐 עדיין בעבודה. עברו ${elapsedMin} דק׳, עוד כ-${remainingMin} דק׳.`
+                    : '🕐 עוד מעט מוכן... נסו לרענן בעוד דקה.';
+            }
+            if (btnEl) btnEl.disabled = false;
+        }
+        
+    } catch (error) {
+        console.error('Status check error:', error);
+        if (resultEl) resultEl.innerHTML = '⚠️ לא הצלחנו לבדוק כרגע. נסו שוב בעוד רגע.';
+        if (btnEl) btnEl.disabled = false;
+    }
+}
+
+function skipTraining() {
+    // 🚫 דילוג על אימון לא נתמך עוד.
+    // הזרימה החדשה: חובה להעלות תמונות ולאמן מודל - אחרת הילד לא יופיע.
+    // נשארה הפונקציה כדי לא לשבור כפתור ב-HTML, אבל היא רק מציגה הודעה.
+    alert('כדי שהילד יופיע בספר, נדרש להעלות תמונות וליצור פרופיל. 📷');
+    showScreen('profileScreen');
+}
+
+// ==========================================
+// 🎯 Navigation & Screens
+// ==========================================
+
+function showScreen(screenId) {
+    document.querySelectorAll('.screen').forEach(screen => {
+        screen.classList.remove('active');
+    });
+    const targetScreen = document.getElementById(screenId);
+    if (targetScreen) {
+        targetScreen.classList.add('active');
+    }
+}
+
+function startCreation() {
+    showScreen('creatorScreen');
+    resetForm();
+}
+
+function resetForm() {
+    // 🆕 שימוש בשם השמור מ-localStorage (הוקלד ב-profileScreen לפני האימון)
+    const savedChildName = localStorage.getItem('lilatov_child_name') || '';
+    
+    appState.bookData = {
+        childName: savedChildName,
+        childAge: '',
+        childGender: '',
+        theme: '',
+        style: '',
+        customInput: ''
+    };
+    
+    const nameInput = document.getElementById('childName');
+    if (nameInput) nameInput.value = savedChildName;
+    
+    document.querySelectorAll('.age-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.gender-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.theme-card').forEach(card => card.classList.remove('selected'));
+    document.querySelectorAll('.style-card').forEach(card => card.classList.remove('selected'));
+    
+    const customInput = document.getElementById('customInput');
+    if (customInput) customInput.value = '';
+    
+    showFormStep(1);
+    
+    // 🆕 הפעלת validateStep1 כדי שהכפתור "המשך" יופעל אם יש כבר שם
+    if (typeof validateStep1 === 'function') {
+        validateStep1();
+    }
+}
+
+function showFormStep(step) {
+    document.querySelectorAll('.form-step').forEach(s => s.classList.remove('active'));
+    const stepElement = document.getElementById(`step${step}`);
+    if (stepElement) {
+        stepElement.classList.add('active');
+    }
+    
+    document.querySelectorAll('.progress-step').forEach(s => s.classList.remove('active'));
+    for (let i = 1; i <= step; i++) {
+        const indicator = document.getElementById(`step${i}-indicator`);
+        if (indicator) {
+            indicator.classList.add('active');
+        }
+    }
+}
+
+// ==========================================
+// 📝 Form Functions
+// ==========================================
+
+function validateStep1() {
+    const nameInput = document.getElementById('childName');
+    const name = nameInput ? nameInput.value.trim() : '';
+    const age = appState.bookData.childAge;
+    const gender = appState.bookData.childGender;
+    const photoOption = appState.bookData.photoOption;
+    
+    // Basic validation
+    let isValid = name && age && gender;
+    
+    // If "real" option selected, require at least 1 photo
+    if (photoOption === 'real' && uploadedPhotos.length === 0) {
+        isValid = false;
+    }
+    
+    const nextBtn = document.getElementById('step1-next');
+    if (nextBtn) {
+        nextBtn.disabled = !isValid;
+        
+        // Visual feedback
+        if (isValid) {
+            nextBtn.style.opacity = '1';
+            nextBtn.style.cursor = 'pointer';
+        } else {
+            nextBtn.style.opacity = '0.5';
+            nextBtn.style.cursor = 'not-allowed';
+        }
+    }
+    
+    if (name) appState.bookData.childName = name;
+    
+    console.log('📋 Validation:', {
+        name: !!name,
+        age: !!age,
+        gender: !!gender,
+        photoOption,
+        photos: uploadedPhotos.length,
+        isValid
+    });
+}
+
+function selectAge(age) {
+    document.querySelectorAll('.age-btn').forEach(btn => btn.classList.remove('active'));
+    if (event && event.target) {
+        event.target.classList.add('active');
+    }
+    appState.bookData.childAge = age;
+    validateStep1();
+}
+
+function selectGender(gender) {
+    document.querySelectorAll('.gender-btn').forEach(btn => btn.classList.remove('active'));
+    if (event && event.target) {
+        event.target.classList.add('active');
+    }
+    appState.bookData.childGender = gender;
+    validateStep1();
+}
+
+function selectTheme(theme) {
+    document.querySelectorAll('.theme-card').forEach(card => card.classList.remove('selected'));
+    if (event && event.target) {
+        const card = event.target.closest('.theme-card');
+        if (card) card.classList.add('selected');
+    }
+    appState.bookData.theme = theme;
+    const nextBtn = document.getElementById('step2-next');
+    if (nextBtn) nextBtn.disabled = false;
+}
+
+function selectStyle(style) {
+    document.querySelectorAll('.style-card').forEach(card => card.classList.remove('selected'));
+    if (event && event.target) {
+        const card = event.target.closest('.style-card');
+        if (card) card.classList.add('selected');
+    }
+    appState.bookData.style = style;
+    const nextBtn = document.getElementById('step3-next');
+    if (nextBtn) nextBtn.disabled = false;
+}
+
+function nextStep() {
+    const currentStepElement = document.querySelector('.form-step.active');
+    if (!currentStepElement) return;
+    
+    const currentStep = currentStepElement.id.replace('step', '');
+    const nextStepNum = parseInt(currentStep) + 1;
+    
+    if (nextStepNum === 4) {
+        updateSummary();
+    }
+    
+    showFormStep(nextStepNum);
+}
+
+function prevStep() {
+    const currentStepElement = document.querySelector('.form-step.active');
+    if (!currentStepElement) return;
+    
+    const currentStep = currentStepElement.id.replace('step', '');
+    const prevStepNum = parseInt(currentStep) - 1;
+    
+    if (prevStepNum >= 1) {
+        showFormStep(prevStepNum);
+    }
+}
+
+function updateSummary() {
+    const summary = document.getElementById('summaryContent');
+    if (!summary) return;
+    
+    const themeNames = {
+        'animals': 'חיות וטבע',
+        'family': 'משפחה ואהבה',
+        'space': 'חלל וכוכבים',
+        'magic': 'קסם ופנטזיה'
+    };
+    
+    const styleNames = {
+        'funny': 'מצחיק ומשעשע',
+        'educational': 'חינוכי ומלמד'
+    };
+    
+    const aiModel = AITrainingManager.loadModel();
+    const aiStatus = aiModel ? '✨ עם פרופיל AI (הילד בתמונות!)' : '🎨 איורים רגילים';
+    
+    summary.innerHTML = `
+        <p><strong>שם:</strong> ${appState.bookData.childName}</p>
+        <p><strong>גיל:</strong> ${appState.bookData.childAge}</p>
+        <p><strong>מגדר:</strong> ${appState.bookData.childGender === 'boy' ? 'בן' : 'בת'}</p>
+        <p><strong>נושא:</strong> ${themeNames[appState.bookData.theme] || appState.bookData.theme}</p>
+        <p><strong>סגנון:</strong> ${styleNames[appState.bookData.style] || appState.bookData.style}</p>
+        <p><strong>תמונות:</strong> ${aiStatus}</p>
+    `;
+}
+
+// ==========================================
+// 📚 Story Generation
+// ==========================================
+
+async function generateStory() {
+    const customInputElement = document.getElementById('customInput');
+    appState.bookData.customInput = customInputElement ? customInputElement.value.trim() : '';
+    
+    // 🎯 חפש אם יש LoRA מאומן עבור הילד הזה
+    const childLora = findLoraForChild(appState.bookData.childName);
+    
+    // 🆕 שלב חדש: אם יש LoRA - הצג תצוגה מקדימה לפני יצירת הספר
+    if (childLora) {
+        const previewApproved = await showLoraPreview(childLora);
+        if (!previewApproved) {
+            console.log('User cancelled book creation after preview');
+            return;  // המשתמש לא אישר - חזרה לטופס
+        }
+    }
+    
+    showScreen('generatingScreen');
+    
+    const steps = ['progress-story', 'progress-images', 'progress-done'];
+    let currentStep = 0;
+    
+    const progressInterval = setInterval(() => {
+        if (currentStep < steps.length) {
+            const stepElement = document.getElementById(steps[currentStep]);
+            if (stepElement) {
+                stepElement.classList.add('active');
+            }
+            currentStep++;
+        }
+    }, 2000);
+    
+    try {
+        const aiModel = AITrainingManager.loadModel();
+        
+        console.log('📸 uploadedPhotos:', uploadedPhotos);
+        console.log('📸 uploadedPhotos.length:', uploadedPhotos.length);
+        
+        const requestData = {
+            ...appState.bookData,
+            ai_model_id: null,  // Force null for now
+            childPhoto: uploadedPhotos.length > 0 ? uploadedPhotos[0] : null,
+            // 🎓 אם יש LoRA - שלח אותו לשרת!
+            lora_url: childLora ? childLora.lora_url : null,
+            trigger_word: childLora ? childLora.trigger_word : null,
+            lora_version: childLora ? childLora.version : null,
+            use_lora: !!childLora,
+            // 🎲 ה-seed שההורה בחר בתצוגה המקדימה (עקביות לכל הספר)
+            chosen_seed: appState.bookData.chosen_seed || null,
+            // 💪 ה-lora_scale שההורה בחר (האיזון בין דמיון לאיור)
+            chosen_lora_scale: appState.bookData.chosen_lora_scale || 1.0,
+            // 🎨 הסגנון שההורה בחר (חמים-ריאליסטי/קלאסי/רך)
+            chosen_style: appState.bookData.chosen_style || 'classic_illustration'
+        };
+        
+        console.log('📤 Sending story request');
+        if (appState.bookData.chosen_seed) {
+            console.log(`🎲 Using chosen seed: ${appState.bookData.chosen_seed}`);
+        }
+        console.log('📸 With photo:', uploadedPhotos.length > 0 ? 'YES ✅' : 'NO ❌');
+        console.log('🤖 With AI model:', aiModel ? 'YES ✅' : 'NO ❌');
+        console.log('🎓 With LoRA:', childLora ? `YES ✅ (${childLora.trigger_word})` : 'NO ❌');
+        if (childLora) {
+            console.log('   Version:', childLora.version);
+        }
+        
+        const response = await fetch(`${SERVER_CONFIG.url}/api/generate-story`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestData)
+        });
+        
+        if (!response.ok) throw new Error('Failed to generate story');
+        
+        const data = await response.json();
+        clearInterval(progressInterval);
+        
+        currentStory = data.story;
+        currentStory.childName = appState.bookData.childName;
+        currentStory.childPhotos = uploadedPhotos.length > 0 ? [...uploadedPhotos] : [];  // ← שמור תמונות!
+        
+        // Save profile with photos
+        if (uploadedPhotos.length > 0) {
+            ChildProfileManager.saveProfile({
+                childName: appState.bookData.childName,
+                childAge: appState.bookData.childAge,
+                childGender: appState.bookData.childGender,
+                photos: uploadedPhotos,
+                createdAt: new Date().toISOString()
+            });
+        }
+        
+        StorageManager.saveCurrentStory(currentStory);
+        displayStory(currentStory);
+        showScreen('previewScreen');
+        
+    } catch (error) {
+        clearInterval(progressInterval);
+        alert('שגיאה ביצירת הסיפור: ' + error.message);
+        showScreen('creatorScreen');
+    }
+}
+
+async function trainModelFromPhotos() {
+    return new Promise(async (resolve, reject) => {
+        try {
+            const response = await fetch(`${SERVER_CONFIG.url}/api/train-model`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    photos: uploadedPhotos,
+                    child_name: appState.bookData.childName || 'child_' + Date.now()
+                })
+            });
+            
+            const data = await response.json();
+            
+            if (!response.ok) {
+                throw new Error(data.error || 'Training failed');
+            }
+            
+            // Quick training (mock)
+            const trainingId = data.training_id;
+            
+            // Wait a bit for mock training
+            await new Promise(res => setTimeout(res, 1000));
+            
+            const statusResponse = await fetch(`${SERVER_CONFIG.url}/api/training-status/${trainingId}`);
+            const statusData = await statusResponse.json();
+            
+            if (statusData.status === 'succeeded') {
+                const modelData = {
+                    model_id: statusData.model_id,
+                    created_at: new Date().toISOString(),
+                    photo_count: uploadedPhotos.length,
+                    child_name: appState.bookData.childName
+                };
+                
+                AITrainingManager.saveModel(modelData);
+                console.log('🤖 Quick training completed:', modelData);
+                resolve();
+            } else {
+                reject(new Error('Training failed'));
+            }
+            
+        } catch (error) {
+            console.error('Training error:', error);
+            reject(error);
+        }
+    });
+}
+
+function displayStory(story) {
+    const container = document.getElementById('storyPages');
+    if (!container) return;
+    
+    container.innerHTML = '';
+    
+    const titleElement = document.getElementById('previewTitle');
+    if (titleElement) {
+        titleElement.textContent = `🌈 הספר של ${story.childName} 🌈`;
+    }
+    
+    if (!story.pages) return;
+    
+    story.pages.forEach((page, index) => {
+        const pageDiv = document.createElement('div');
+        pageDiv.className = 'story-page';
+        pageDiv.id = `page-${index}`;
+        
+        let imageHTML = '';
+        if (page.imageUrl) {
+            imageHTML = `<img src="${page.imageUrl}" class="page-image" alt="איור עמוד ${index + 1}" style="width: 100%; max-width: 500px; border-radius: 15px; margin-bottom: 1rem;">`;
+        } else {
+            imageHTML = `
+                <div class="page-image-placeholder" style="background: linear-gradient(135deg, #e0f7fa 0%, #b2ebf2 100%); border-radius: 15px; padding: 3rem; text-align: center; color: #666; margin-bottom: 1rem;">
+                    <div style="font-size: 3rem; margin-bottom: 1rem;">🎨</div>
+                    <div style="font-size: 0.9rem;">${page.illustration || '[מקום לאיור]'}</div>
+                </div>
+            `;
+        }
+        
+        pageDiv.innerHTML = `
+            <div class="page-number">עמוד ${index + 1}</div>
+            
+            ${imageHTML}
+            
+            <div class="page-text-container">
+                <div class="page-text" id="text-${index}">${page.text}</div>
+                <textarea class="page-text-edit" id="edit-${index}" style="display: none;">${page.text}</textarea>
+            </div>
+            
+            <div class="page-actions">
+                <button class="btn-small btn-edit" onclick="startEdit(${index})">
+                    ✏️ ערוך טקסט
+                </button>
+                <button class="btn-small btn-suggest" onclick="suggestAlternatives(${index})">
+                    💡 הצע חלופה
+                </button>
+                <button class="btn-small btn-regenerate-image" onclick="showImageEditPopup(${index})" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+                    🎨 שנה תמונה
+                </button>
+                <button class="btn-small btn-save" id="save-${index}" style="display: none;" onclick="saveEdit(${index})">
+                    ✓ שמור
+                </button>
+                <button class="btn-small btn-cancel" id="cancel-${index}" style="display: none;" onclick="cancelEdit(${index})">
+                    ✗ ביטול
+                </button>
+            </div>
+            
+            <div id="alternatives-${index}" class="alternatives-container" style="display: none;"></div>
+        `;
+        container.appendChild(pageDiv);
+    });
+}
+
+// ==========================================
+// ✏️ Editing Functions
+// ==========================================
+
+function startEdit(pageIndex) {
+    const textDiv = document.getElementById(`text-${pageIndex}`);
+    const textarea = document.getElementById(`edit-${pageIndex}`);
+    const saveBtn = document.getElementById(`save-${pageIndex}`);
+    const cancelBtn = document.getElementById(`cancel-${pageIndex}`);
+    
+    if (textDiv) textDiv.style.display = 'none';
+    if (textarea) {
+        textarea.style.display = 'block';
+        textarea.focus();
+    }
+    if (saveBtn) saveBtn.style.display = 'inline-block';
+    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+}
+
+async function saveEdit(pageIndex) {
+    const textDiv = document.getElementById(`text-${pageIndex}`);
+    const textarea = document.getElementById(`edit-${pageIndex}`);
+    
+    if (textarea && currentStory && currentStory.pages[pageIndex]) {
+        const newText = textarea.value.trim();
+        const oldText = currentStory.pages[pageIndex].text;
+        
+        if (newText && newText !== oldText) {
+            currentStory.pages[pageIndex].text = newText;
+            if (textDiv) textDiv.textContent = newText;
+            StorageManager.saveCurrentStory(currentStory);
+            
+            cancelEdit(pageIndex);
+            
+            // 🆕 שאל אם להחליף תמונה כשהטקסט השתנה
+            await askToRegenerateImage(pageIndex, oldText, newText);
+            return;
+        }
+    }
+    
+    cancelEdit(pageIndex);
+}
+
+function cancelEdit(pageIndex) {
+    const textDiv = document.getElementById(`text-${pageIndex}`);
+    const textarea = document.getElementById(`edit-${pageIndex}`);
+    const saveBtn = document.getElementById(`save-${pageIndex}`);
+    const cancelBtn = document.getElementById(`cancel-${pageIndex}`);
+    
+    if (currentStory && currentStory.pages[pageIndex] && textarea) {
+        textarea.value = currentStory.pages[pageIndex].text;
+    }
+    if (textDiv) textDiv.style.display = 'block';
+    if (textarea) textarea.style.display = 'none';
+    if (saveBtn) saveBtn.style.display = 'none';
+    if (cancelBtn) cancelBtn.style.display = 'none';
+}
+
+async function suggestAlternatives(pageIndex) {
+    if (!currentStory || !currentStory.pages[pageIndex]) return;
+    
+    const container = document.getElementById(`alternatives-${pageIndex}`);
+    if (!container) return;
+    
+    container.innerHTML = '<div style="padding: 1rem; text-align: center;">⏳ מחפש חלופות...</div>';
+    container.style.display = 'block';
+    
+    try {
+        const response = await fetch(`${SERVER_CONFIG.url}/api/suggest-alternative`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                currentText: currentStory.pages[pageIndex].text,
+                childName: currentStory.childName
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.alternatives && data.alternatives.length > 0) {
+            container.innerHTML = '<h4 style="margin-bottom: 0.5rem;">💡 חלופות מוצעות:</h4>';
+            
+            data.alternatives.forEach((alt, i) => {
+                const btn = document.createElement('button');
+                btn.className = 'alternative-option';
+                btn.textContent = `${i + 1}. ${alt}`;
+                btn.onclick = () => useAlternative(pageIndex, alt);
+                container.appendChild(btn);
+            });
+        } else {
+            container.innerHTML = '<div>לא נמצאו חלופות</div>';
+        }
+    } catch (error) {
+        container.innerHTML = '<div style="color: red;">שגיאה בחיפוש חלופות</div>';
+    }
+}
+
+async function useAlternative(pageIndex, newText) {
+    if (!currentStory || !currentStory.pages[pageIndex]) return;
+    
+    const oldText = currentStory.pages[pageIndex].text;
+    currentStory.pages[pageIndex].text = newText;
+    
+    const textDiv = document.getElementById(`text-${pageIndex}`);
+    const textarea = document.getElementById(`edit-${pageIndex}`);
+    const altContainer = document.getElementById(`alternatives-${pageIndex}`);
+    
+    if (textDiv) textDiv.textContent = newText;
+    if (textarea) textarea.value = newText;
+    if (altContainer) altContainer.style.display = 'none';
+    
+    StorageManager.saveCurrentStory(currentStory);
+    
+    // 🆕 שאל אם להחליף תמונה כשהטקסט השתנה
+    await askToRegenerateImage(pageIndex, oldText, newText);
+}
+
+// ==========================================
+// 🆕 שאל אם להחליף תמונה אחרי שינוי טקסט
+// ==========================================
+async function askToRegenerateImage(pageIndex, oldText, newText) {
+    /**
+     * אחרי שטקסט עמוד השתנה, מציג חלון שואל אם ליצור תמונה חדשה.
+     * אם ההורה מאשר - הקוד יוצר תמונה חדשה שתואמת לטקסט החדש.
+     */
+    if (!currentStory || !currentStory.pages[pageIndex]) return;
+    
+    // בודק אם השינוי מספיק משמעותי כדי להציע (יותר מ-5 תווים שונים)
+    const significantChange = Math.abs(oldText.length - newText.length) > 5 || 
+                               oldText.split(' ').slice(0, 5).join(' ') !== newText.split(' ').slice(0, 5).join(' ');
+    
+    if (!significantChange) {
+        console.log('🔍 Text change too small, not asking for new image');
+        return;
+    }
+    
+    return new Promise((resolve) => {
+        // יצירת overlay מודלי
+        const overlay = document.createElement('div');
+        overlay.id = 'imageRegenOverlay';
+        overlay.style.cssText = `
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.7);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 10000;
+            font-family: inherit;
+        `;
+        
+        overlay.innerHTML = `
+            <div style="background: #fff; border-radius: 20px; padding: 2rem; max-width: 480px; width: 90%; text-align: right; box-shadow: 0 20px 60px rgba(0,0,0,0.4);">
+                <div style="text-align: center; font-size: 2.5rem; margin-bottom: 0.8rem;">🎨</div>
+                
+                <h2 style="margin: 0 0 0.5rem 0; color: #2A2118; font-size: 1.4rem; text-align: center;">
+                    הטקסט השתנה
+                </h2>
+                <p style="color: #5C4A35; margin-bottom: 1.5rem; font-size: 0.95rem; text-align: center;">
+                    האם ליצור גם תמונה חדשה שתתאים לטקסט?
+                </p>
+                
+                <div style="background: #FBF4E4; padding: 1rem; border-radius: 12px; margin-bottom: 1rem;">
+                    <div style="font-size: 0.8rem; color: #999; margin-bottom: 0.3rem;">📝 טקסט חדש:</div>
+                    <div style="color: #2A2118; font-size: 0.95rem;">${newText.substring(0, 200)}${newText.length > 200 ? '...' : ''}</div>
+                </div>
+                
+                <div style="display: flex; gap: 0.7rem; flex-direction: column;">
+                    <button id="regenYes" style="
+                        background: #C95E48; color: white; border: none;
+                        padding: 0.9rem 2rem; border-radius: 100px; cursor: pointer;
+                        font-size: 1rem; font-weight: 700; font-family: inherit;
+                    ">
+                        ✅ כן, צור תמונה חדשה
+                    </button>
+                    <button id="regenNo" style="
+                        background: transparent; color: #5C4A35;
+                        border: 2px solid rgba(0,0,0,0.1);
+                        padding: 0.7rem 1.5rem; border-radius: 100px; cursor: pointer;
+                        font-size: 0.95rem; font-weight: 600; font-family: inherit;
+                    ">
+                        ❌ לא, השאר את התמונה הנוכחית
+                    </button>
+                </div>
+                
+                <p style="color: #999; font-size: 0.8rem; text-align: center; margin-top: 1rem;">
+                    ⏱️ יצירת תמונה לוקחת ~10 שניות
+                </p>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        function cleanup() {
+            if (document.body.contains(overlay)) {
+                document.body.removeChild(overlay);
+            }
+        }
+        
+        document.getElementById('regenYes').onclick = async () => {
+            cleanup();
+            // קריאה ל-regenerate עם הטקסט החדש
+            await regenerateImageForUpdatedText(pageIndex, newText);
+            resolve(true);
+        };
+        
+        document.getElementById('regenNo').onclick = () => {
+            cleanup();
+            resolve(false);
+        };
+    });
+}
+
+async function regenerateImageForUpdatedText(pageIndex, newText) {
+    /**
+     * יוצר תמונה חדשה בהתבסס על טקסט עודכן.
+     * משתמש ב-LoRA אם קיים + outfit שנבחר.
+     */
+    const page = currentStory.pages[pageIndex];
+    
+    // קבלת LoRA אם קיים
+    const childLora = findLoraForChild(currentStory.childName || appState.bookData.childName);
+    
+    // קבלת תמונת ילד (אם אין LoRA)
+    const childPhoto = (currentStory.childPhotos && currentStory.childPhotos.length > 0) 
+        ? currentStory.childPhotos[0] 
+        : (uploadedPhotos.length > 0 ? uploadedPhotos[0] : null);
+    
+    console.log('🔄 Regenerating image for updated text:');
+    console.log('  📝 New text:', newText.substring(0, 80));
+    console.log('  🎓 With LoRA:', childLora ? `YES ✅ (${childLora.trigger_word})` : 'NO ❌');
+    console.log('  🎽 Outfit:', currentStory.outfit || 'random');
+    
+    // 🎯 NEW: בנה Character descriptions מ-Character Bible אם יש
+    const characterDescriptions = [];
+    if (currentStory.character_bible && page.characters_in_scene) {
+        page.characters_in_scene.forEach(name => {
+            if (currentStory.character_bible[name]) {
+                characterDescriptions.push(currentStory.character_bible[name]);
+            }
+        });
+    }
+    
+    showLoadingOverlay('מייצר תמונה חדשה שתתאים לטקסט... ⏳');
+    
+    try {
+        const response = await fetch(`${SERVER_CONFIG.url}/api/regenerate-image`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                // 🎯 חשוב! שולחים את הטקסט העברי החדש כ-page_text
+                // השרת יתרגם אותו ויבנה פרומפט מתאים
+                page_text: newText,  // הטקסט החדש בעברית
+                user_prompt: '',     // אין הוראה מיוחדת - רק התאמה לטקסט
+                child_photo: childPhoto,
+                lora_url: childLora ? childLora.lora_url : null,
+                trigger_word: childLora ? childLora.trigger_word : null,
+                lora_version: childLora ? childLora.version : null,
+                outfit: currentStory.outfit || null,
+                character_descriptions: characterDescriptions,
+                character_bible: currentStory.character_bible || {},  // 🆕
+                chosen_style: currentStory.chosen_style || appState.bookData.chosen_style || 'classic_illustration',
+                chosen_seed: currentStory.chosen_seed || appState.bookData.chosen_seed || null,
+                chosen_lora_scale: currentStory.chosen_lora_scale || appState.bookData.chosen_lora_scale || 1.0,
+                child_gender: appState.bookData.childGender === 'girl' ? 'girl' : 'boy'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.imageUrl) {
+            // עדכון התמונה
+            page.imageUrl = data.imageUrl;
+            
+            // עדכון התצוגה
+            const imgElement = document.querySelector(`#page-${pageIndex} .page-image`);
+            if (imgElement) {
+                imgElement.src = data.imageUrl;
+            }
+            
+            // שמירה
+            StorageManager.saveCurrentStory(currentStory);
+            hideLoadingOverlay();
+            showSuccessMessage('✅ תמונה חדשה נוצרה ומותאמת לטקסט!');
+        } else {
+            throw new Error(data.error || 'Failed to regenerate image');
+        }
+        
+    } catch (error) {
+        console.error('Image regeneration error:', error);
+        hideLoadingOverlay();
+        alert('❌ לא הצלחתי ליצור תמונה חדשה. נסי שוב.');
+    }
+}
+
+// ==========================================
+// 📄 PDF & Actions
+// ==========================================
+
+async function downloadPDF() {
+    if (!currentStory) {
+        alert('אין ספר לשמירה');
+        return;
+    }
+    
+    const modal = document.getElementById('pdfModal');
+    if (modal) modal.classList.add('active');
+    
+    try {
+        const response = await fetch(`${SERVER_CONFIG.url}/api/generate-pdf`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(currentStory)
+        });
+        
+        if (!response.ok) throw new Error('Failed to generate PDF');
+        
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `lilush_tovush_${currentStory.childName || 'story'}.pdf`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        
+        if (modal) modal.classList.remove('active');
+        
+    } catch (error) {
+        if (modal) modal.classList.remove('active');
+        alert('שגיאה ביצירת PDF: ' + error.message);
+    }
+}
+
+function saveToHistory() {
+    if (currentStory) {
+        StorageManager.saveToHistory(currentStory);
+        alert('✅ הספר נשמר להיסטוריה!');
+    }
+}
+
+function showHistory() {
+    const history = StorageManager.getHistory();
+    if (history.length === 0) {
+        alert('אין ספרים שמורים עדיין');
+        return;
+    }
+    
+    alert(`יש ${history.length} ספרים בהיסטוריה!\n\n(תכונה זו תשופר בקרוב)`);
+}
+
+function startOver() {
+    if (confirm('להתחיל ספר חדש?')) {
+        showScreen('landingScreen');
+    }
+}
+
+// ==========================================
+// 🚀 Initialization
+// ==========================================
+
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('🚀 App loaded');
+    
+    // 🔐 בדיקת קוד גישה - אם אין, חזרה לדף הנחיתה
+    const accessCode = localStorage.getItem('lilatov_access_code');
+    if (!accessCode) {
+        console.log('⛔ No access code - redirecting to landing');
+        window.location.href = '/';
+        return;
+    }
+    console.log('✅ Access code:', accessCode);
+    
+    // 🤖 בדיקה אם יש כבר מודל AI מוכן
+    const aiModel = AITrainingManager.loadModel();
+    if (aiModel) {
+        console.log('🤖 AI Model found:', aiModel.model_id);
+        // יש מודל - המשך ישר לסיפור
+        showScreen('creatorScreen');
+        resetForm();
+    } else {
+        // אין מודל - בודק אם יש אימון בתהליך
+        const pendingRaw = localStorage.getItem('lilatov_training_pending');
+        if (pendingRaw) {
+            try {
+                const pending = JSON.parse(pendingRaw);
+                // ודא שהאימון שייך לאותו קוד גישה
+                if (pending.access_code === accessCode) {
+                    console.log('⏳ Pending training found:', pending.training_id);
+                    showWaitingScreen(pending);
+                    // בדיקה אוטומטית מיד בכניסה
+                    setTimeout(() => checkTrainingStatus(pending), 500);
+                    return;
+                }
+            } catch (e) {
+                console.warn('Bad pending training data:', e);
+                localStorage.removeItem('lilatov_training_pending');
+            }
+        }
+        // אין כלום - מתחיל מהעלאת תמונות
+        console.log('📷 No AI Model - starting with photo upload');
+        showScreen('profileScreen');
+    }
+    
+    // Setup event listeners
+    const childNameInput = document.getElementById('childName');
+    if (childNameInput) {
+        childNameInput.addEventListener('input', validateStep1);
+    }
+    
+});
+
+// ==========================================
+// 🎨 Image Editing Functions
+// ==========================================
+
+function showImageEditPopup(pageIndex) {
+    const page = currentStory.pages[pageIndex];
+    
+    // Create modal HTML
+    const modalHTML = `
+        <div class="modal-overlay" id="imageEditModal" onclick="closeImageEditPopup(event)">
+            <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 500px; background: white; padding: 2rem; border-radius: 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.2);">
+                <h2 style="color: #667eea; margin-bottom: 1rem; font-size: 1.5rem;">🎨 שינוי תמונה</h2>
+                
+                <p style="color: #666; margin-bottom: 1rem; font-size: 0.9rem;">
+                    תאר במילים מה תרצה לראות בתמונה:
+                </p>
+                
+                <textarea id="imagePromptInput" 
+                    placeholder="למשל: הילד במגרש משחקים עם כדור, שמש בשמיים, עצים ברקע..." 
+                    style="width: 100%; min-height: 100px; padding: 0.75rem; border: 2px solid #e0e0e0; border-radius: 10px; font-family: inherit; font-size: 0.9rem; resize: vertical; direction: rtl;"
+                ></textarea>
+                
+                <p style="color: #999; font-size: 0.8rem; margin-top: 0.5rem; margin-bottom: 1.5rem;">
+                    💡 השאר ריק כדי ליצור תמונה חדשה באופן אוטומטי
+                </p>
+                
+                <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+                    <button onclick="closeImageEditPopup()" 
+                        style="padding: 0.75rem 1.5rem; background: #f5f5f5; border: none; border-radius: 10px; cursor: pointer; font-weight: 600;">
+                        ביטול
+                    </button>
+                    <button onclick="regenerateImage(${pageIndex})" 
+                        style="padding: 0.75rem 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: 600;">
+                        🎨 צור תמונה חדשה
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+    
+    // Focus on textarea
+    setTimeout(() => {
+        const input = document.getElementById('imagePromptInput');
+        if (input) input.focus();
+    }, 100);
+}
+
+function closeImageEditPopup(event) {
+    const modal = document.getElementById('imageEditModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+async function regenerateImage(pageIndex) {
+    const userPrompt = document.getElementById('imagePromptInput').value.trim();
+    const page = currentStory.pages[pageIndex];
+    
+    // Get child photo from story or uploaded photos
+    const childPhoto = (currentStory.childPhotos && currentStory.childPhotos.length > 0) 
+        ? currentStory.childPhotos[0] 
+        : (uploadedPhotos.length > 0 ? uploadedPhotos[0] : null);
+    
+    // 🎓 Check if there's a LoRA for this child
+    const childLora = findLoraForChild(currentStory.childName || appState.bookData.childName);
+    
+    // 🎯 NEW: בנה Character descriptions מ-Character Bible אם יש
+    const characterDescriptions = [];
+    if (currentStory.character_bible && page.characters_in_scene) {
+        page.characters_in_scene.forEach(name => {
+            if (currentStory.character_bible[name]) {
+                characterDescriptions.push(currentStory.character_bible[name]);
+            }
+        });
+    }
+    
+    console.log('🎭 Regenerating image:');
+    console.log('  📸 With photo:', childPhoto ? 'YES ✅' : 'NO ❌');
+    console.log('  🎓 With LoRA:', childLora ? `YES ✅ (${childLora.trigger_word})` : 'NO ❌');
+    console.log('  📖 Characters:', characterDescriptions.length);
+    
+    // Close modal
+    closeImageEditPopup();
+    
+    // Show loading
+    showLoadingOverlay(childLora ? 'מייצר תמונה חדשה עם המודל המאומן... ⏳' : 'מייצר תמונה חדשה... ⏳');
+    
+    try {
+        const response = await fetch(`${SERVER_CONFIG.url}/api/regenerate-image`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                page_text: page.illustration,
+                user_prompt: userPrompt,
+                child_photo: childPhoto,
+                // 🎓 LoRA parameters
+                lora_url: childLora ? childLora.lora_url : null,
+                trigger_word: childLora ? childLora.trigger_word : null,
+                lora_version: childLora ? childLora.version : null,
+                outfit: currentStory.outfit || null,
+                character_descriptions: characterDescriptions,
+                character_bible: currentStory.character_bible || {},  // 🆕
+                chosen_style: currentStory.chosen_style || appState.bookData.chosen_style || 'classic_illustration',
+                chosen_seed: currentStory.chosen_seed || appState.bookData.chosen_seed || null,
+                chosen_lora_scale: currentStory.chosen_lora_scale || appState.bookData.chosen_lora_scale || 1.0,
+                child_gender: appState.bookData.childGender === 'girl' ? 'girl' : 'boy'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.imageUrl) {
+            // Update the image
+            page.imageUrl = data.imageUrl;
+            
+            // Update the display
+            const imgElement = document.querySelector(`#page-${pageIndex} .page-image`);
+            if (imgElement) {
+                imgElement.src = data.imageUrl;
+            }
+            
+            // Save to storage
+            StorageManager.saveCurrentStory(currentStory);
+            
+            showSuccessMessage('✅ תמונה חדשה נוצרה בהצלחה!');
+        } else {
+            throw new Error(data.error || 'Failed to regenerate image');
+        }
+        
+    } catch (error) {
+        console.error('Image regeneration error:', error);
+        alert('שגיאה ביצירת תמונה חדשה: ' + error.message);
+    } finally {
+        hideLoadingOverlay();
+    }
+}
+
+function showLoadingOverlay(message) {
+    const overlayHTML = `
+        <div id="loadingOverlay" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 10000;">
+            <div style="background: white; padding: 2rem 3rem; border-radius: 20px; text-align: center;">
+                <div style="font-size: 2rem; margin-bottom: 1rem;">🎨</div>
+                <div style="font-size: 1.1rem; color: #333; font-weight: 600;">${message}</div>
+                <div style="margin-top: 1rem; color: #666; font-size: 0.9rem;">זה ייקח כ-15 שניות...</div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', overlayHTML);
+}
+
+function hideLoadingOverlay() {
+    const overlay = document.getElementById('loadingOverlay');
+    if (overlay) overlay.remove();
+}
+
+function showSuccessMessage(message) {
+    const msgHTML = `
+        <div id="successMessage" style="position: fixed; top: 20px; left: 50%; transform: translateX(-50%); background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 1rem 2rem; border-radius: 50px; z-index: 10001; box-shadow: 0 5px 20px rgba(0,0,0,0.2); font-weight: 600;">
+            ${message}
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', msgHTML);
+    
+    setTimeout(() => {
+        const msg = document.getElementById('successMessage');
+        if (msg) {
+            msg.style.transition = 'opacity 0.5s';
+            msg.style.opacity = '0';
+            setTimeout(() => msg.remove(), 500);
+        }
+    }, 3000);
+}
+
+// ==========================================
+// App initialization complete
+// ==========================================
+console.log('✅ App initialized successfully');
+
+// ==========================================
+// 🧪 Test Face Swap Function
+// ==========================================
+
+async function testFaceSwap() {
+    if (uploadedPhotos.length === 0) {
+        alert('אנא העלה תמונה קודם');
+        return;
+    }
+    
+    const childName = document.getElementById('childName').value.trim() || 'הילד';
+    
+    // Show loading
+    const preview = document.getElementById('photoPreviewInline');
+    const loadingDiv = document.createElement('div');
+    loadingDiv.id = 'testLoading';
+    loadingDiv.style.cssText = 'grid-column: 1/-1; text-align: center; padding: 1.5rem; background: white; border-radius: 10px; margin-top: 0.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
+    loadingDiv.innerHTML = `
+        <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎨</div>
+        <div style="font-weight: bold; color: #667eea; margin-bottom: 0.5rem;">יוצר תמונת בדיקה...</div>
+        <div style="font-size: 0.9rem; color: #666;">זה ייקח כ-15 שניות</div>
+    `;
+    preview.appendChild(loadingDiv);
+    
+    try {
+        const response = await fetch(`${SERVER_CONFIG.url}/api/test-face-swap`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                child_photo: uploadedPhotos[0],
+                child_name: childName
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.imageUrl) {
+            // Remove loading
+            loadingDiv.remove();
+            
+            // Show result
+            const resultDiv = document.createElement('div');
+            resultDiv.style.cssText = 'grid-column: 1/-1; background: white; border-radius: 10px; padding: 1rem; margin-top: 0.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
+            resultDiv.innerHTML = `
+                <div style="font-weight: bold; color: #667eea; margin-bottom: 0.75rem; text-align: center;">✅ תמונת בדיקה:</div>
+                <img src="${data.imageUrl}" style="width: 100%; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);" />
+                <div style="margin-top: 0.75rem; text-align: center; font-size: 0.9rem; color: #666;">
+                    האם ${childName} מזוהה בתמונה? אם כן, אפשר להמשיך ליצור ספר!
+                </div>
+                <button onclick="this.parentElement.remove()" style="width: 100%; margin-top: 0.75rem; padding: 0.5rem; background: #f5f5f5; border: none; border-radius: 8px; cursor: pointer; font-weight: 600;">
+                    סגור
+                </button>
+            `;
+            preview.appendChild(resultDiv);
+            
+        } else {
+            throw new Error(data.error || 'Failed to test face swap');
+        }
+        
+    } catch (error) {
+        console.error('Test error:', error);
+        loadingDiv.remove();
+        alert('שגיאה בבדיקה: ' + error.message);
+    }
+}
+
+// ==========================================
+// 🎓 LoRA Training Function
+// ==========================================
+
+async function startLoraTraining() {
+    if (uploadedPhotos.length < 5) {
+        alert('צריך לפחות 5 תמונות לאימון LoRA.\n\nהעלה עוד ' + (5 - uploadedPhotos.length) + ' תמונות.');
+        return;
+    }
+    
+    const childName = document.getElementById('childName').value.trim();
+    if (!childName) {
+        alert('אנא הזן שם ילד קודם');
+        return;
+    }
+    
+    const confirmed = confirm(
+        `🎓 אימון LoRA מאומן\n\n` +
+        `ילד: ${childName}\n` +
+        `תמונות: ${uploadedPhotos.length}\n` +
+        `זמן: 10 דקות\n` +
+        `עלות: ₪2 (חד-פעמי)\n\n` +
+        `אחרי האימון תוכל ליצור ספרים אין-סופיים עם ${childName}!\n\n` +
+        `להתחיל אימון?`
+    );
+    
+    if (!confirmed) return;
+    
+    // Show loading
+    const preview = document.getElementById('photoPreviewInline');
+    const loadingDiv = document.createElement('div');
+    loadingDiv.id = 'loraLoading';
+    loadingDiv.style.cssText = 'grid-column: 1/-1; text-align: center; padding: 1.5rem; background: white; border-radius: 10px; margin-top: 0.5rem; box-shadow: 0 4px 12px rgba(0,0,0,0.1);';
+    loadingDiv.innerHTML = `
+        <div style="font-size: 2rem; margin-bottom: 0.5rem;">🎓</div>
+        <div style="font-weight: bold; color: #667eea; margin-bottom: 0.5rem;">מאמן LoRA ל-${childName}...</div>
+        <div style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">זה ייקח כ-10 דקות</div>
+        <div style="background: #f0f0f0; border-radius: 8px; height: 8px; overflow: hidden;">
+            <div id="loraProgress" style="background: linear-gradient(90deg, #667eea, #764ba2); height: 100%; width: 0%; transition: width 0.3s;"></div>
+        </div>
+        <div id="loraStatus" style="margin-top: 0.5rem; font-size: 0.85rem; color: #999;">מתחיל...</div>
+    `;
+    preview.appendChild(loadingDiv);
+    
+    try {
+        // Start training
+        const response = await fetch(`${SERVER_CONFIG.url}/api/start-lora-training`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                child_name: childName,
+                child_photos: uploadedPhotos
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            // Poll for status
+            pollLoraStatus(data.training_id, childName, data.trigger_word);
+        } else {
+            throw new Error(data.error);
+        }
+        
+    } catch (error) {
+        console.error('Training error:', error);
+        loadingDiv.remove();
+        alert('שגיאה באימון: ' + error.message);
+    }
+}
+
+async function pollLoraStatus(trainingId, childName, triggerWord) {
+    const startTime = Date.now();
+    const statusEl = document.getElementById('loraStatus');
+    const progressEl = document.getElementById('loraProgress');
+    
+    const interval = setInterval(async () => {
+        try {
+            const response = await fetch(`${SERVER_CONFIG.url}/api/lora-status/${trainingId}`);
+            const data = await response.json();
+            
+            const elapsed = Math.floor((Date.now() - startTime) / 1000);
+            const progress = Math.min(95, (elapsed / 600) * 100);
+            
+            progressEl.style.width = progress + '%';
+            statusEl.textContent = `${Math.floor(progress)}% • ${Math.floor(elapsed / 60)} דקות`;
+            
+            if (data.status === 'succeeded') {
+                clearInterval(interval);
+                
+                progressEl.style.width = '100%';
+                statusEl.textContent = '100% • אימון הושלם!';
+                
+                // Save LoRA
+                saveLoraModel({
+                    child_name: childName,
+                    trigger_word: triggerWord,
+                    lora_url: data.lora_url,
+                    version: data.version,
+                    created_at: new Date().toISOString()
+                });
+                
+                setTimeout(() => {
+                    document.getElementById('loraLoading').remove();
+                    alert(`✅ אימון LoRA הושלם!\n\nעכשיו ${childName} מוכן ליצירת ספרים מושלמים!`);
+                }, 2000);
+                
+            } else if (data.status === 'failed') {
+                clearInterval(interval);
+                statusEl.textContent = '❌ אימון נכשל';
+                throw new Error(data.error);
+            }
+            
+        } catch (error) {
+            clearInterval(interval);
+            console.error('Status check error:', error);
+            document.getElementById('loraLoading').remove();
+            alert('שגיאה בבדיקת סטטוס: ' + error.message);
+        }
+    }, 5000); // Check every 5 seconds
+}
+
+// ==========================================
+// 🎓 LoRA Manager - שמירה וטעינה של LoRA models
+// ==========================================
+function saveLoraModel(model) {
+    // שמור ברשימה של כל המודלים (לפי ילד)
+    const models = JSON.parse(localStorage.getItem('lora_models') || '[]');
+    
+    // אם יש כבר מודל לאותו ילד - החלף אותו (לא יוצר כפילויות)
+    const existingIdx = models.findIndex(m => m.child_name === model.child_name);
+    if (existingIdx >= 0) {
+        models[existingIdx] = model;
+        console.log('🔄 Updated existing LoRA for:', model.child_name);
+    } else {
+        models.push(model);
+        console.log('💾 New LoRA saved for:', model.child_name);
+    }
+    
+    localStorage.setItem('lora_models', JSON.stringify(models));
+    
+    // שמור גם ב-AITrainingManager לתאימות עם הקוד הקיים
+    AITrainingManager.saveModel({
+        model_id: model.lora_url,           // ה-URL של ה-LoRA
+        trigger_word: model.trigger_word,    // ה-trigger word
+        lora_url: model.lora_url,            // copy
+        child_name: model.child_name,
+        is_lora: true,                        // דגל שזה LoRA אמיתי
+        created_at: model.created_at
+    });
+    
+    console.log('✅ LoRA model fully saved:', model);
+}
+
+function findLoraForChild(childName) {
+    /**
+     * מחפש LoRA מאומן עבור ילד לפי שם.
+     * מחזיר null אם אין.
+     */
+    if (!childName) return null;
+    const models = JSON.parse(localStorage.getItem('lora_models') || '[]');
+    const found = models.find(m => m.child_name === childName);
+    if (found) {
+        console.log(`🎯 Found LoRA for ${childName}:`, found.trigger_word);
+    }
+    return found || null;
+}
+
+function getAllLoraModels() {
+    /** מחזיר רשימת כל המודלים המאומנים */
+    return JSON.parse(localStorage.getItem('lora_models') || '[]');
+}
+
+function deleteLoraModel(childName) {
+    /** מוחק מודל LoRA של ילד מסוים */
+    const models = JSON.parse(localStorage.getItem('lora_models') || '[]');
+    const filtered = models.filter(m => m.child_name !== childName);
+    localStorage.setItem('lora_models', JSON.stringify(filtered));
+    console.log(`🗑️ Deleted LoRA for: ${childName}`);
+}
+
+// ==========================================
+// 🔍 LoRA Preview - Sanity Check Before Book Generation
+// ==========================================
+async function showLoraPreview(childLora) {
+    /**
+     * מציג 3 תמונות תצוגה מקדימה. ההורה בוחר אחת.
+     * ה-seed של התמונה הנבחרת נשמר ל-appState.bookData.chosen_seed.
+     * מחזיר Promise<boolean>: true = בחר, false = ביטול
+     */
+    return new Promise(async (resolve) => {
+        const overlay = document.createElement('div');
+        overlay.id = 'loraPreviewOverlay';
+        overlay.style.cssText = `
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.85);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 10000; font-family: inherit;
+            padding: 1rem; overflow-y: auto;
+        `;
+        
+        overlay.innerHTML = `
+            <div style="background: #fff; border-radius: 20px; padding: 2rem; max-width: 720px; width: 100%; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.4);">
+                <h2 style="margin: 0 0 0.5rem 0; color: #2A2118; font-size: 1.5rem;">
+                    🎨 בחרו את ${childLora.child_name}
+                </h2>
+                <p style="color: #5C4A35; margin-bottom: 1.5rem; font-size: 0.95rem;">
+                    יצרנו 3 גרסאות. בחרו את זו שהכי דומה לילד/ה — היא תלווה את כל הספר.
+                </p>
+                
+                <div id="previewOptionsContainer" style="
+                    display: grid; grid-template-columns: repeat(3, 1fr);
+                    gap: 0.8rem; margin-bottom: 1.5rem; min-height: 220px;
+                ">
+                    <div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 2rem;">
+                        <div style="font-size: 2.5rem; margin-bottom: 1rem;">🎨</div>
+                        <div style="color: #5C4A35; font-weight: 600;">יוצר 3 תמונות...</div>
+                        <div style="color: #999; font-size: 0.85rem; margin-top: 0.5rem;">60-90 שניות</div>
+                    </div>
+                </div>
+                
+                <div id="previewActions" style="display: none; flex-direction: column; gap: 0.7rem;">
+                    <button id="previewRetry" style="
+                        background: transparent; color: #5C4A35;
+                        border: 2px solid rgba(0,0,0,0.1);
+                        padding: 0.7rem 1.5rem; border-radius: 100px; cursor: pointer;
+                        font-size: 0.95rem; font-weight: 600; font-family: inherit;
+                    ">
+                        🔄 צור 3 תמונות חדשות
+                    </button>
+                    <button id="previewCancel" style="
+                        background: transparent; color: #999;
+                        border: none; cursor: pointer;
+                        font-size: 0.9rem; font-family: inherit; padding: 0.5rem;
+                    ">
+                        ❌ ביטול
+                    </button>
+                </div>
+                
+                <div id="previewError" style="display: none; color: #C95E48; padding: 1rem;"></div>
+            </div>
+        `;
+        
+        document.body.appendChild(overlay);
+        
+        function cleanup(result) {
+            if (document.body.contains(overlay)) {
+                document.body.removeChild(overlay);
+            }
+            resolve(result);
+        }
+        
+        async function generateOptions() {
+            document.getElementById('previewActions').style.display = 'none';
+            document.getElementById('previewError').style.display = 'none';
+            document.getElementById('previewOptionsContainer').innerHTML = `
+                <div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 2rem;">
+                    <div style="font-size: 2.5rem; margin-bottom: 1rem;">🎨</div>
+                    <div style="color: #5C4A35; font-weight: 600;">יוצר 3 תמונות...</div>
+                    <div style="color: #999; font-size: 0.85rem; margin-top: 0.5rem;">60-90 שניות</div>
+                </div>
+            `;
+            
+            try {
+                const response = await fetch(`${SERVER_CONFIG.url}/api/preview-options`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        child_name: childLora.child_name,
+                        lora_url: childLora.lora_url,
+                        trigger_word: childLora.trigger_word,
+                        lora_version: childLora.version,
+                        theme: appState.bookData.theme || 'animals',
+                        child_gender: appState.bookData.childGender === 'girl' ? 'girl' : 'boy'
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success && data.options && data.options.length > 0) {
+                    const container = document.getElementById('previewOptionsContainer');
+                    container.innerHTML = '';
                     
-                    img_buffer = BytesIO(img_bytes)
-                    pil_img = PILImage.open(img_buffer)
-                    # Convert to RGB if needed (for transparency issues)
-                    if pil_img.mode in ('RGBA', 'LA', 'P'):
-                        pil_img = pil_img.convert('RGB')
-                    output = BytesIO()
-                    pil_img.save(output, format='JPEG', quality=85)
-                    output.seek(0)
-                    return ImageReader(output)
-                except Exception as e:
-                    print(f"  ⚠️ Could not load image: {e}")
-                    return None
-            
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            story_data = json.loads(post_data.decode('utf-8'))
-            
-            child_name = story_data.get('childName', 'ילד')
-            pages = story_data.get('pages', [])
-            
-            print(f"📄 PDF for: {child_name}")
-            print(f"   Pages: {len(pages)}")
-            print(f"   Hebrew support: {'✅' if has_bidi else '❌'}")
-            
-            buffer = BytesIO()
-            c = canvas.Canvas(buffer, pagesize=A4)
-            width, height = A4
-            
-            # 🇮🇱 NEW: הורדה אוטומטית של פונט עברי אמיתי מ-Google Fonts
-            # זה מבטיח שעברית תיראה תקין ב-PDF, ולא ג'יבריש
-            HEBREW_FONT_PATH = '/tmp/NotoSansHebrew-Regular.ttf'
-            
-            if not os.path.exists(HEBREW_FONT_PATH):
-                try:
-                    print(f"   🌐 Downloading Hebrew font from Google Fonts...")
-                    font_url = "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansHebrew/NotoSansHebrew-Regular.ttf"
-                    
-                    ctx = ssl.create_default_context()
-                    ctx.check_hostname = False
-                    ctx.verify_mode = ssl.CERT_NONE
-                    
-                    req = urllib.request.Request(
-                        font_url,
-                        headers={'User-Agent': 'Mozilla/5.0'}
-                    )
-                    with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
-                        font_data = response.read()
-                    
-                    with open(HEBREW_FONT_PATH, 'wb') as f:
-                        f.write(font_data)
-                    print(f"   ✅ Hebrew font downloaded: {len(font_data)} bytes")
-                except Exception as font_err:
-                    print(f"   ⚠️ Failed to download Hebrew font: {font_err}")
-            
-            # Register Hebrew font - first try the downloaded one, then system fonts
-            hebrew_font = 'Helvetica'
-            font_paths = [
-                HEBREW_FONT_PATH,  # 🥇 First try our downloaded font
-                '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-                '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-                '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
-                '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
-                'C:\\Windows\\Fonts\\arial.ttf'
-            ]
-            
-            for font_path in font_paths:
-                try:
-                    if os.path.exists(font_path):
-                        pdfmetrics.registerFont(TTFont('Hebrew', font_path))
-                        hebrew_font = 'Hebrew'
-                        print(f"   📝 Font registered: {font_path}")
-                        break
-                except Exception as e:
-                    print(f"   ⚠️ Font failed: {font_path} - {e}")
-                    continue
-            
-            # ====== Cover Page ======
-            c.setFillColorRGB(0.99, 0.96, 0.89)  # cream
-            c.rect(0, 0, width, height, stroke=0, fill=1)
-            c.setFillColorRGB(0.16, 0.13, 0.09)  # dark
-            c.setFont(hebrew_font, 36)
-            title = fix_hebrew(f"הספר של {child_name}")
-            title_width = c.stringWidth(title, hebrew_font, 36)
-            c.drawString((width - title_width) / 2, height - 200, title)
-            
-            c.setFont(hebrew_font, 16)
-            subtitle = fix_hebrew("מבית לילוש טובוש")
-            sub_width = c.stringWidth(subtitle, hebrew_font, 16)
-            c.drawString((width - sub_width) / 2, height - 240, subtitle)
-            c.showPage()
-            
-            # ====== Story Pages ======
-            for i, page in enumerate(pages):
-                print(f"   🖼️ Adding page {i+1}/{len(pages)}...")
-                
-                # Page number
-                c.setFillColorRGB(0.36, 0.29, 0.21)
-                c.setFont(hebrew_font, 10)
-                page_num = fix_hebrew(f"עמוד {i + 1}")
-                c.drawString(width - 100, 30, page_num)
-                
-                # ===== IMAGE =====
-                image_url = page.get('imageUrl')
-                if image_url:
-                    img_reader = load_image_for_pdf(image_url)
-                    if img_reader:
-                        # Image position - top half of page
-                        img_width = width - 80  # margin 40 each side
-                        img_height = height * 0.55  # top 55% of page
-                        img_x = 40
-                        img_y = height - img_height - 60  # 60 from top
+                    data.options.forEach((option, idx) => {
+                        const card = document.createElement('div');
+                        card.style.cssText = `
+                            cursor: pointer; border-radius: 12px; overflow: hidden;
+                            border: 3px solid transparent; transition: all 0.2s;
+                            background: #FBF4E4;
+                        `;
+                        // תווית מסבירה לפי סוג הווריאציה
+                        const labelText = {
+                            'warm_realistic': '📷 ריאליסטי',
+                            'classic_illustration': '🎨 איור קלאסי',
+                            'soft_illustration': '✏️ איור רך'
+                        }[option.label] || `אפשרות ${idx + 1}`;
                         
-                        try:
-                            c.drawImage(
-                                img_reader,
-                                img_x, img_y,
-                                width=img_width,
-                                height=img_height,
-                                preserveAspectRatio=True,
-                                anchor='c'
-                            )
-                            print(f"      ✅ Image added")
-                        except Exception as img_err:
-                            print(f"      ⚠️ Image draw failed: {img_err}")
-                
-                # ===== TEXT =====
-                c.setFillColorRGB(0.16, 0.13, 0.09)
-                c.setFont(hebrew_font, 16)
-                text = page.get('text', '')
-                
-                # Split and reverse for Hebrew (each line individually)
-                if has_bidi and any(ord(ch) > 127 for ch in text):
-                    # Hebrew: split, fix each line, then layout
-                    raw_lines = simpleSplit(text, hebrew_font, 16, width - 100)
-                    text_lines = [fix_hebrew(line) for line in raw_lines]
-                else:
-                    text_lines = simpleSplit(text, hebrew_font, 16, width - 100)
-                
-                # Text in bottom half
-                y_position = height * 0.35  # ~35% from bottom
-                for line in text_lines:
-                    line_width = c.stringWidth(line, hebrew_font, 16)
-                    c.drawString((width - line_width) / 2, y_position, line)
-                    y_position -= 24
-                
-                c.showPage()
-            
-            c.save()
-            
-            pdf_data = buffer.getvalue()
-            buffer.close()
-            
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/pdf')
-            
-            # 🔧 FIX: תמיכה בשמות קבצים בעברית ע"פ RFC 5987
-            try:
-                child_name.encode('latin-1')
-                self.send_header('Content-Disposition', f'attachment; filename="lilush_{child_name}.pdf"')
-            except UnicodeEncodeError:
-                from urllib.parse import quote
-                ascii_fallback = "lilush_book.pdf"
-                utf8_filename = quote(f"lilush_{child_name}.pdf", safe='')
-                self.send_header(
-                    'Content-Disposition',
-                    f'attachment; filename="{ascii_fallback}"; filename*=UTF-8\'\'{utf8_filename}'
-                )
-            
-            self.send_header('Content-Length', len(pdf_data))
-            self.end_headers()
-            self.wfile.write(pdf_data)
-            
-            print(f"✅ PDF done ({len(pdf_data)} bytes)")
-            
-        except Exception as e:
-            print(f"❌ PDF error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            self.send_json_response({'error': str(e)}, status=500)
-    
-    def send_json_response(self, data, status=200):
-        self.send_response(status)
-        self.send_header('Content-Type', 'application/json; charset=utf-8')
-        self.end_headers()
-        self.wfile.write(json.dumps(data, ensure_ascii=False).encode('utf-8'))
-    
-    def log_message(self, format, *args):
-        if self.path.startswith('/api/'):
-            return
-        SimpleHTTPRequestHandler.log_message(self, format, *args)
-    
-    # ==========================================
-    # 🤖 AI Training Endpoints (NEW!)
-    # ==========================================
-    
-    def handle_train_model(self):
-        """מאמן מודל AI על בסיס תמונות הילד"""
-        try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            photos = data.get('photos', [])
-            child_name = data.get('child_name', 'child')
-            
-            print(f"\n🤖 Starting AI Training")
-            print(f"📸 Photos: {len(photos)}")
-            print(f"👤 Name: {child_name}")
-            
-            if not REPLICATE_API_TOKEN:
-                raise Exception('Replicate API token not configured')
-            
-            if len(photos) < 5:
-                raise Exception('Need at least 5 photos for training')
-            
-            # Start training
-            training_id = self.start_replicate_training(photos, child_name)
-            
-            if training_id:
-                print(f"✅ Training started: {training_id}")
-                
-                self.send_json_response({
-                    'success': True,
-                    'training_id': training_id,
-                    'message': 'Training started successfully',
-                    'estimated_time': '5-10 minutes'
-                })
-            else:
-                raise Exception('Failed to start training')
-                
-        except Exception as e:
-            print(f"❌ Training error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            self.send_json_response({'error': str(e)}, status=500)
-    
-    def start_replicate_training(self, photos, child_name):
-        """מתחיל אימון ב-Replicate - גרסה פשוטה"""
-        try:
-            if not REPLICATE_API_TOKEN:
-                raise Exception('No Replicate token')
-            
-            print(f"  🚀 REAL Replicate Training starting...")
-            print(f"  📸 Photos: {len(photos)}")
-            
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            
-            # Create ZIP from photos
-            zip_b64 = self.create_zip_from_photos(photos)
-            if not zip_b64:
-                raise Exception('Failed to create ZIP')
-            
-            # Simplified Training - try without specific version first
-            print(f"  🔍 Checking available training options...")
-            
-            # Try simple prediction first to test
-            training_data = {
-                "input": {
-                    "input_images": f"data:application/zip;base64,{zip_b64}",
-                    "steps": 500,
-                    "trigger_word": child_name
-                }
-            }
-            
-            headers = {
-                'Authorization': f'Token {REPLICATE_API_TOKEN}',
-                'Content-Type': 'application/json'
-            }
-            
-            # Try the trainings endpoint
-            training_url = 'https://api.replicate.com/v1/models/ostris/flux-dev-lora-trainer/versions/4a78013f38e8c316fb9bdb7b8b7f81c0059fc7e127e60f03c90fd639b3e6408c/trainings'
-            
-            req = urllib.request.Request(
-                'https://api.replicate.com/v1/trainings',
-                data=json.dumps(training_data).encode('utf-8'),
-                headers=headers,
-                method='POST'
-            )
-            
-            print(f"  📤 Sending training request to Replicate...")
-            
-            with urllib.request.urlopen(req, timeout=60, context=ctx) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                training_id = result['id']
-            
-            print(f"  ✅ Training started: {training_id}")
-            print(f"  ⏱️  This will take ~10 minutes...")
-            
-            return training_id
-                
-        except Exception as e:
-            print(f"  ❌ Training error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
-    
-    def create_zip_from_photos(self, photos):
-        """יוצר ZIP מתמונות base64"""
-        try:
-            import zipfile
-            from io import BytesIO
-            
-            zip_buffer = BytesIO()
-            
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                for i, photo_b64 in enumerate(photos):
-                    # Remove data:image/... prefix
-                    if ',' in photo_b64:
-                        photo_b64 = photo_b64.split(',')[1]
+                        card.innerHTML = `
+                            <img src="${option.image}" 
+                                 style="width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block;"
+                                 alt="${labelText}">
+                            <div style="padding: 0.5rem; font-size: 0.85rem; color: #5C4A35; font-weight: 600;">
+                                ${labelText}
+                            </div>
+                        `;
+                        
+                        card.addEventListener('mouseenter', () => {
+                            card.style.borderColor = '#C95E48';
+                            card.style.transform = 'scale(1.03)';
+                        });
+                        card.addEventListener('mouseleave', () => {
+                            card.style.borderColor = 'transparent';
+                            card.style.transform = 'scale(1)';
+                        });
+                        
+                        card.addEventListener('click', () => {
+                            // 🎲 שמירת seed + lora_scale + style הנבחרים!
+                            appState.bookData.chosen_seed = option.seed;
+                            appState.bookData.chosen_lora_scale = option.lora_scale;
+                            appState.bookData.chosen_style = option.style;
+                            console.log(`✅ Parent chose: style=${option.style}, seed=${option.seed}, scale=${option.lora_scale}`);
+                            cleanup(true);
+                        });
+                        
+                        container.appendChild(card);
+                    });
                     
-                    photo_data = base64.b64decode(photo_b64)
-                    zip_file.writestr(f'photo_{i+1}.jpg', photo_data)
-            
-            zip_data = zip_buffer.getvalue()
-            return base64.b64encode(zip_data).decode()
-            
-        except Exception as e:
-            print(f"  ⚠️ ZIP creation error: {str(e)}")
-            return None
-    
-    def handle_training_status(self, training_id):
-        """בודק סטטוס של training"""
-        try:
-            # Mock implementation for MVP
-            # In production, this would check real Replicate API
-            
-            if training_id.startswith('mock_training_'):
-                # Simulate training completion after a short delay
-                # In real implementation, this would poll Replicate
-                
-                # Extract model ID from training ID
-                model_id = training_id.replace('mock_training_', '')
-                
-                # For demo purposes, mark as succeeded immediately
-                response_data = {
-                    'status': 'succeeded',
-                    'id': training_id,
-                    'model_id': model_id
+                    document.getElementById('previewActions').style.display = 'flex';
+                } else {
+                    throw new Error(data.error || 'יצירת התצוגות נכשלה');
                 }
-                
-                print(f"✅ Mock training completed: {model_id}")
-                
-                self.send_json_response(response_data)
-                return
-            
-            # If it's a real Replicate training ID, check it properly
-            if not REPLICATE_API_TOKEN:
-                raise Exception('Replicate API token not configured')
-            
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            
-            headers = {
-                'Authorization': f'Token {REPLICATE_API_TOKEN}',
-                'Content-Type': 'application/json'
+            } catch (err) {
+                console.error('Preview options error:', err);
+                document.getElementById('previewOptionsContainer').innerHTML = '';
+                document.getElementById('previewError').style.display = 'block';
+                document.getElementById('previewError').innerHTML = `
+                    <strong>⚠️ שגיאה ביצירת התצוגות</strong><br>
+                    <small>${err.message}</small>
+                `;
+                document.getElementById('previewActions').style.display = 'flex';
             }
-            
-            req = urllib.request.Request(
-                f'https://api.replicate.com/v1/trainings/{training_id}',
-                headers=headers
-            )
-            
-            with urllib.request.urlopen(req, timeout=30, context=ctx) as response:
-                result = json.loads(response.read().decode('utf-8'))
-                
-                status = result.get('status')
-                
-                response_data = {
-                    'status': status,
-                    'id': training_id
-                }
-                
-                if status == 'succeeded':
-                    model_version = result.get('output', {}).get('version')
-                    if model_version:
-                        response_data['model_id'] = model_version
-                        print(f"✅ Training completed: {model_version}")
-                
-                elif status == 'failed':
-                    error = result.get('error', 'Unknown error')
-                    response_data['error'] = error
-                    print(f"❌ Training failed: {error}")
-                
-                self.send_json_response(response_data)
-                
-        except Exception as e:
-            print(f"❌ Status check error: {str(e)}")
-            self.send_json_response({'error': str(e)}, status=500)
-
-
-def run_server(port=None):
-    if port is None:
-        port = int(os.environ.get('PORT', 8000))
-    
-    print("\n" + "="*60)
-    print("🚀 לילוש טובוש")
-    print("="*60)
-    print(f"📸 Images: {IMAGE_MODE}")
-    print(f"👤 Face Swap: {'ON' if FAL_KEY and HAS_FAL else 'OFF'}")
-    print(f"📡 Port: {port}")
-    print("="*60 + "\n")
-    
-    server_address = ('', port)
-    httpd = HTTPServer(server_address, CORSRequestHandler)
-    
-    try:
-        httpd.serve_forever()
-    except KeyboardInterrupt:
-        print("\n👋 Stopped!")
-
-
-if __name__ == '__main__':
-    run_server()
+        }
+        
+        generateOptions();
+        
+        overlay.addEventListener('click', (e) => {
+            if (e.target.id === 'previewCancel') {
+                cleanup(false);
+            } else if (e.target.id === 'previewRetry') {
+                generateOptions();
+            }
+        });
+    });
+}
