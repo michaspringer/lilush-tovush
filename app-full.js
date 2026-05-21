@@ -476,8 +476,12 @@ async function checkTrainingStatus(trainingState) {
         
         if (statusData.status === 'succeeded') {
             // ✅ האימון הסתיים בהצלחה - שמור LoRA מלא (כולל URL ו-version)
+            // 🐛 תיקון באג: שומרים תחת שם הילד האמיתי שההורה הקליד,
+            // לא תחת קוד הגישה. אחרת findLoraForChild(childName) לא ימצא
+            // את ה-LoRA, וההורה לא יקבל את 3 התמונות לבחירה.
+            const savedChildName = localStorage.getItem('lilatov_child_name') || trainingState.access_code;
             const loraModel = {
-                child_name: trainingState.access_code,  // קוד הגישה
+                child_name: savedChildName,  // ✅ "מיכה" - לא "100"
                 trigger_word: trainingState.trigger_word,
                 lora_url: statusData.lora_url,
                 version: statusData.version,
