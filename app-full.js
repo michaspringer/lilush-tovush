@@ -233,14 +233,79 @@ function validateProfileStep() {
     const btn = document.getElementById('startTrainingBtn');
     const nameInput = document.getElementById('profileChildName');
     const photosInput = document.getElementById('trainingPhotos');
+    const clearBtn = document.getElementById('clearPhotosBtn');
     
     if (!btn) return;
     
     const hasName = nameInput && nameInput.value.trim().length >= 2;
-    const hasEnoughPhotos = photosInput && photosInput.files &&
-                            photosInput.files.length >= 5 && photosInput.files.length <= 10;
+    const photoCount = photosInput && photosInput.files ? photosInput.files.length : 0;
+    const hasEnoughPhotos = photoCount >= 5 && photoCount <= 10;
     
     btn.disabled = !(hasName && hasEnoughPhotos);
+    
+    // 🆕 כפתור "מחק תמונות" מופיע רק כשיש לפחות תמונה אחת שנבחרה
+    if (clearBtn) {
+        clearBtn.style.display = photoCount > 0 ? 'inline-block' : 'none';
+    }
+}
+
+/**
+ * 🆕 מנקה את התמונות שנבחרו ואת התצוגה המקדימה.
+ * מאפשר להורה להתחיל מחדש בלי לרענן את הדף.
+ */
+function clearTrainingPhotos() {
+    if (!confirm('למחוק את כל התמונות שהעלית?')) return;
+    
+    const input = document.getElementById('trainingPhotos');
+    const preview = document.getElementById('photoPreviewGrid');
+    
+    if (input) input.value = '';
+    if (preview) preview.innerHTML = '';
+    
+    validateProfileStep();
+    console.log('🗑️ Training photos cleared');
+}
+
+/**
+ * דוחס תמונה בצד הלקוח לרוחב מקסימלי + איכות JPEG.
+ * חיוני לפני שליחה לשרת - תמונות מטלפון (4000px, 3-5MB) יוצרות
+ * ZIP של 15+ MB שעובר את מגבלת 10MB של Cloudinary.
+ * 
+ * @param {File} file - קובץ התמונה המקורי
+ * @param {number} maxWidth - רוחב מקסימלי בפיקסלים (ברירת מחדל 1024)
+ * @param {number} quality - איכות JPEG 0-1 (ברירת מחדל 0.85)
+ * @returns {Promise<string>} - data URL של התמונה המכווצת
+ */
+function compressImage(file, maxWidth = 1024, quality = 0.85) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.onload = (e) => {
+            const img = new Image();
+            img.onerror = () => reject(new Error('Failed to load image'));
+            img.onload = () => {
+                // חישוב מימדים חדשים תוך שמירה על יחס
+                let { width, height } = img;
+                if (width > maxWidth) {
+                    height = Math.round(height * maxWidth / width);
+                    width = maxWidth;
+                }
+                
+                // ציור על canvas והמרה ל-JPEG דחוס
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                
+                // תמיד JPEG (גם אם המקור PNG) - יותר קטן באופן משמעותי
+                const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                resolve(dataUrl);
+            };
+            img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+    });
 }
 
 async function startTraining() {
@@ -265,18 +330,19 @@ async function startTraining() {
     showScreen('trainingScreen');
     
     try {
-        document.getElementById('trainingStatus').textContent = 'מעלה תמונות...';
-        document.getElementById('trainingProgressBar').style.width = '10%';
+        document.getElementById('trainingStatus').textContent = 'מכווץ תמונות...';
+        document.getElementById('trainingProgressBar').style.width = '5%';
         
+        // 🗜️ דחיסת תמונות בצד הלקוח - תמונות מטלפון יוצרות ZIP > 10MB
+        // (המגבלה של Cloudinary). דוחסים ל-1024px רוחב + JPEG quality 85
+        // שזה איכות מצוינת ל-LoRA training, ומקטין כל תמונה פי 10.
         const photos = await Promise.all(
-            Array.from(files).map(file => {
-                return new Promise((resolve) => {
-                    const reader = new FileReader();
-                    reader.onload = (e) => resolve(e.target.result);
-                    reader.readAsDataURL(file);
-                });
-            })
+            Array.from(files).map((file, i) => compressImage(file, 1024, 0.85))
         );
+        
+        // לוג גודל כולל לאבחון
+        const totalKB = photos.reduce((sum, p) => sum + Math.ceil(p.length * 0.75 / 1024), 0);
+        console.log(`🗜️ Compressed ${photos.length} photos, total ~${totalKB} KB`);
         
         document.getElementById('training-upload').classList.add('active');
         document.getElementById('trainingProgressBar').style.width = '30%';
