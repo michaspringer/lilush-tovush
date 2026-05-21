@@ -8,7 +8,7 @@
 </head>
 <body>
     <div id="app">
-        <!-- Screen 1: Landing Page -->
+        <!-- Screen 1: Landing Page (in-app) -->
         <div class="screen landing-screen active" id="landingScreen">
             <div class="landing-content">
                 <h1 class="main-title">🌈 לילוש טובוש 🌈</h1>
@@ -18,14 +18,9 @@
                     בעזרת בינה מלאכותית, אנחנו יוצרים סיפור ייחודי עם איורים מקסימים,<br>
                     שמותאם בדיוק לגיל, לתחומי העניין ולאישיות של הילד שלכם.
                 </p>
-                <button class="cta-button" onclick="startCreation()">
-                    ✨ התחילו לצור ✨
+                <button class="cta-button" onclick="showProfileCreation()">
+                    ✨ בואו נתחיל ✨
                 </button>
-                <div style="margin-top: 1rem; text-align: center;">
-                    <button class="cta-button-secondary" onclick="showProfileCreation()" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); font-size: 0.9rem; padding: 0.8rem 2rem;">
-                        🎨 צרו פרופיל AI (הילד בתמונות!) 🌟
-                    </button>
-                </div>
                 <div class="features">
                     <div class="feature">
                         <div class="feature-icon">📖</div>
@@ -83,56 +78,6 @@
                         <div class="gender-buttons">
                             <button class="gender-btn" onclick="selectGender('boy')">👦 בן</button>
                             <button class="gender-btn" onclick="selectGender('girl')">👧 בת</button>
-                        </div>
-                    </div>
-                    
-                    <div class="form-group" style="margin-top: 2rem; padding: 1.5rem; background: linear-gradient(135deg, #f5f7ff 0%, #e8ecff 100%); border-radius: 15px; border: 2px dashed #667eea;">
-                        <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: bold; color: #667eea; margin-bottom: 1rem;">
-                            <span>🌟</span>
-                            <span>רוצים שהילד יופיע בתמונות?</span>
-                        </label>
-                        
-                        <!-- Choice Buttons -->
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
-                            <button type="button" class="photo-option-btn" id="optionGeneric" onclick="selectPhotoOption('generic')" style="padding: 1.5rem; border: 3px solid #ddd; border-radius: 15px; background: white; cursor: pointer; transition: all 0.3s; text-align: center;">
-                                <div style="font-size: 3rem; margin-bottom: 0.5rem;">🎨</div>
-                                <div style="font-weight: bold; font-size: 1.1rem; color: #333; margin-bottom: 0.5rem;">ספר רגיל</div>
-                                <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">דמות גנרית יפה</div>
-                                <div style="background: #e8f5e9; color: #2e7d32; padding: 0.5rem; border-radius: 8px; font-size: 0.9rem; font-weight: bold;">מהיר • ₪149</div>
-                            </button>
-                            
-                            <button type="button" class="photo-option-btn" id="optionReal" onclick="selectPhotoOption('real')" style="padding: 1.5rem; border: 3px solid #ddd; border-radius: 15px; background: white; cursor: pointer; transition: all 0.3s; text-align: center;">
-                                <div style="font-size: 3rem; margin-bottom: 0.5rem;">✨</div>
-                                <div style="font-weight: bold; font-size: 1.1rem; color: #333; margin-bottom: 0.5rem;">הילד האמיתי!</div>
-                                <div style="font-size: 0.85rem; color: #666; margin-bottom: 0.5rem;">הילד שלכם בתמונות</div>
-                                <div style="background: #fff3e0; color: #e65100; padding: 0.5rem; border-radius: 8px; font-size: 0.9rem; font-weight: bold;">פרימיום • ₪349</div>
-                            </button>
-                        </div>
-                        
-                        <!-- Upload Section (shows only if "real" selected) -->
-                        <div id="photoUploadSection" style="display: none;">
-                            <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">
-                                📸 העלו 1-3 תמונות ברורות של הילד. ה-AI יוסיף את הפנים לכל תמונה בספר!
-                            </p>
-                            <input type="file" 
-                                   id="childPhotosInline" 
-                                   accept="image/jpeg,image/png,image/jpg" 
-                                   multiple 
-                                   onchange="previewPhotosInline()"
-                                   style="display: none;">
-                            <label for="childPhotosInline" class="upload-inline-label" style="display: block; padding: 1rem; background: white; border: 2px solid #667eea; border-radius: 10px; text-align: center; cursor: pointer; transition: all 0.3s;">
-                                <div style="font-size: 2rem; margin-bottom: 0.5rem;">📸</div>
-                                <div style="font-weight: bold; color: #667eea;">לחצו להעלאת תמונות</div>
-                                <div style="font-size: 0.8rem; color: #666; margin-top: 0.3rem;">1-3 תמונות ברורות של הילד</div>
-                            </label>
-                            <div id="photoPreviewInline" style="margin-top: 1.5rem; display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 1rem; padding: 1rem; background: #f8f9ff; border-radius: 12px;">
-                                <!-- Photos preview will appear here -->
-                            </div>
-                        </div>
-                        
-                        <!-- Info Box -->
-                        <div id="optionInfoBox" style="margin-top: 1rem; padding: 1rem; background: white; border-radius: 10px; display: none;">
-                            <!-- Will be filled by JS -->
                         </div>
                     </div>
                     
@@ -256,7 +201,7 @@
             </div>
         </div>
 
-        <!-- Screen: AI Profile Creation (NEW!) -->
+        <!-- Screen: AI Profile Creation -->
         <div class="screen profile-screen" id="profileScreen">
             <div class="container">
                 <h1 style="text-align: center; color: #667eea; margin-bottom: 1rem;">
@@ -265,6 +210,23 @@
                 <p style="text-align: center; font-size: 1.1rem; margin-bottom: 2rem;">
                     העלו 5-10 תמונות של הילד והוא יופיע בכל ספר! ✨
                 </p>
+
+                <!-- 🆕 שדה שם הילד - נדרש לפני האימון -->
+                <div class="child-name-section" style="background: white; padding: 1.5rem; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 1.5rem;">
+                    <label for="profileChildName" style="display: block; font-weight: bold; font-size: 1.1rem; color: #667eea; margin-bottom: 0.5rem;">
+                        👶 איך קוראים לילד שלכם?
+                    </label>
+                    <p style="font-size: 0.9rem; color: #666; margin-bottom: 1rem;">
+                        השם הזה ילווה אתכם בכל הספרים שתיצרו.
+                    </p>
+                    <input 
+                        type="text" 
+                        id="profileChildName" 
+                        placeholder="למשל: נועה, דני, תמר..." 
+                        oninput="validateProfileStep()"
+                        style="width: 100%; padding: 0.9rem 1rem; font-size: 1.1rem; border: 2px solid #e0e0e0; border-radius: 10px; box-sizing: border-box; font-family: inherit;"
+                    >
+                </div>
                 
                 <div class="photo-upload-section" style="background: white; padding: 2rem; border-radius: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); margin-bottom: 2rem;">
                     <input type="file" 
@@ -299,27 +261,18 @@
                 </div>
                 
                 <div class="form-nav" style="display: flex; gap: 1rem; justify-content: center;">
-                    <button class="btn btn-secondary" onclick="showScreen('landingScreen')">
-                        ⬅️ חזור
-                    </button>
                     <button class="btn btn-success" 
                             onclick="startTraining()" 
                             id="startTrainingBtn" 
                             disabled
                             style="font-size: 1.1rem; padding: 1rem 2rem;">
-                        🚀 התחל אימון AI (5-10 דקות)
-                    </button>
-                </div>
-                
-                <div style="text-align: center; margin-top: 2rem;">
-                    <button class="btn btn-link" onclick="skipTraining()" style="color: #666; text-decoration: underline;">
-                        ⏭️ דלג לעכשיו (אפשר ליצור ספר רגיל)
+                        🚀 התחל אימון AI (כ-25 דקות)
                     </button>
                 </div>
             </div>
         </div>
 
-        <!-- Screen: AI Training Progress (NEW!) -->
+        <!-- Screen: AI Training Progress -->
         <div class="screen training-screen" id="trainingScreen">
             <div class="generating-content">
                 <div class="generating-animation">
@@ -327,7 +280,7 @@
                     <div class="sparkles">✨</div>
                 </div>
                 <h2 class="generating-title">מאמנים את ה-AI על הילד שלכם...</h2>
-                <p class="generating-text" id="trainingText">זה ייקח בערך 5-10 דקות. אתם יכולים להמתין או לסגור ולחזור מאוחר יותר.</p>
+                <p class="generating-text" id="trainingText">זה ייקח בערך 25 דקות. אתם יכולים לסגור את הדף ולחזור.</p>
                 <div class="progress-steps">
                     <div class="progress-item active" id="training-upload">
                         <div class="progress-icon">📤</div>
