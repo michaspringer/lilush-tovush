@@ -1,5 +1,5 @@
 // ==========================================
-// 🌐 Server Configuration  
+// 🌐 Server Configuration
 // ==========================================
 const SERVER_CONFIG = {
     url: 'https://web-production-ec858.up.railway.app'
@@ -504,9 +504,22 @@ async function checkTrainingStatus(trainingState) {
             localStorage.removeItem('lilatov_training_pending');
             console.log('🎉 LoRA Model saved:', loraModel);
             
-            if (resultEl) resultEl.innerHTML = '✅ <strong>מוכן! מעבירים אתכם ליצירת הספר...</strong>';
+            // 🆕 שלב חדש: הצגת 3 תמונות לבחירה מיד אחרי האימון, לפני טופס הסיפור.
+            // היגיון: ההורה רוצה לראות שהילד יוצא דומה לפני שהוא משקיע במילוי טופס.
+            if (resultEl) resultEl.innerHTML = '✅ <strong>הפרופיל מוכן! נכין לכם 3 גרסאות לבחירה...</strong>';
             await new Promise(r => setTimeout(r, 1200));
-            startCreation();
+            
+            // קריאה ל-showLoraPreview עם המודל החדש
+            const previewApproved = await showLoraPreview(loraModel);
+            
+            if (previewApproved) {
+                // ✅ ההורה אישר תמונה - ממשיכים לטופס הסיפור
+                startCreation();
+            } else {
+                // ❌ ההורה ביטל / בחר לאמן מחדש - חוזרים ל-profileScreen
+                // (אם הוא בחר "אמן מחדש", showLoraPreview כבר ניקה את ה-LoRA)
+                showScreen('profileScreen');
+            }
             
         } else if (statusData.status === 'failed') {
             // ❌ האימון נכשל
@@ -558,6 +571,11 @@ function showScreen(screenId) {
     if (targetScreen) {
         targetScreen.classList.add('active');
     }
+    
+    // 🔝 גלילה אוטומטית לראש בכל מעבר מסך.
+    // בלי זה, מעבר מ-profileScreen למסך ההמתנה הארוך גורם
+    // לכך שההורה רואה את אמצע הדף בלי לדעת שהמסך השתנה.
+    window.scrollTo({ top: 0, behavior: 'instant' });
 }
 
 function startCreation() {
@@ -761,17 +779,8 @@ async function generateStory() {
     const customInputElement = document.getElementById('customInput');
     appState.bookData.customInput = customInputElement ? customInputElement.value.trim() : '';
     
-    // 🎯 חפש אם יש LoRA מאומן עבור הילד הזה
-    const childLora = findLoraForChild(appState.bookData.childName);
-    
-    // 🆕 שלב חדש: אם יש LoRA - הצג תצוגה מקדימה לפני יצירת הספר
-    if (childLora) {
-        const previewApproved = await showLoraPreview(childLora);
-        if (!previewApproved) {
-            console.log('User cancelled book creation after preview');
-            return;  // המשתמש לא אישר - חזרה לטופס
-        }
-    }
+    // הערה: בעבר היה כאן showLoraPreview - הוא הועבר מיד אחרי האימון.
+    // ההורה כבר בחר את הילד שלו לפני שהוא הגיע לטופס הזה.
     
     showScreen('generatingScreen');
     
@@ -1858,6 +1867,14 @@ async function showLoraPreview(childLora) {
                     ">
                         🔄 צור 3 תמונות חדשות
                     </button>
+                    <button id="previewRetrain" style="
+                        background: transparent; color: #C95E48;
+                        border: 2px solid #E0552F;
+                        padding: 0.7rem 1.5rem; border-radius: 100px; cursor: pointer;
+                        font-size: 0.95rem; font-weight: 600; font-family: inherit;
+                    ">
+                        🔁 אמן מחדש עם תמונות אחרות
+                    </button>
                     <button id="previewCancel" style="
                         background: transparent; color: #999;
                         border: none; cursor: pointer;
@@ -1978,6 +1995,19 @@ async function showLoraPreview(childLora) {
                 cleanup(false);
             } else if (e.target.id === 'previewRetry') {
                 generateOptions();
+            } else if (e.target.id === 'previewRetrain') {
+                // 🔁 ההורה החליט שהתמונות לא טובות ורוצה לאמן מחדש.
+                // מאשרים, מוחקים את ה-LoRA הקיים, וחוזרים ל-profileScreen.
+                if (!confirm('האם למחוק את הפרופיל הקיים ולהעלות תמונות חדשות?\n\nתאלצו לחכות 25 דקות נוספות לאימון מחדש.')) {
+                    return;
+                }
+                console.log('🔁 User chose to retrain - deleting current LoRA');
+                if (typeof deleteLoraModel === 'function') {
+                    deleteLoraModel(childLora.child_name);
+                }
+                // ניקוי שם הילד הקיים, כדי שב-profileScreen ההורה ימלא חדש
+                localStorage.removeItem('lilatov_child_name');
+                cleanup(false);
             }
         });
     });
