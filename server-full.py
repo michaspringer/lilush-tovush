@@ -1371,25 +1371,41 @@ Return ONLY the English description, nothing else."""
 
 ⚠️⚠️ התיאור חייב להיות מאוד ספציפי - זו הסיבה #1 לחוסר אחידות!
 חובה שכל תיאור חיה יכלול את 5 המרכיבים האלה, בסדר הזה:
-1. גזע מדויק - חובה! בלי גזע הכלב ייראה שונה לגמרי בכל עמוד.
+1. גזע/מין מדויק - חובה! בלי גזע הכלב ייראה שונה לגמרי בכל עמוד.
    (golden retriever / chocolate labrador / beagle / cocker spaniel)
    ❌ אסור "dog" / "puppy" כללי - חייב גזע אמיתי.
-2. צבע פרווה מדויק (chocolate brown / golden / black and white)
-3. גודל (small / medium-sized / large)
-4. אורך וסוג פרווה (short smooth coat / long fluffy coat / curly coat)
-   ⚠️ קריטי! אם לא תציין - הכלב יקבל פרווה שונה בכל עמוד.
-5. מאפיינים ייחודיים קבועים (floppy ears, blue collar, white chest patch)
+   🐘 לחיות אקזוטיות: ציין את המין המדויק -
+   "an African elephant" (אפריקאי - אוזניים גדולות, חיוורות יותר) או
+   "an Asian elephant" (אסיאתי - אוזניים קטנות, גוף כהה יותר) -
+   אחד מהם בלבד, ולעולם לא לערבב! בחר אחד וחזור עליו בכל עמוד.
+2. צבע פרווה/עור מדויק (chocolate brown / golden / grey)
+3. גודל (small / medium-sized / large / huge)
+4. אורך וסוג פרווה/עור (short smooth coat / long fluffy coat / thick grey skin)
+   ⚠️ קריטי! אם לא תציין - החיה תקבל מראה שונה בכל עמוד.
+5. מאפיינים ייחודיים קבועים (floppy ears, blue collar, white tusks)
+   ⚠️ אסור להזכיר סימני קישוט (פרחים בראש, צבעים כתומים על האוזניים, ורוד)
+   אלא אם הם חלק קבוע של החיה. אחרת ייווצרו סימני קישוט שונים בכל עמוד!
 
 דוגמה טובה (כלב): "a medium-sized chocolate labrador retriever, 
 short smooth chocolate-brown coat, floppy ears, dark brown eyes, 
 a blue collar with a gold tag"
-דוגמה טובה (חתול): "a small grey tabby cat, short fur, green eyes, 
-white paws, a red collar"
+דוגמה טובה (פיל): "a large adult African elephant, thick grey skin,
+big wide flat ears, two short white tusks, long curling trunk,
+NO decorative markings on ears, plain natural grey color"
+דוגמה טובה (קוף): "a small brown spider monkey, fluffy brown fur,
+long curling tail, small round monkey face with dark eyes,
+animal monkey appearance (NOT human face), pink animal nose"
 דוגמה רעה: "a small brown dog with floppy ears" 
 (אין גזע! אין סוג פרווה! - ייצא כלב אחר בכל עמוד!)
+דוגמה רעה: "a friendly elephant" 
+(לא ברור איזה סוג פיל - יצא שונה בכל עמוד!)
 
 🔒 כלל ברזל: ברגע שבחרת גזע + צבע + סוג פרווה לדמות - 
 הם נעולים. אסור לשנות מילה. אותו תיאור מדויק חוזר בכל עמוד.
+
+🐒 קוף, חיה דמוית-אדם: זהירות מיוחדת! קוף הוא חיה, לא אדם.
+התיאור חייב להדגיש: "animal monkey appearance, animal face, NOT human face,
+fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר ילד-קוף.
 
 🚫 כללים קריטיים:
 1. אל תתאר את הילד הראשי בכלל - יש לו מודל מאומן!
@@ -2055,22 +2071,30 @@ white paws, a red collar"
                 # 🐕 חיזוק הדמות הנלווית: התיאור מוזכר פעמיים -
                 # פעם כהגדרה מלאה ופעם כתזכורת בסוף - כדי שה-LoRA
                 # (שמאומן בכבדות על הילד) לא "יבלע" אותה.
+                # 🚨 הוראות אנטי-זליגה: ה-LoRA המאומן על הילד נוטה
+                # להחיל את פני הילד גם על דמויות אחרות (חיות, קופים).
+                # ההוראות החזקות למטה מונעות זאת.
                 full_prompt = (
                     f"{style_anchor_start}"
-                    f"a scene with exactly ONE human child and ONE animal: "
+                    f"a scene with exactly ONE human child and ONE non-human animal: "
                     f"FIRST: {child_block}. "
                     f"SECOND: an animal companion - {char_part}. "
+                    f"CRITICAL: the animal has the head and face of {char_part} - "
+                    f"NOT a human face, NOT the child's face, the animal is fully animal. "
                     f"The animal MUST look exactly like this description "
                     f"in every detail: {char_part}. "
-                    f"The animal is a separate creature, the animal wears no clothes. "
+                    f"The animal is a separate creature with its own animal head, "
+                    f"the animal wears no clothes, the animal is not anthropomorphic. "
                     f"IMPORTANT: only ONE single human child in the entire image, "
+                    f"the trigger word ({trigger_word}) applies ONLY to the human child, "
                     f"absolutely no second child, no duplicate child, "
-                    f"no other kids, no children in the background. "
+                    f"no other kids, no children in the background, "
+                    f"no human face on the animal. "
                     f"Scene: {prompt}, "
                     f"{style_prompt}, {clean_composition}"
                     f"{style_anchor_end}, "
                     f"consistent animal appearance: {char_part}, "
-                    f"exactly one human child only"
+                    f"exactly one human child only, the animal has an animal face"
                 )
             else:
                 # 👤 רק הילד לבד
@@ -2128,14 +2152,24 @@ white paws, a red collar"
                 base_input["seed"] = int(seed)
                 print(f"  🎲 Using fixed seed: {seed}")
             
-            print(f"  💪 LoRA scale: {lora_scale}")
+            # 🐕 הורדה אוטומטית של lora_scale כשיש דמות נוספת (חיה/חבר):
+            # ה-LoRA נוטה "להחיל" את פני הילד גם על דמויות אחרות.
+            # הורדה של 0.1 ב-scale מספיקה כדי לתת לדמות השנייה נשימה,
+            # בלי לאבד את הדמיון של הילד הראשי.
+            effective_lora_scale = lora_scale
+            if has_other_chars and effective_lora_scale > 0.85:
+                effective_lora_scale = round(effective_lora_scale - 0.1, 2)
+                print(f"  🐕 Other character in scene - reducing lora_scale "
+                      f"from {lora_scale} to {effective_lora_scale}")
+            
+            print(f"  💪 LoRA scale: {effective_lora_scale}")
             
             # 🎯 STRATEGY 1 (Preferred): Use the trained model directly
             if lora_version:
                 print(f"  📌 Using trained model directly (best quality)")
                 strategy1_input = dict(base_input)
                 strategy1_input["prompt"] = full_prompt
-                strategy1_input["lora_scale"] = lora_scale
+                strategy1_input["lora_scale"] = effective_lora_scale
                 output = _run_with_retry(lora_version, strategy1_input)
             else:
                 # 🔧 STRATEGY 2 (Fallback/Legacy): Use ostris/flux-dev-lora with weights URL
@@ -2143,7 +2177,7 @@ white paws, a red collar"
                 strategy2_input = dict(base_input)
                 strategy2_input["prompt"] = full_prompt
                 strategy2_input["lora_url"] = lora_url
-                strategy2_input["lora_scale"] = lora_scale
+                strategy2_input["lora_scale"] = effective_lora_scale
                 output = _run_with_retry("ostris/flux-dev-lora", strategy2_input)
             
             if output and len(output) > 0:
