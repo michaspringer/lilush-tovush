@@ -1,5 +1,5 @@
 // ==========================================
-// 🌐 Server Configuration 1
+// 🌐 Server Configuration
 // ==========================================
 const SERVER_CONFIG = {
     url: 'https://web-production-ec858.up.railway.app'
@@ -482,6 +482,7 @@ async function checkTrainingStatus(trainingState) {
             const savedChildName = localStorage.getItem('lilatov_child_name') || trainingState.access_code;
             const loraModel = {
                 child_name: savedChildName,  // ✅ "מיכה" - לא "100"
+                access_code: trainingState.access_code,  // 🔑 קוד הגישה שיצר את המודל
                 trigger_word: trainingState.trigger_word,
                 lora_url: statusData.lora_url,
                 version: statusData.version,
@@ -1352,15 +1353,22 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     console.log('✅ Access code:', accessCode);
     
-    // 🤖 בדיקה אם יש כבר מודל AI מוכן
-    const aiModel = AITrainingManager.loadModel();
-    if (aiModel) {
-        console.log('🤖 AI Model found:', aiModel.model_id);
-        // יש מודל - המשך ישר לסיפור
+    // 🤖 בדיקה אם יש כבר מודל AI מוכן - **רק אם הוא שייך לקוד הגישה הנוכחי**!
+    // localStorage הוא פר-דפדפן, אז יכול להיות שמשתמש קודם עם קוד אחר
+    // השאיר מודל שאומן על ילד אחר - לא ניגע בו.
+    const allModels = (() => {
+        try { return JSON.parse(localStorage.getItem('lora_models') || '[]'); }
+        catch { return []; }
+    })();
+    const matchingModel = allModels.find(m => m.access_code === accessCode);
+    
+    if (matchingModel) {
+        console.log('🤖 AI Model found for this access code:', matchingModel.child_name);
+        // יש מודל לקוד הזה - המשך ישר לסיפור
         showScreen('creatorScreen');
         resetForm();
     } else {
-        // אין מודל - בודק אם יש אימון בתהליך
+        // אין מודל לקוד הזה - בודק אם יש אימון בתהליך
         const pendingRaw = localStorage.getItem('lilatov_training_pending');
         if (pendingRaw) {
             try {
@@ -1378,8 +1386,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 localStorage.removeItem('lilatov_training_pending');
             }
         }
-        // אין כלום - מתחיל מהעלאת תמונות
-        console.log('📷 No AI Model - starting with photo upload');
+        // אין כלום לקוד הזה - מתחיל מהעלאת תמונות
+        console.log('📷 No model/training for code', accessCode, '- starting with photo upload');
         showScreen('profileScreen');
     }
     
@@ -1794,11 +1802,18 @@ function saveLoraModel(model) {
 function findLoraForChild(childName) {
     /**
      * מחפש LoRA מאומן עבור ילד לפי שם.
+     * סינון נוסף: רק מודלים ששייכים לקוד הגישה הנוכחי.
+     * (אחרת משתמש בקוד 300 יקבל את המודל של דולב שאומן עם קוד 100.)
      * מחזיר null אם אין.
      */
     if (!childName) return null;
+    const currentCode = localStorage.getItem('lilatov_access_code');
     const models = JSON.parse(localStorage.getItem('lora_models') || '[]');
-    const found = models.find(m => m.child_name === childName);
+    const found = models.find(m =>
+        m.child_name === childName &&
+        // אם למודל יש access_code - חייב להתאים. אם אין (מודל ישן) - מתעלמים.
+        (!m.access_code || m.access_code === currentCode)
+    );
     if (found) {
         console.log(`🎯 Found LoRA for ${childName}:`, found.trigger_word);
     }
