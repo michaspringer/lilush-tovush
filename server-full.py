@@ -103,11 +103,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         elif self.path.startswith('/api/lora-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_lora_status(training_id)
-        elif self.path == '/' or self.path == '/landing.html':
-            # 🏠 דף הנחיתה - מה שמבקר חדש רואה ראשון
-            self.serve_file('landing.html', 'text/html')
-        elif self.path == '/app' or self.path == '/app-full' or self.path == '/index-full.html':
-            # 📱 האפליקציה עצמה - לכאן מגיעים אחרי קוד גישה
+        elif self.path == '/' or self.path == '/index-full.html':
+            # Serve index-full.html
             self.serve_file('index-full.html', 'text/html')
         elif self.path == '/app-full.js':
             self.serve_file('app-full.js', 'application/javascript')
@@ -1369,43 +1366,14 @@ Return ONLY the English description, nothing else."""
 לפני העמודים, צור מילון של כל הדמויות (מלבד הילד הראשי).
 לכל דמות נוספת (חבר, חיה, יצור) - תן תיאור באנגלית קבוע ומפורט שיופיע בכל הספר.
 
-⚠️⚠️ התיאור חייב להיות מאוד ספציפי - זו הסיבה #1 לחוסר אחידות!
-חובה שכל תיאור חיה יכלול את 5 המרכיבים האלה, בסדר הזה:
-1. גזע/מין מדויק - חובה! בלי גזע הכלב ייראה שונה לגמרי בכל עמוד.
-   (golden retriever / chocolate labrador / beagle / cocker spaniel)
-   ❌ אסור "dog" / "puppy" כללי - חייב גזע אמיתי.
-   🐘 לחיות אקזוטיות: ציין את המין המדויק -
-   "an African elephant" (אפריקאי - אוזניים גדולות, חיוורות יותר) או
-   "an Asian elephant" (אסיאתי - אוזניים קטנות, גוף כהה יותר) -
-   אחד מהם בלבד, ולעולם לא לערבב! בחר אחד וחזור עליו בכל עמוד.
-2. צבע פרווה/עור מדויק (chocolate brown / golden / grey)
-3. גודל (small / medium-sized / large / huge)
-4. אורך וסוג פרווה/עור (short smooth coat / long fluffy coat / thick grey skin)
-   ⚠️ קריטי! אם לא תציין - החיה תקבל מראה שונה בכל עמוד.
-5. מאפיינים ייחודיים קבועים (floppy ears, blue collar, white tusks)
-   ⚠️ אסור להזכיר סימני קישוט (פרחים בראש, צבעים כתומים על האוזניים, ורוד)
-   אלא אם הם חלק קבוע של החיה. אחרת ייווצרו סימני קישוט שונים בכל עמוד!
-
-דוגמה טובה (כלב): "a medium-sized chocolate labrador retriever, 
-short smooth chocolate-brown coat, floppy ears, dark brown eyes, 
-a blue collar with a gold tag"
-דוגמה טובה (פיל): "a large adult African elephant, thick grey skin,
-big wide flat ears, two short white tusks, long curling trunk,
-NO decorative markings on ears, plain natural grey color"
-דוגמה טובה (קוף): "a small brown spider monkey, fluffy brown fur,
-long curling tail, small round monkey face with dark eyes,
-animal monkey appearance (NOT human face), pink animal nose"
-דוגמה רעה: "a small brown dog with floppy ears" 
-(אין גזע! אין סוג פרווה! - ייצא כלב אחר בכל עמוד!)
-דוגמה רעה: "a friendly elephant" 
-(לא ברור איזה סוג פיל - יצא שונה בכל עמוד!)
-
-🔒 כלל ברזל: ברגע שבחרת גזע + צבע + סוג פרווה לדמות - 
-הם נעולים. אסור לשנות מילה. אותו תיאור מדויק חוזר בכל עמוד.
-
-🐒 קוף, חיה דמוית-אדם: זהירות מיוחדת! קוף הוא חיה, לא אדם.
-התיאור חייב להדגיש: "animal monkey appearance, animal face, NOT human face,
-fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר ילד-קוף.
+⚠️ התיאור חייב להיות מאוד ספציפי - לעקביות לאורך הספר:
+- גזע מדויק (golden retriever puppy / black labrador / tabby cat)
+- צבע מדויק (golden-brown fur / black and white)
+- גודל (small / medium / large)
+- מאפיינים ייחודיים (floppy ears, fluffy tail, blue collar)
+דוגמה טובה: "a small golden retriever puppy, fluffy golden-brown fur, 
+floppy ears, dark eyes, red collar"
+דוגמה רעה: "a dog" (כללי מדי - ייצא שונה בכל עמוד!)
 
 🚫 כללים קריטיים:
 1. אל תתאר את הילד הראשי בכלל - יש לו מודל מאומן!
@@ -1495,7 +1463,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
   "characters": [
     {
       "name": "פליק",
-      "english_description": "a medium-sized chocolate labrador retriever, short smooth chocolate-brown coat, floppy ears, dark brown eyes, a blue collar with a gold tag",
+      "english_description": "small brown dog with floppy ears, fluffy fur, friendly eyes",
       "type": "dog"
     }
   ],
@@ -1894,13 +1862,20 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             # Start Replicate training
             print(f"  🎓 Starting Replicate training...")
             
+            # 🎯 פרמטרים אופטימליים לפנים של ילדים:
+            # - steps: 1500 (במקום 1000) - הכרחי לזיהוי פנים חזק; 1000 = under-trained
+            # - lora_rank: 32 (במקום default 16) - יותר "קיבולת" ללמוד פרטים עדינים של פנים
+            # - caption_dropout_rate: 0.05 - מונע overfit לרקעים/אביזרים, מתמקד בפנים
+            # ⏱️  זמן אימון: ~25-30 דק' (במקום ~15); עלות: ~$0.80 (במקום ~$0.50)
             training = replicate.trainings.create(
                 version="ostris/flux-dev-lora-trainer:e440909d3512c31646ee2e0c7d6f6f4923224863a6a10c494606e79fb5844497",
                 input={
                     "input_images": zip_url,
                     "trigger_word": trigger_word,
-                    "steps": 1000,
+                    "steps": 1500,
                     "learning_rate": 0.0004,
+                    "lora_rank": 32,
+                    "caption_dropout_rate": 0.05,
                     "resolution": "512,768,1024",
                     "autocaption": True
                 },
@@ -1916,7 +1891,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 'destination': destination,
                 'child_name': child_name_raw,
                 'child_slug': child_slug,
-                'estimated_time': 600
+                'estimated_time': 1500  # ~25 דק' עבור 1500 steps + rank 32
             })
             
         except Exception as e:
@@ -1978,12 +1953,12 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             
             # Style-specific prompts - מותאם ל-3 הסגנונות החדשים
             style_prompts = {
-                # 3 הסגנונות החדשים - צבעים חיים ועשירים
-                "warm_realistic": "high quality, detailed, warm vivid tones, rich natural colors",
-                "classic_illustration": "children's book illustration style, vibrant saturated colors, bright cheerful palette, soft lighting, detailed",
-                "soft_illustration": "soft painterly style, vivid pastel colors, bright and luminous, gentle, detailed",
+                # 3 הסגנונות החדשים
+                "warm_realistic": "high quality, detailed, warm tones",
+                "classic_illustration": "children's book illustration style, warm colors, soft lighting, detailed",
+                "soft_illustration": "soft painterly style, pastel colors, gentle, detailed",
                 # legacy
-                "illustration": "children's book illustration style, vibrant colors, soft lighting, detailed",
+                "illustration": "children's book illustration style, warm colors, soft lighting, detailed",
                 "watercolor": "watercolor painting, soft colors, artistic, gentle",
                 "cartoon": "cartoon style, bold colors, playful, fun",
                 "realistic": "realistic digital art, detailed, professional",
@@ -2031,8 +2006,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     'start': "a classic children's book illustration, ",
                     'end': (
                         ", traditional storybook illustration art, "
-                        "vibrant rich colors, bright and cheerful palette, "
-                        "clean illustration style, "
+                        "warm colors, clean illustration style, "
                         "professional children's book art"
                     )
                 },
@@ -2041,8 +2015,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     'start': "a soft gentle painterly children's illustration, ",
                     'end': (
                         ", dreamy soft illustration, delicate painterly style, "
-                        "luminous vivid pastel colors, bright and warm, "
-                        "gentle soft lighting, "
+                        "pastel warm colors, gentle soft lighting, "
                         "tender storybook art"
                     )
                 },
@@ -2068,33 +2041,16 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     f"ONE human {gender_word} as main character "
                     f"({trigger_word}), detailed facial features, recognizable face"
                 )
-                # 🐕 חיזוק הדמות הנלווית: התיאור מוזכר פעמיים -
-                # פעם כהגדרה מלאה ופעם כתזכורת בסוף - כדי שה-LoRA
-                # (שמאומן בכבדות על הילד) לא "יבלע" אותה.
-                # 🚨 הוראות אנטי-זליגה: ה-LoRA המאומן על הילד נוטה
-                # להחיל את פני הילד גם על דמויות אחרות (חיות, קופים).
-                # ההוראות החזקות למטה מונעות זאת.
                 full_prompt = (
                     f"{style_anchor_start}"
-                    f"a scene with exactly ONE human child and ONE non-human animal: "
+                    f"a scene with exactly two characters: "
                     f"FIRST: {child_block}. "
                     f"SECOND: an animal companion - {char_part}. "
-                    f"CRITICAL: the animal has the head and face of {char_part} - "
-                    f"NOT a human face, NOT the child's face, the animal is fully animal. "
-                    f"The animal MUST look exactly like this description "
-                    f"in every detail: {char_part}. "
-                    f"The animal is a separate creature with its own animal head, "
-                    f"the animal wears no clothes, the animal is not anthropomorphic. "
-                    f"IMPORTANT: only ONE single human child in the entire image, "
-                    f"the trigger word ({trigger_word}) applies ONLY to the human child, "
-                    f"absolutely no second child, no duplicate child, "
-                    f"no other kids, no children in the background, "
-                    f"no human face on the animal. "
+                    f"The animal is a separate creature, the animal wears no clothes. "
+                    f"Only one human child in the image, no duplicate child. "
                     f"Scene: {prompt}, "
                     f"{style_prompt}, {clean_composition}"
-                    f"{style_anchor_end}, "
-                    f"consistent animal appearance: {char_part}, "
-                    f"exactly one human child only, the animal has an animal face"
+                    f"{style_anchor_end}"
                 )
             else:
                 # 👤 רק הילד לבד
@@ -2104,14 +2060,12 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     f"solo portrait of ONE single human {gender_word}, "
                     f"exactly one child in the entire image, "
                     f"only one person, no duplicate figures, "
-                    f"no second child, no twin, no other kids in the background, "
                     f"{trigger_word}, {outfit_clause}"
                     f"detailed facial features, recognizable face, expressive eyes, "
                     f"the child is the main focus of the scene, "
                     f"{prompt}, "
                     f"{style_prompt}, {clean_composition}"
-                    f"{style_anchor_end}, "
-                    f"exactly one human child only, single child"
+                    f"{style_anchor_end}"
                 )
             
             print(f"  🎨 Generating with LoRA...")
@@ -2152,24 +2106,14 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 base_input["seed"] = int(seed)
                 print(f"  🎲 Using fixed seed: {seed}")
             
-            # 🐕 הורדה אוטומטית של lora_scale כשיש דמות נוספת (חיה/חבר):
-            # ה-LoRA נוטה "להחיל" את פני הילד גם על דמויות אחרות.
-            # הורדה של 0.1 ב-scale מספיקה כדי לתת לדמות השנייה נשימה,
-            # בלי לאבד את הדמיון של הילד הראשי.
-            effective_lora_scale = lora_scale
-            if has_other_chars and effective_lora_scale > 0.85:
-                effective_lora_scale = round(effective_lora_scale - 0.1, 2)
-                print(f"  🐕 Other character in scene - reducing lora_scale "
-                      f"from {lora_scale} to {effective_lora_scale}")
-            
-            print(f"  💪 LoRA scale: {effective_lora_scale}")
+            print(f"  💪 LoRA scale: {lora_scale}")
             
             # 🎯 STRATEGY 1 (Preferred): Use the trained model directly
             if lora_version:
                 print(f"  📌 Using trained model directly (best quality)")
                 strategy1_input = dict(base_input)
                 strategy1_input["prompt"] = full_prompt
-                strategy1_input["lora_scale"] = effective_lora_scale
+                strategy1_input["lora_scale"] = lora_scale
                 output = _run_with_retry(lora_version, strategy1_input)
             else:
                 # 🔧 STRATEGY 2 (Fallback/Legacy): Use ostris/flux-dev-lora with weights URL
@@ -2177,7 +2121,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 strategy2_input = dict(base_input)
                 strategy2_input["prompt"] = full_prompt
                 strategy2_input["lora_url"] = lora_url
-                strategy2_input["lora_scale"] = effective_lora_scale
+                strategy2_input["lora_scale"] = lora_scale
                 output = _run_with_retry("ostris/flux-dev-lora", strategy2_input)
             
             if output and len(output) > 0:
@@ -2261,21 +2205,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 }
                 for old, new in replacements.items():
                     text = text.replace(old, new)
-                
-                # 🛡️ שלב הגנה אחרון - מסיר כל תו שהפונט העברי לא מכיר.
-                # NotoSansHebrew תומך בעברית + לטינית בסיסית + פיסוק נפוץ,
-                # אבל תווים אחרים (סמלים, אמוג'י, פיסוק נדיר) יוצאים ריבועים.
-                # נשמור רק: עברית, לטינית בסיסית, ספרות, רווחים ופיסוק נפוץ.
-                allowed_punct = set(' .,!?;:\'"()[]{}-/\n\t<>=+*%&@#~`^|\\$_')
-                cleaned_chars = []
-                for ch in text:
-                    code = ord(ch)
-                    is_hebrew = 0x0590 <= code <= 0x05FF
-                    is_basic_latin = code < 0x0080
-                    if is_hebrew or is_basic_latin or ch in allowed_punct:
-                        cleaned_chars.append(ch)
-                    # אחרת - מדלגים על התו (במקום להציג ריבוע)
-                return ''.join(cleaned_chars)
+                return text
             
             def fix_hebrew(text):
                 """מסדר עברית לימין-לשמאל.
