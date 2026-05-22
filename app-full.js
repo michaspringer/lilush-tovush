@@ -145,34 +145,278 @@ const appState = {
 // ==========================================
 
 let uploadedPhotos = []; // Store uploaded photos globally
-// 🎯 מסלול יחיד בזרימה החדשה: הילד תמיד מ-LoRA מאומן.
-// המשתנה נשאר כדי שקוד ישן ימשיך לעבוד, אבל הערך קבוע.
-let photoOption = 'real';
+let photoOption = 'generic'; // 'generic' or 'real'
 
 function selectPhotoOption(option) {
-    // 🚫 לא בשימוש בזרימה החדשה - הזרימה כעת חד-מסלולית (LoRA בלבד).
-    // הפונקציה נשארת רק כדי לא לשבור onclick ישנים ב-HTML שאולי נשארו.
-    photoOption = 'real';
+    photoOption = option;
+    
+    // Update button styles
+    document.querySelectorAll('.photo-option-btn').forEach(btn => {
+        btn.style.border = '3px solid #ddd';
+        btn.style.background = 'white';
+        btn.style.transform = 'scale(1)';
+    });
+    
+    const selectedBtn = document.getElementById(option === 'generic' ? 'optionGeneric' : 'optionReal');
+    selectedBtn.style.border = '3px solid #667eea';
+    selectedBtn.style.background = 'linear-gradient(135deg, #f5f7ff 0%, #e8ecff 100%)';
+    selectedBtn.style.transform = 'scale(1.02)';
+    
+    // Show/hide upload section
+    const uploadSection = document.getElementById('photoUploadSection');
+    const infoBox = document.getElementById('optionInfoBox');
+    
+    if (option === 'real') {
+        uploadSection.style.display = 'block';
+        infoBox.style.display = 'block';
+        infoBox.innerHTML = `
+            <div style="display: flex; align-items: start; gap: 1rem;">
+                <div style="font-size: 2rem;">💡</div>
+                <div>
+                    <div style="font-weight: bold; color: #667eea; margin-bottom: 0.5rem;">איך זה עובד?</div>
+                    <div style="font-size: 0.9rem; color: #666; line-height: 1.6;">
+                        1. העלו 5-10 תמונות ברורות של הילד<br>
+                        2. ה-AI ילמד את הפנים של הילד (10 דקות)<br>
+                        3. הילד יופיע בכל תמונה בספר!<br>
+                        <br>
+                        <strong>💰 עלות:</strong> ₪349 לספר הראשון (כולל אימון AI)<br>
+                        <strong>🎁 ספרים נוספים:</strong> רק ₪149 (בלי אימון מחדש!)
+                    </div>
+                </div>
+            </div>
+        `;
+    } else {
+        uploadSection.style.display = 'none';
+        uploadedPhotos = [];
+        document.getElementById('photoPreviewInline').innerHTML = '';
+        infoBox.style.display = 'block';
+        infoBox.innerHTML = `
+            <div style="display: flex; align-items: start; gap: 1rem;">
+                <div style="font-size: 2rem;">✨</div>
+                <div>
+                    <div style="font-weight: bold; color: #667eea; margin-bottom: 0.5rem;">ספר עם דמות יפה ועקבית</div>
+                    <div style="font-size: 0.9rem; color: #666; line-height: 1.6;">
+                        נשתמש ב-AI כדי ליצור דמות יפה ועקבית שתופיע בכל התמונות.<br>
+                        הדמות לא תהיה הילד שלכם, אבל תהיה חמודה ועקבית!<br>
+                        <br>
+                        <strong>💰 עלות:</strong> ₪149 בלבד<br>
+                        <strong>⚡ זמן:</strong> 2-3 דקות
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    console.log('📸 Photo option selected:', option);
 }
 
 function previewPhotosInline() {
-    // 🚫 לא בשימוש בזרימה החדשה - העלאת התמונות עברה ל-profileScreen.
-    // הפונקציה נשארת רק כדי לא לשבור onchange ישן ב-HTML שאולי נשאר.
-    return;
+    const input = document.getElementById('childPhotosInline');
+    const preview = document.getElementById('photoPreviewInline');
+    
+    if (!preview) return;
+    
+    preview.innerHTML = '';
+    uploadedPhotos = [];
+    
+    if (!input.files || input.files.length === 0) {
+        return;
+    }
+    
+    // For InstantID - 1 photo is enough!
+    if (input.files.length > 10) {
+        alert('⚠️ מקסימום 10 תמונות');
+        input.value = '';
+        return;
+    }
+    
+    console.log(`📸 Processing ${input.files.length} photo(s)...`);
+    
+    // Convert to base64 and store
+    const promises = Array.from(input.files).map(file => {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                uploadedPhotos.push(e.target.result);
+                resolve(e.target.result);
+            };
+            reader.readAsDataURL(file);
+        });
+    });
+    
+    Promise.all(promises).then((results) => {
+        // Clear and show preview container
+        preview.innerHTML = '';
+        preview.style.display = 'grid';
+        
+        results.forEach((src, i) => {
+            const div = document.createElement('div');
+            div.style.cssText = 'position: relative; aspect-ratio: 1; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border: 3px solid #667eea;';
+            
+            const img = document.createElement('img');
+            img.src = src;
+            img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+            
+            const badge = document.createElement('div');
+            badge.textContent = i + 1;
+            badge.style.cssText = 'position: absolute; top: 8px; right: 8px; background: #667eea; color: white; width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.9rem; font-weight: bold; box-shadow: 0 2px 8px rgba(0,0,0,0.3);';
+            
+            div.appendChild(img);
+            div.appendChild(badge);
+            preview.appendChild(div);
+        });
+        
+        // Add success message
+        const successMsg = document.createElement('div');
+        successMsg.style.cssText = 'grid-column: 1/-1; text-align: center; padding: 1rem; color: white; font-weight: bold; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 10px; margin-top: 0.5rem; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);';
+        successMsg.innerHTML = `✅ ${uploadedPhotos.length} תמונות מוכנות!`;
+        preview.appendChild(successMsg);
+        
+        // Add test button
+        const testBtn = document.createElement('button');
+        testBtn.style.cssText = 'grid-column: 1/-1; padding: 0.75rem 1.5rem; background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 0.95rem; box-shadow: 0 4px 12px rgba(245, 87, 108, 0.4); transition: transform 0.2s;';
+        testBtn.innerHTML = '🧪 בדוק המרה לאיור (15 שניות)';
+        testBtn.onmouseover = () => testBtn.style.transform = 'scale(1.05)';
+        testBtn.onmouseout = () => testBtn.style.transform = 'scale(1)';
+        testBtn.onclick = testFaceSwap;
+        preview.appendChild(testBtn);
+        
+        // Add LoRA upgrade button
+        const loraBtn = document.createElement('button');
+        loraBtn.style.cssText = 'grid-column: 1/-1; padding: 0.75rem 1.5rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; font-size: 0.95rem; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4); transition: transform 0.2s; margin-top: 0.5rem;';
+        loraBtn.innerHTML = '🎓 שדרג ל-LoRA מאומן<br><span style="font-size: 0.85rem; font-weight: normal;">דמיון מושלם • 10 דקות אימון חד-פעמי</span>';
+        loraBtn.onmouseover = () => loraBtn.style.transform = 'scale(1.05)';
+        loraBtn.onmouseout = () => loraBtn.style.transform = 'scale(1)';
+        loraBtn.onclick = startLoraTraining;
+        preview.appendChild(loraBtn);
+        
+        console.log(`✅ Uploaded ${uploadedPhotos.length} photos successfully`);
+        console.log(`📸 Preview displayed with ${results.length} images`);
+        
+        // Re-validate to enable "Next" button
+        validateStep1();
+    });
 }
 
 function showProfileCreation() {
-    // 🤖 פישוט: בלי popups. אם יש מודל - לסיפור; אם לא - להעלאת תמונות.
-    // (ה-init ב-DOMContentLoaded כבר עושה את זה, אבל הפונקציה הזו עוד נקראת
-    // מכפתורי "התחל מחדש" וכו', אז כדאי שתעבוד גם בנפרד.)
     const existingModel = AITrainingManager.loadModel();
+    
     if (existingModel) {
-        console.log('Found existing model - going to story creation');
-        startCreation();
+        console.log('Found existing model:', existingModel);
+        const createdDate = new Date(existingModel.created_at).toLocaleDateString('he-IL');
+        
+        if (confirm(`יש לכם כבר פרופיל AI! 🤖\n\nנוצר ב: ${createdDate}\nתמונות: ${existingModel.photo_count}\n\nרוצים ליצור ספר עם הפרופיל הקיים?`)) {
+            startCreation();
+        } else if (confirm('רוצים ליצור פרופיל חדש?\n\n(זה ידרוס את הפרופיל הקיים)')) {
+            AITrainingManager.deleteModel();
+            // 💡 פיצ'ר G: דף הדרכה לפני העלאת תמונות
+            showPhotoTipsModal(() => showScreen('profileScreen'));
+        }
     } else {
-        console.log('No existing model - going to photo upload');
-        showScreen('profileScreen');
+        console.log('No existing model found');
+        // 💡 פיצ'ר G: דף הדרכה לפני העלאת תמונות
+        showPhotoTipsModal(() => showScreen('profileScreen'));
     }
+}
+
+/**
+ * 💡 פיצ'ר G: מודאל הדרכה לבחירת תמונות אימון נקיות
+ * מופיע פעם אחת (נשמר ב-localStorage). אפשר לפתוח שוב מתוך profileScreen.
+ * 
+ * @param {Function} onContinue - callback שייקרא כשההורה מאשר
+ * @param {boolean} forceShow - אם true, מציג גם אם המשתמש כבר ראה (לכפתור "צפה שוב")
+ */
+function showPhotoTipsModal(onContinue, forceShow = false) {
+    const STORAGE_KEY = 'lilatov_seen_photo_tips_v1';
+    
+    // אם כבר ראה ולא מבקש לכפות - דלג
+    if (!forceShow && localStorage.getItem(STORAGE_KEY) === 'yes') {
+        if (onContinue) onContinue();
+        return;
+    }
+    
+    const overlay = document.createElement('div');
+    overlay.id = 'photoTipsOverlay';
+    overlay.style.cssText = `
+        position: fixed; inset: 0;
+        background: rgba(0,0,0,0.7);
+        display: flex; align-items: flex-start; justify-content: center;
+        z-index: 10000;
+        font-family: inherit;
+        overflow-y: auto;
+        padding: 2rem 1rem;
+    `;
+    
+    overlay.innerHTML = `
+        <div style="background: #fff; border-radius: 20px; padding: 2rem 1.5rem; max-width: 520px; width: 100%; text-align: right; box-shadow: 0 20px 60px rgba(0,0,0,0.4); margin: auto;">
+            <div style="text-align: center; font-size: 3rem; margin-bottom: 0.5rem;">📸</div>
+            
+            <h2 style="margin: 0 0 0.5rem 0; color: #2A2118; font-size: 1.5rem; text-align: center;">
+                תמונות אימון מעולות = ילד שמזהה את עצמו
+            </h2>
+            <p style="color: #5C4A35; margin-bottom: 1.5rem; font-size: 0.95rem; text-align: center; line-height: 1.5;">
+                בחירת התמונות היא הכי חשובה לתוצאה.<br>
+                ⏱️ 2 דקות של קריאה = ספר ש<u>באמת</u> נראה כמו הילד שלכם.
+            </p>
+            
+            <div style="background: #E8F5E9; padding: 1rem 1.2rem; border-radius: 14px; margin-bottom: 1rem; border-right: 4px solid #4CAF50;">
+                <div style="font-weight: 700; color: #2E7D32; margin-bottom: 0.6rem; font-size: 1rem;">✅ כן — תמונות שיעבדו מצוין:</div>
+                <ul style="margin: 0; padding-right: 1.2rem; color: #2A2118; font-size: 0.92rem; line-height: 1.7;">
+                    <li><b>פנים גדולות וברורות</b> — שתופסות לפחות חצי מהתמונה</li>
+                    <li><b>5-10 תמונות מגוונות</b> — זוויות שונות, רקעים שונים, מצבי רוח שונים</li>
+                    <li><b>תאורה טובה</b> — אור יום, ללא צללים חזקים על הפנים</li>
+                    <li><b>פנים גלויות</b> — שיער מאחורי האוזניים אם אפשר</li>
+                </ul>
+            </div>
+            
+            <div style="background: #FFEBEE; padding: 1rem 1.2rem; border-radius: 14px; margin-bottom: 1.2rem; border-right: 4px solid #E53935;">
+                <div style="font-weight: 700; color: #C62828; margin-bottom: 0.6rem; font-size: 1rem;">❌ לא — תמונות שיפגעו בתוצאה:</div>
+                <ul style="margin: 0; padding-right: 1.2rem; color: #2A2118; font-size: 0.92rem; line-height: 1.7;">
+                    <li><b>משקפי שמש, כובעים, מסכות</b> — כל מה שמכסה את הפנים</li>
+                    <li><b>תמונות מטושטשות</b> או באיכות נמוכה</li>
+                    <li><b>תמונות קבוצתיות</b> — רק הילד שלכם בפריים (אפשר לחתוך)</li>
+                    <li><b>פנים קטנות מאוד</b> בתוך נוף — קרבו אם צריך</li>
+                    <li><b>10 תמונות זהות</b> — גיוון חשוב יותר מכמות</li>
+                </ul>
+            </div>
+            
+            <div style="background: #FFF8E1; padding: 0.9rem 1.1rem; border-radius: 12px; margin-bottom: 1.5rem; font-size: 0.88rem; color: #5C4A35; line-height: 1.5;">
+                💡 <b>טיפ:</b> תמונות סלפי עם הילד עובדות מצוין —
+                הפנים גדולות, מבט לפנים, ותאורה טובה.
+            </div>
+            
+            <button id="photoTipsContinue" style="
+                background: #C95E48; color: white; border: none;
+                padding: 1rem 2rem; border-radius: 100px; cursor: pointer;
+                font-size: 1.05rem; font-weight: 700; font-family: inherit;
+                width: 100%;
+            ">
+                הבנתי, ממשיכים להעלאת תמונות ←
+            </button>
+            
+            <p style="color: #999; font-size: 0.78rem; text-align: center; margin-top: 1rem; margin-bottom: 0;">
+                תמיד אפשר לראות את הטיפים שוב מתוך מסך העלאת התמונות
+            </p>
+        </div>
+    `;
+    
+    document.body.appendChild(overlay);
+    
+    document.getElementById('photoTipsContinue').onclick = () => {
+        localStorage.setItem(STORAGE_KEY, 'yes');
+        if (document.body.contains(overlay)) {
+            document.body.removeChild(overlay);
+        }
+        if (onContinue) onContinue();
+    };
+}
+
+/**
+ * כפתור עזר ל-profileScreen — מאפשר להורה לפתוח שוב את ההדרכה.
+ * אם אין כפתור כזה ב-HTML, הוא יוסיף אותו דינמית במסך.
+ */
+function showPhotoTipsAgain() {
+    showPhotoTipsModal(null, true);
 }
 
 function previewTrainingPhotos() {
@@ -221,106 +465,12 @@ function previewTrainingPhotos() {
         reader.readAsDataURL(file);
     });
     
-    // 🆕 לא מפעיל ישירות את הכפתור - דורש גם שם
-    validateProfileStep();
-}
-
-/**
- * בודק אם יש גם שם וגם 5+ תמונות, ומפעיל את כפתור "התחל אימון" בהתאם.
- * נקרא מ-oninput של שדה השם וגם מ-previewTrainingPhotos.
- */
-function validateProfileStep() {
-    const btn = document.getElementById('startTrainingBtn');
-    const nameInput = document.getElementById('profileChildName');
-    const photosInput = document.getElementById('trainingPhotos');
-    const clearBtn = document.getElementById('clearPhotosBtn');
-    
-    if (!btn) return;
-    
-    const hasName = nameInput && nameInput.value.trim().length >= 2;
-    const photoCount = photosInput && photosInput.files ? photosInput.files.length : 0;
-    const hasEnoughPhotos = photoCount >= 5 && photoCount <= 10;
-    
-    btn.disabled = !(hasName && hasEnoughPhotos);
-    
-    // 🆕 כפתור "מחק תמונות" מופיע רק כשיש לפחות תמונה אחת שנבחרה
-    if (clearBtn) {
-        clearBtn.style.display = photoCount > 0 ? 'inline-block' : 'none';
-    }
-}
-
-/**
- * 🆕 מנקה את התמונות שנבחרו ואת התצוגה המקדימה.
- * מאפשר להורה להתחיל מחדש בלי לרענן את הדף.
- */
-function clearTrainingPhotos() {
-    if (!confirm('למחוק את כל התמונות שהעלית?')) return;
-    
-    const input = document.getElementById('trainingPhotos');
-    const preview = document.getElementById('photoPreviewGrid');
-    
-    if (input) input.value = '';
-    if (preview) preview.innerHTML = '';
-    
-    validateProfileStep();
-    console.log('🗑️ Training photos cleared');
-}
-
-/**
- * דוחס תמונה בצד הלקוח לרוחב מקסימלי + איכות JPEG.
- * חיוני לפני שליחה לשרת - תמונות מטלפון (4000px, 3-5MB) יוצרות
- * ZIP של 15+ MB שעובר את מגבלת 10MB של Cloudinary.
- * 
- * @param {File} file - קובץ התמונה המקורי
- * @param {number} maxWidth - רוחב מקסימלי בפיקסלים (ברירת מחדל 1024)
- * @param {number} quality - איכות JPEG 0-1 (ברירת מחדל 0.85)
- * @returns {Promise<string>} - data URL של התמונה המכווצת
- */
-function compressImage(file, maxWidth = 1024, quality = 0.85) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error('Failed to read file'));
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onerror = () => reject(new Error('Failed to load image'));
-            img.onload = () => {
-                // חישוב מימדים חדשים תוך שמירה על יחס
-                let { width, height } = img;
-                if (width > maxWidth) {
-                    height = Math.round(height * maxWidth / width);
-                    width = maxWidth;
-                }
-                
-                // ציור על canvas והמרה ל-JPEG דחוס
-                const canvas = document.createElement('canvas');
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
-                
-                // תמיד JPEG (גם אם המקור PNG) - יותר קטן באופן משמעותי
-                const dataUrl = canvas.toDataURL('image/jpeg', quality);
-                resolve(dataUrl);
-            };
-            img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
-    });
+    btn.disabled = false;
 }
 
 async function startTraining() {
     const input = document.getElementById('trainingPhotos');
     const files = input.files;
-    
-    // 🆕 קריאת שם הילד שהוקלד ב-profileScreen
-    const childNameInput = document.getElementById('profileChildName');
-    const childName = childNameInput ? childNameInput.value.trim() : '';
-    
-    if (!childName || childName.length < 2) {
-        alert('נא להזין את שם הילד');
-        if (childNameInput) childNameInput.focus();
-        return;
-    }
     
     if (!files || files.length < 5) {
         alert('נא להעלות לפחות 5 תמונות');
@@ -330,234 +480,97 @@ async function startTraining() {
     showScreen('trainingScreen');
     
     try {
-        document.getElementById('trainingStatus').textContent = 'מכווץ תמונות...';
-        document.getElementById('trainingProgressBar').style.width = '5%';
+        document.getElementById('trainingStatus').textContent = 'מעלה תמונות...';
+        document.getElementById('trainingProgressBar').style.width = '10%';
         
-        // 🗜️ דחיסת תמונות בצד הלקוח - תמונות מטלפון יוצרות ZIP > 10MB
-        // (המגבלה של Cloudinary). דוחסים ל-1024px רוחב + JPEG quality 85
-        // שזה איכות מצוינת ל-LoRA training, ומקטין כל תמונה פי 10.
         const photos = await Promise.all(
-            Array.from(files).map((file, i) => compressImage(file, 1024, 0.85))
+            Array.from(files).map(file => {
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onload = (e) => resolve(e.target.result);
+                    reader.readAsDataURL(file);
+                });
+            })
         );
-        
-        // לוג גודל כולל לאבחון
-        const totalKB = photos.reduce((sum, p) => sum + Math.ceil(p.length * 0.75 / 1024), 0);
-        console.log(`🗜️ Compressed ${photos.length} photos, total ~${totalKB} KB`);
         
         document.getElementById('training-upload').classList.add('active');
         document.getElementById('trainingProgressBar').style.width = '30%';
         document.getElementById('trainingStatus').textContent = 'שולח לשרת...';
         
-        // 🎯 משתמשים ב-endpoint התקין של LoRA (לא ב-train-model הישן והשבור).
-        // שמות הפרמטרים: child_photos + child_name (לא photos!)
-        const accessCode = localStorage.getItem('lilatov_access_code') || 'unknown';
-        
-        // 💾 שמירת השם של הילד ב-localStorage - יישמש בטופס הסיפור
-        localStorage.setItem('lilatov_child_name', childName);
-        console.log('💾 Child name saved:', childName);
-        
-        const response = await fetch(`${SERVER_CONFIG.url}/api/start-lora-training`, {
+        const response = await fetch(`${SERVER_CONFIG.url}/api/train-model`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                child_photos: photos,
-                child_name: childName  // 🆕 השם האמיתי, לא child_<code>
+                photos: photos,
+                child_name: 'child_' + Date.now()
             })
         });
         
         const data = await response.json();
         
-        if (!response.ok || !data.success) {
+        if (!response.ok) {
             throw new Error(data.error || 'Training failed');
         }
         
-        // ✅ האימון התחיל - שמירת מצב ויציאה ממסך ההמתנה.
-        // הזרימה החדשה: אנחנו *לא* ממתינים בלולאה. שומרים את ה-training_id,
-        // ההורה יוצא, וכשהוא חוזר - בודקים סטטוס מול השרת.
-        const trainingState = {
-            training_id: data.training_id,
-            trigger_word: data.trigger_word,  // חשוב! נצטרך אותו בעתיד ליצירת תמונות
-            access_code: accessCode,
-            photo_count: photos.length,
-            started_at: new Date().toISOString()
-        };
-        localStorage.setItem('lilatov_training_pending', JSON.stringify(trainingState));
-        console.log('💾 Training state saved:', trainingState);
+        document.getElementById('training-process').classList.add('active');
+        document.getElementById('trainingProgressBar').style.width = '60%';
+        document.getElementById('trainingStatus').textContent = 'מאמן AI...';
         
-        // 📺 הצגת מסך "צא וחזור עוד 25 דקות"
-        showWaitingScreen(trainingState);
+        const trainingId = data.training_id;
+        let attempts = 0;
+        const maxAttempts = 60;
+        
+        while (attempts < maxAttempts) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            attempts++;
+            
+            const statusResponse = await fetch(`${SERVER_CONFIG.url}/api/training-status/${trainingId}`);
+            const statusData = await statusResponse.json();
+            
+            const progress = 60 + (attempts / maxAttempts) * 35;
+            document.getElementById('trainingProgressBar').style.width = progress + '%';
+            
+            if (statusData.status === 'succeeded') {
+                document.getElementById('training-done').classList.add('active');
+                document.getElementById('trainingProgressBar').style.width = '100%';
+                document.getElementById('trainingStatus').textContent = 'מוכן! 🎉';
+                
+                const modelData = {
+                    model_id: statusData.model_id,
+                    created_at: new Date().toISOString(),
+                    photo_count: photos.length
+                };
+                
+                AITrainingManager.saveModel(modelData);
+                console.log('🤖 Model saved:', modelData);
+                
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                
+                alert('✅ הפרופיל מוכן!\n\nעכשיו תוכלו ליצור ספרים עם הילד בתמונות! 🌟');
+                
+                startCreation();
+                break;
+                
+            } else if (statusData.status === 'failed') {
+                throw new Error('Training failed: ' + (statusData.error || 'Unknown error'));
+            }
+        }
+        
+        if (attempts >= maxAttempts) {
+            throw new Error('Training timeout');
+        }
         
     } catch (error) {
         console.error('Training error:', error);
-        alert('❌ שגיאה באימון: ' + error.message + '\n\nאפשר לנסות שוב.');
+        alert('❌ שגיאה באימון: ' + error.message + '\n\nאפשר לנסות שוב או ליצור ספר רגיל.');
         showScreen('profileScreen');
     }
 }
 
-// ==========================================
-// ⏳ Async Training - Waiting Screen
-// ==========================================
-
-/**
- * מציג מסך המתנה ידידותי אחרי שהאימון נשלח.
- * ההורה רואה הסבר ברור על 25 הדקות, יכול לעזוב, ולחזור.
- */
-function showWaitingScreen(trainingState) {
-    // יצירת מסך המתנה דינמי - לא דורש HTML מראש
-    let waitScreen = document.getElementById('asyncWaitScreen');
-    if (!waitScreen) {
-        waitScreen = document.createElement('div');
-        waitScreen.id = 'asyncWaitScreen';
-        waitScreen.className = 'screen';
-        document.body.appendChild(waitScreen);
-    }
-    
-    const startedAt = new Date(trainingState.started_at);
-    const expectedReady = new Date(startedAt.getTime() + 25 * 60 * 1000);
-    const expectedTimeStr = expectedReady.toLocaleTimeString('he-IL', {
-        hour: '2-digit', minute: '2-digit'
-    });
-    
-    waitScreen.innerHTML = `
-        <div style="max-width: 560px; margin: 2rem auto; padding: 2rem 1.5rem; text-align: center; font-family: 'Heebo', sans-serif;">
-            <div style="font-size: 4rem; margin-bottom: 1rem;">⏳</div>
-            <h1 style="font-family: 'Fredoka', sans-serif; color: #E0552F; font-size: 2rem; margin: 0 0 0.5rem;">
-                הפרופיל בתהליך יצירה!
-            </h1>
-            <p style="color: #5C4A35; font-size: 1.1rem; line-height: 1.6; margin: 1rem 0;">
-                אנחנו יוצרים את הדמות של הילד שלכם.<br>
-                זה תהליך חד-פעמי שלוקח בערך <strong>25 דקות</strong>.
-            </p>
-            
-            <div style="background: #FFF7E8; border: 2px solid #F2A91B; border-radius: 16px; padding: 1.3rem; margin: 1.5rem 0; text-align: right;">
-                <div style="font-weight: 700; color: #2A2118; margin-bottom: 0.6rem;">📍 מה לעשות עכשיו:</div>
-                <ol style="margin: 0; padding-right: 1.3rem; color: #5C4A35; line-height: 1.7;">
-                    <li>אפשר לסגור את הדף ולחזור בעוד 25 דקות</li>
-                    <li>כשתחזרו - היכנסו שוב עם אותו קוד גישה (<strong>${trainingState.access_code}</strong>)</li>
-                    <li>אם הפרופיל מוכן - תוכלו ליצור את הספר! ✨</li>
-                </ol>
-            </div>
-            
-            <div style="color: #5C4A35; font-size: 0.95rem; margin: 1.5rem 0;">
-                ⏰ הפרופיל צפוי להיות מוכן בסביבות <strong>${expectedTimeStr}</strong>
-            </div>
-            
-            <button id="checkStatusBtn" style="background: linear-gradient(135deg, #E0552F, #F2A91B); color: white; border: none; padding: 0.9rem 2rem; font-size: 1.05rem; font-weight: 700; border-radius: 50px; cursor: pointer; font-family: 'Heebo', sans-serif; box-shadow: 0 6px 18px rgba(224, 85, 47, 0.3); margin-top: 0.5rem;">
-                🔄 בדקו אם מוכן עכשיו
-            </button>
-            
-            <div id="checkStatusResult" style="margin-top: 1rem; min-height: 1.5rem; color: #5C4A35;"></div>
-        </div>
-    `;
-    
-    showScreen('asyncWaitScreen');
-    
-    document.getElementById('checkStatusBtn').onclick = () => checkTrainingStatus(trainingState);
-}
-
-/**
- * בדיקת סטטוס אימון מול השרת.
- * נקראת אוטומטית בעת כניסה לאפליקציה אם יש אימון ממתין,
- * וגם בלחיצה ידנית של ההורה על "בדקו אם מוכן".
- */
-async function checkTrainingStatus(trainingState) {
-    const resultEl = document.getElementById('checkStatusResult');
-    const btnEl = document.getElementById('checkStatusBtn');
-    
-    if (resultEl) resultEl.textContent = '⏳ בודק...';
-    if (btnEl) btnEl.disabled = true;
-    
-    try {
-        // 🎯 קוראים ל-lora-status (התקין) ולא ל-training-status (הישן)
-        const response = await fetch(`${SERVER_CONFIG.url}/api/lora-status/${trainingState.training_id}`);
-        const statusData = await response.json();
-        
-        console.log('🔍 Training status:', statusData);
-        
-        if (statusData.status === 'succeeded') {
-            // ✅ האימון הסתיים בהצלחה - שמור LoRA מלא (כולל URL ו-version)
-            // 🐛 תיקון באג: שומרים תחת שם הילד האמיתי שההורה הקליד,
-            // לא תחת קוד הגישה. אחרת findLoraForChild(childName) לא ימצא
-            // את ה-LoRA, וההורה לא יקבל את 3 התמונות לבחירה.
-            const savedChildName = localStorage.getItem('lilatov_child_name') || trainingState.access_code;
-            const loraModel = {
-                child_name: savedChildName,  // ✅ "מיכה" - לא "100"
-                access_code: trainingState.access_code,  // 🔑 קוד הגישה שיצר את המודל
-                trigger_word: trainingState.trigger_word,
-                lora_url: statusData.lora_url,
-                version: statusData.version,
-                created_at: new Date().toISOString(),
-                photo_count: trainingState.photo_count
-            };
-            // saveLoraModel קיים בקוד הישן ושומר ב-localStorage תחת המפתח הנכון
-            if (typeof saveLoraModel === 'function') {
-                saveLoraModel(loraModel);
-            } else {
-                // fallback - שמירה ידנית
-                AITrainingManager.saveModel({
-                    model_id: statusData.version,
-                    created_at: loraModel.created_at,
-                    photo_count: trainingState.photo_count,
-                    lora_url: statusData.lora_url,
-                    trigger_word: trainingState.trigger_word
-                });
-            }
-            localStorage.removeItem('lilatov_training_pending');
-            console.log('🎉 LoRA Model saved:', loraModel);
-            
-            // 🆕 שלב חדש: הצגת 3 תמונות לבחירה מיד אחרי האימון, לפני טופס הסיפור.
-            // היגיון: ההורה רוצה לראות שהילד יוצא דומה לפני שהוא משקיע במילוי טופס.
-            if (resultEl) resultEl.innerHTML = '✅ <strong>הפרופיל מוכן! נכין לכם 3 גרסאות לבחירה...</strong>';
-            await new Promise(r => setTimeout(r, 1200));
-            
-            // קריאה ל-showLoraPreview עם המודל החדש
-            const previewApproved = await showLoraPreview(loraModel);
-            
-            if (previewApproved) {
-                // ✅ ההורה אישר תמונה - ממשיכים לטופס הסיפור
-                startCreation();
-            } else {
-                // ❌ ההורה ביטל / בחר לאמן מחדש - חוזרים ל-profileScreen
-                // (אם הוא בחר "אמן מחדש", showLoraPreview כבר ניקה את ה-LoRA)
-                showScreen('profileScreen');
-            }
-            
-        } else if (statusData.status === 'failed') {
-            // ❌ האימון נכשל
-            localStorage.removeItem('lilatov_training_pending');
-            if (resultEl) resultEl.innerHTML = '❌ האימון נכשל. אנא נסו שוב.';
-            if (btnEl) btnEl.disabled = false;
-            await new Promise(r => setTimeout(r, 2000));
-            showScreen('profileScreen');
-            
-        } else {
-            // 🕐 עדיין רץ - חישוב זמן שעבר וזמן משוער שנותר
-            const elapsedMin = Math.floor(
-                (Date.now() - new Date(trainingState.started_at).getTime()) / 60000
-            );
-            const remainingMin = Math.max(0, 25 - elapsedMin);
-            
-            if (resultEl) {
-                resultEl.innerHTML = remainingMin > 0
-                    ? `🕐 עדיין בעבודה. עברו ${elapsedMin} דק׳, עוד כ-${remainingMin} דק׳.`
-                    : '🕐 עוד מעט מוכן... נסו לרענן בעוד דקה.';
-            }
-            if (btnEl) btnEl.disabled = false;
-        }
-        
-    } catch (error) {
-        console.error('Status check error:', error);
-        if (resultEl) resultEl.innerHTML = '⚠️ לא הצלחנו לבדוק כרגע. נסו שוב בעוד רגע.';
-        if (btnEl) btnEl.disabled = false;
-    }
-}
-
 function skipTraining() {
-    // 🚫 דילוג על אימון לא נתמך עוד.
-    // הזרימה החדשה: חובה להעלות תמונות ולאמן מודל - אחרת הילד לא יופיע.
-    // נשארה הפונקציה כדי לא לשבור כפתור ב-HTML, אבל היא רק מציגה הודעה.
-    alert('כדי שהילד יופיע בספר, נדרש להעלות תמונות וליצור פרופיל. 📷');
-    showScreen('profileScreen');
+    if (confirm('האם אתם בטוחים שרוצים לדלג?\n\nבלי פרופיל AI, הילד לא יופיע בתמונות.')) {
+        startCreation();
+    }
 }
 
 // ==========================================
@@ -572,11 +585,6 @@ function showScreen(screenId) {
     if (targetScreen) {
         targetScreen.classList.add('active');
     }
-    
-    // 🔝 גלילה אוטומטית לראש בכל מעבר מסך.
-    // בלי זה, מעבר מ-profileScreen למסך ההמתנה הארוך גורם
-    // לכך שההורה רואה את אמצע הדף בלי לדעת שהמסך השתנה.
-    window.scrollTo({ top: 0, behavior: 'instant' });
 }
 
 function startCreation() {
@@ -585,11 +593,8 @@ function startCreation() {
 }
 
 function resetForm() {
-    // 🆕 שימוש בשם השמור מ-localStorage (הוקלד ב-profileScreen לפני האימון)
-    const savedChildName = localStorage.getItem('lilatov_child_name') || '';
-    
     appState.bookData = {
-        childName: savedChildName,
+        childName: '',
         childAge: '',
         childGender: '',
         theme: '',
@@ -598,7 +603,7 @@ function resetForm() {
     };
     
     const nameInput = document.getElementById('childName');
-    if (nameInput) nameInput.value = savedChildName;
+    if (nameInput) nameInput.value = '';
     
     document.querySelectorAll('.age-btn').forEach(btn => btn.classList.remove('active'));
     document.querySelectorAll('.gender-btn').forEach(btn => btn.classList.remove('active'));
@@ -609,11 +614,6 @@ function resetForm() {
     if (customInput) customInput.value = '';
     
     showFormStep(1);
-    
-    // 🆕 הפעלת validateStep1 כדי שהכפתור "המשך" יופעל אם יש כבר שם
-    if (typeof validateStep1 === 'function') {
-        validateStep1();
-    }
 }
 
 function showFormStep(step) {
@@ -780,8 +780,17 @@ async function generateStory() {
     const customInputElement = document.getElementById('customInput');
     appState.bookData.customInput = customInputElement ? customInputElement.value.trim() : '';
     
-    // הערה: בעבר היה כאן showLoraPreview - הוא הועבר מיד אחרי האימון.
-    // ההורה כבר בחר את הילד שלו לפני שהוא הגיע לטופס הזה.
+    // 🎯 חפש אם יש LoRA מאומן עבור הילד הזה
+    const childLora = findLoraForChild(appState.bookData.childName);
+    
+    // 🆕 שלב חדש: אם יש LoRA - הצג תצוגה מקדימה לפני יצירת הספר
+    if (childLora) {
+        const previewApproved = await showLoraPreview(childLora);
+        if (!previewApproved) {
+            console.log('User cancelled book creation after preview');
+            return;  // המשתמש לא אישר - חזרה לטופס
+        }
+    }
     
     showScreen('generatingScreen');
     
@@ -1344,51 +1353,18 @@ function startOver() {
 document.addEventListener('DOMContentLoaded', () => {
     console.log('🚀 App loaded');
     
-    // 🔐 בדיקת קוד גישה - אם אין, חזרה לדף הנחיתה
-    const accessCode = localStorage.getItem('lilatov_access_code');
-    if (!accessCode) {
-        console.log('⛔ No access code - redirecting to landing');
-        window.location.href = '/';
-        return;
+    // Check for saved story
+    const saved = StorageManager.loadCurrentStory();
+    if (saved && confirm('נמצא ספר שמור. להמשיך לעבוד עליו?')) {
+        currentStory = saved;
+        displayStory(currentStory);
+        showScreen('previewScreen');
     }
-    console.log('✅ Access code:', accessCode);
     
-    // 🤖 בדיקה אם יש כבר מודל AI מוכן - **רק אם הוא שייך לקוד הגישה הנוכחי**!
-    // localStorage הוא פר-דפדפן, אז יכול להיות שמשתמש קודם עם קוד אחר
-    // השאיר מודל שאומן על ילד אחר - לא ניגע בו.
-    const allModels = (() => {
-        try { return JSON.parse(localStorage.getItem('lora_models') || '[]'); }
-        catch { return []; }
-    })();
-    const matchingModel = allModels.find(m => m.access_code === accessCode);
-    
-    if (matchingModel) {
-        console.log('🤖 AI Model found for this access code:', matchingModel.child_name);
-        // יש מודל לקוד הזה - המשך ישר לסיפור
-        showScreen('creatorScreen');
-        resetForm();
-    } else {
-        // אין מודל לקוד הזה - בודק אם יש אימון בתהליך
-        const pendingRaw = localStorage.getItem('lilatov_training_pending');
-        if (pendingRaw) {
-            try {
-                const pending = JSON.parse(pendingRaw);
-                // ודא שהאימון שייך לאותו קוד גישה
-                if (pending.access_code === accessCode) {
-                    console.log('⏳ Pending training found:', pending.training_id);
-                    showWaitingScreen(pending);
-                    // בדיקה אוטומטית מיד בכניסה
-                    setTimeout(() => checkTrainingStatus(pending), 500);
-                    return;
-                }
-            } catch (e) {
-                console.warn('Bad pending training data:', e);
-                localStorage.removeItem('lilatov_training_pending');
-            }
-        }
-        // אין כלום לקוד הזה - מתחיל מהעלאת תמונות
-        console.log('📷 No model/training for code', accessCode, '- starting with photo upload');
-        showScreen('profileScreen');
+    // Check for AI model
+    const aiModel = AITrainingManager.loadModel();
+    if (aiModel) {
+        console.log('🤖 AI Model loaded:', aiModel.model_id);
     }
     
     // Setup event listeners
@@ -1802,18 +1778,11 @@ function saveLoraModel(model) {
 function findLoraForChild(childName) {
     /**
      * מחפש LoRA מאומן עבור ילד לפי שם.
-     * סינון נוסף: רק מודלים ששייכים לקוד הגישה הנוכחי.
-     * (אחרת משתמש בקוד 300 יקבל את המודל של דולב שאומן עם קוד 100.)
      * מחזיר null אם אין.
      */
     if (!childName) return null;
-    const currentCode = localStorage.getItem('lilatov_access_code');
     const models = JSON.parse(localStorage.getItem('lora_models') || '[]');
-    const found = models.find(m =>
-        m.child_name === childName &&
-        // אם למודל יש access_code - חייב להתאים. אם אין (מודל ישן) - מתעלמים.
-        (!m.access_code || m.access_code === currentCode)
-    );
+    const found = models.find(m => m.child_name === childName);
     if (found) {
         console.log(`🎯 Found LoRA for ${childName}:`, found.trigger_word);
     }
@@ -1881,14 +1850,6 @@ async function showLoraPreview(childLora) {
                         font-size: 0.95rem; font-weight: 600; font-family: inherit;
                     ">
                         🔄 צור 3 תמונות חדשות
-                    </button>
-                    <button id="previewRetrain" style="
-                        background: transparent; color: #C95E48;
-                        border: 2px solid #E0552F;
-                        padding: 0.7rem 1.5rem; border-radius: 100px; cursor: pointer;
-                        font-size: 0.95rem; font-weight: 600; font-family: inherit;
-                    ">
-                        🔁 אמן מחדש עם תמונות אחרות
                     </button>
                     <button id="previewCancel" style="
                         background: transparent; color: #999;
@@ -2010,19 +1971,6 @@ async function showLoraPreview(childLora) {
                 cleanup(false);
             } else if (e.target.id === 'previewRetry') {
                 generateOptions();
-            } else if (e.target.id === 'previewRetrain') {
-                // 🔁 ההורה החליט שהתמונות לא טובות ורוצה לאמן מחדש.
-                // מאשרים, מוחקים את ה-LoRA הקיים, וחוזרים ל-profileScreen.
-                if (!confirm('האם למחוק את הפרופיל הקיים ולהעלות תמונות חדשות?\n\nתאלצו לחכות 25 דקות נוספות לאימון מחדש.')) {
-                    return;
-                }
-                console.log('🔁 User chose to retrain - deleting current LoRA');
-                if (typeof deleteLoraModel === 'function') {
-                    deleteLoraModel(childLora.child_name);
-                }
-                // ניקוי שם הילד הקיים, כדי שב-profileScreen ההורה ימלא חדש
-                localStorage.removeItem('lilatov_child_name');
-                cleanup(false);
             }
         });
     });
