@@ -103,8 +103,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         elif self.path.startswith('/api/lora-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_lora_status(training_id)
-        elif self.path == '/' or self.path == '/index-full.html':
-            # Serve index-full.html
+        elif self.path == '/' or self.path == '/landing' or self.path == '/landing.html':
+            # 🏠 דף הבית = דף הנחיתה
+            self.serve_file('landing.html', 'text/html')
+        elif self.path == '/app' or self.path == '/app/' or self.path == '/index-full.html':
+            # 🎯 /app = האפליקציה עצמה
             self.serve_file('index-full.html', 'text/html')
         elif self.path == '/app-full.js':
             self.serve_file('app-full.js', 'application/javascript')
