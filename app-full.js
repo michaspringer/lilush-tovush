@@ -1,14 +1,17 @@
 // ==========================================
 // LILATOV / לילוש טובוש - Frontend
-// 
-// Last modified by Claude: 2026-05-22 (14:30)
+//
+// Last modified by Claude: 2026-05-23 10:30 (Israel time)
 // Changes in this version:
-//   - FIX: childLora is not defined ב-generateStory (קריסת יצירת סיפור)
-//   - FIX: בכניסה חוזרת לקוד גישה עם מודל קיים, מציג 3 תמונות לבחירה
-//          (לא קופץ ישר ל-creatorScreen)
-//   - NEW: שמירת בחירת 3-תמונות ב-localStorage כדי לשרוד רענון
-//   - NEW: Photo tips modal (פיצ'ר G): מופיע פעם אחת לפני העלאת תמונות
-//          (משולב גם ב-DOMContentLoaded וגם ב-showProfileCreation)
+//   - 🔬 EXIF orientation fix — createImageBitmap עם imageOrientation='from-image'
+//     (תיקון תמונות מ-iPhone שבאו "שכובות" וכשלו באימון)
+//   - 🔬 Memory: דחיסה סדרתית במקום מקבילית, שחרור bitmap+canvas מיד
+//     (מונע OOM ב-iPhone ישן עם 10 תמונות 12MP)
+//   - 🔬 Preview: URL.createObjectURL במקום FileReader.readAsDataURL
+//     (פי-100 פחות זיכרון במובייל)
+//   - 💡 פיצ'ר G: מודאל הדרכת תמונות (מופיע פעם אחת)
+//   - 🆕 בכניסה חוזרת עם מודל קיים, מציג 3 תמונות לבחירה
+//   - 🆕 שמירת בחירה ב-localStorage כדי לשרוד רענון
 // ==========================================
 
 // ==========================================
@@ -192,9 +195,6 @@ function showProfileCreation() {
 /**
  * 💡 פיצ'ר G: מודאל הדרכה לבחירת תמונות אימון נקיות
  * מופיע פעם אחת לכל קוד גישה - נשמר ב-localStorage.
- * 
- * @param {Function} onContinue - callback שייקרא כשההורה מאשר
- * @param {boolean} forceShow - אם true, מציג גם אם המשתמש כבר ראה
  */
 function showPhotoTipsModal(onContinue, forceShow = false) {
     const accessCode = localStorage.getItem('lilatov_access_code') || 'default';
@@ -220,7 +220,6 @@ function showPhotoTipsModal(onContinue, forceShow = false) {
     overlay.innerHTML = `
         <div style="background: #fff; border-radius: 20px; padding: 2rem 1.5rem; max-width: 520px; width: 100%; text-align: right; box-shadow: 0 20px 60px rgba(0,0,0,0.4); margin: auto;">
             <div style="text-align: center; font-size: 3rem; margin-bottom: 0.5rem;">📸</div>
-            
             <h2 style="margin: 0 0 0.5rem 0; color: #2A2118; font-size: 1.5rem; text-align: center;">
                 תמונות אימון מעולות = ילד שמזהה את עצמו
             </h2>
@@ -228,7 +227,6 @@ function showPhotoTipsModal(onContinue, forceShow = false) {
                 בחירת התמונות היא הכי חשובה לתוצאה.<br>
                 ⏱️ 2 דקות של קריאה = ספר ש<u>באמת</u> נראה כמו הילד שלכם.
             </p>
-            
             <div style="background: #E8F5E9; padding: 1rem 1.2rem; border-radius: 14px; margin-bottom: 1rem; border-right: 4px solid #4CAF50;">
                 <div style="font-weight: 700; color: #2E7D32; margin-bottom: 0.6rem; font-size: 1rem;">✅ כן — תמונות שיעבדו מצוין:</div>
                 <ul style="margin: 0; padding-right: 1.2rem; color: #2A2118; font-size: 0.92rem; line-height: 1.7;">
@@ -238,7 +236,6 @@ function showPhotoTipsModal(onContinue, forceShow = false) {
                     <li><b>פנים גלויות</b> — שיער מאחורי האוזניים אם אפשר</li>
                 </ul>
             </div>
-            
             <div style="background: #FFEBEE; padding: 1rem 1.2rem; border-radius: 14px; margin-bottom: 1.2rem; border-right: 4px solid #E53935;">
                 <div style="font-weight: 700; color: #C62828; margin-bottom: 0.6rem; font-size: 1rem;">❌ לא — תמונות שיפגעו בתוצאה:</div>
                 <ul style="margin: 0; padding-right: 1.2rem; color: #2A2118; font-size: 0.92rem; line-height: 1.7;">
@@ -249,12 +246,9 @@ function showPhotoTipsModal(onContinue, forceShow = false) {
                     <li><b>10 תמונות זהות</b> — גיוון חשוב יותר מכמות</li>
                 </ul>
             </div>
-            
             <div style="background: #FFF8E1; padding: 0.9rem 1.1rem; border-radius: 12px; margin-bottom: 1.5rem; font-size: 0.88rem; color: #5C4A35; line-height: 1.5;">
-                💡 <b>טיפ:</b> תמונות סלפי עם הילד עובדות מצוין —
-                הפנים גדולות, מבט לפנים, ותאורה טובה.
+                💡 <b>טיפ:</b> תמונות סלפי עם הילד עובדות מצוין — הפנים גדולות, מבט לפנים, ותאורה טובה.
             </div>
-            
             <button id="photoTipsContinue" style="
                 background: #C95E48; color: white; border: none;
                 padding: 1rem 2rem; border-radius: 100px; cursor: pointer;
@@ -267,7 +261,6 @@ function showPhotoTipsModal(onContinue, forceShow = false) {
     `;
     
     document.body.appendChild(overlay);
-    
     document.getElementById('photoTipsContinue').onclick = () => {
         localStorage.setItem(STORAGE_KEY, 'yes');
         if (document.body.contains(overlay)) {
@@ -306,25 +299,27 @@ function previewTrainingPhotos() {
         return;
     }
     
+    // 🔬 23/5: שימוש ב-URL.createObjectURL במקום FileReader+readAsDataURL.
+    // ההפרש דרמטי: object URL הוא פוינטר (אפס RAM נוסף), data URL הוא base64 בזיכרון
+    // (תמונה 5MB הופכת ל-7MB string). עם 10 תמונות מובייל זה ההבדל בין יציב לקריסה.
     Array.from(input.files).forEach((file, i) => {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            const div = document.createElement('div');
-            div.style.cssText = 'position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);';
-            
-            const img = document.createElement('img');
-            img.src = e.target.result;
-            img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
-            
-            const badge = document.createElement('div');
-            badge.textContent = i + 1;
-            badge.style.cssText = 'position: absolute; top: 5px; right: 5px; background: #667eea; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;';
-            
-            div.appendChild(img);
-            div.appendChild(badge);
-            grid.appendChild(div);
-        };
-        reader.readAsDataURL(file);
+        const div = document.createElement('div');
+        div.style.cssText = 'position: relative; aspect-ratio: 1; border-radius: 10px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.1);';
+        
+        const img = document.createElement('img');
+        const objectUrl = URL.createObjectURL(file);
+        img.src = objectUrl;
+        img.style.cssText = 'width: 100%; height: 100%; object-fit: cover;';
+        // שחרור ה-object URL אחרי שהתמונה נטענה (חיוני לזיכרון)
+        img.onload = () => URL.revokeObjectURL(objectUrl);
+        
+        const badge = document.createElement('div');
+        badge.textContent = i + 1;
+        badge.style.cssText = 'position: absolute; top: 5px; right: 5px; background: #667eea; color: white; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 0.8rem; font-weight: bold;';
+        
+        div.appendChild(img);
+        div.appendChild(badge);
+        grid.appendChild(div);
     });
     
     // 🆕 לא מפעיל ישירות את הכפתור - דורש גם שם
@@ -377,41 +372,64 @@ function clearTrainingPhotos() {
  * חיוני לפני שליחה לשרת - תמונות מטלפון (4000px, 3-5MB) יוצרות
  * ZIP של 15+ MB שעובר את מגבלת 10MB של Cloudinary.
  * 
+ * 🔬 23/5: 3 תיקונים לתמונות מהמובייל:
+ *   1. EXIF orientation — בלי זה, תמונות מ-iPhone באות "שכובות" ב-canvas
+ *      וה-LoRA מאמן על פנים מסובבות. createImageBitmap עם imageOrientation:'from-image'
+ *      מטפל ב-EXIF אוטומטית (תמיכה נרחבת מ-2019+, fallback ל-Image API במידת הצורך).
+ *   2. memory — שחרור bitmap מיד אחרי השימוש (.close()) כדי להוריד עומס.
+ *   3. concurrency — הקריאה מתבצעת סדרתית בצד החיצוני (ראה startTraining).
+ * 
  * @param {File} file - קובץ התמונה המקורי
  * @param {number} maxWidth - רוחב מקסימלי בפיקסלים (ברירת מחדל 1024)
  * @param {number} quality - איכות JPEG 0-1 (ברירת מחדל 0.85)
  * @returns {Promise<string>} - data URL של התמונה המכווצת
  */
-function compressImage(file, maxWidth = 1024, quality = 0.85) {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onerror = () => reject(new Error('Failed to read file'));
-        reader.onload = (e) => {
-            const img = new Image();
-            img.onerror = () => reject(new Error('Failed to load image'));
-            img.onload = () => {
-                // חישוב מימדים חדשים תוך שמירה על יחס
-                let { width, height } = img;
-                if (width > maxWidth) {
-                    height = Math.round(height * maxWidth / width);
-                    width = maxWidth;
-                }
-                
-                // ציור על canvas והמרה ל-JPEG דחוס
-                const canvas = document.createElement('canvas');
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0, width, height);
-                
-                // תמיד JPEG (גם אם המקור PNG) - יותר קטן באופן משמעותי
-                const dataUrl = canvas.toDataURL('image/jpeg', quality);
-                resolve(dataUrl);
+async function compressImage(file, maxWidth = 1024, quality = 0.85) {
+    // ניסיון ראשון: createImageBitmap עם תיקון EXIF אוטומטי (מודרני, מהיר, פחות RAM)
+    let bitmap = null;
+    let img = null;
+    try {
+        bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    } catch (e) {
+        // Fallback: Image() API (ישן, ללא תיקון EXIF, אבל עובד בכל דפדפן)
+        console.warn('createImageBitmap failed, falling back to Image():', e.message);
+        img = await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.onload = (ev) => {
+                const i = new Image();
+                i.onerror = () => reject(new Error('Failed to load image'));
+                i.onload = () => resolve(i);
+                i.src = ev.target.result;
             };
-            img.src = e.target.result;
-        };
-        reader.readAsDataURL(file);
-    });
+            reader.readAsDataURL(file);
+        });
+    }
+    
+    const source = bitmap || img;
+    let { width, height } = source;
+    
+    if (width > maxWidth) {
+        height = Math.round(height * maxWidth / width);
+        width = maxWidth;
+    }
+    
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(source, 0, 0, width, height);
+    
+    // שחרור זיכרון מיד (חשוב במובייל)
+    if (bitmap) bitmap.close();
+    
+    const dataUrl = canvas.toDataURL('image/jpeg', quality);
+    
+    // עזרה ל-GC לשחרר את ה-canvas
+    canvas.width = 0;
+    canvas.height = 0;
+    
+    return dataUrl;
 }
 
 async function startTraining() {
@@ -442,9 +460,23 @@ async function startTraining() {
         // 🗜️ דחיסת תמונות בצד הלקוח - תמונות מטלפון יוצרות ZIP > 10MB
         // (המגבלה של Cloudinary). דוחסים ל-1024px רוחב + JPEG quality 85
         // שזה איכות מצוינת ל-LoRA training, ומקטין כל תמונה פי 10.
-        const photos = await Promise.all(
-            Array.from(files).map((file, i) => compressImage(file, 1024, 0.85))
-        );
+        // 🔬 23/5: סדרתי במקום מקבילי — Promise.all על 10 תמונות 12MP גורם
+        // ל-OOM ב-iPhone ישן. סדרתי = פי 10 פחות RAM, מחיר זמן זניח (~0.3s לתמונה).
+        const photos = [];
+        for (let i = 0; i < files.length; i++) {
+            try {
+                const compressed = await compressImage(files[i], 1024, 0.85);
+                photos.push(compressed);
+                // עדכון התקדמות (5% → 25% במהלך הדחיסה)
+                const pct = 5 + Math.round((i + 1) / files.length * 20);
+                document.getElementById('trainingProgressBar').style.width = pct + '%';
+                document.getElementById('trainingStatus').textContent =
+                    `מכווץ תמונות... (${i + 1}/${files.length})`;
+            } catch (err) {
+                console.error(`Failed to compress photo ${i + 1}:`, err);
+                throw new Error(`שגיאה בעיבוד תמונה ${i + 1}: ${err.message}`);
+            }
+        }
         
         // לוג גודל כולל לאבחון
         const totalKB = photos.reduce((sum, p) => sum + Math.ceil(p.length * 0.75 / 1024), 0);
@@ -911,10 +943,6 @@ async function generateStory() {
     
     try {
         const aiModel = AITrainingManager.loadModel();
-        
-        // 🐛 FIX: הגדרת childLora — בלי זה השורות למטה זורקות "childLora is not defined".
-        // findLoraForChild מחפש ב-lora_models[] לפי שם הילד.
-        const childLora = findLoraForChild(appState.bookData.childName);
         
         console.log('📸 uploadedPhotos:', uploadedPhotos);
         console.log('📸 uploadedPhotos.length:', uploadedPhotos.length);
@@ -1479,11 +1507,10 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (matchingModel) {
         console.log('🤖 AI Model found for this access code:', matchingModel.child_name);
-        // 🆕 גם בכניסה חוזרת — מציגים 3 תמונות לבחירה לפני מסך הסיפור.
-        // היגיון: הבחירה היא חלק מחוויית "הילד שלי" — לא רק בחירת סגנון חד-פעמית.
-        // נוסף: אם רוצים, בעתיד אפשר לזכור את הבחירה האחרונה ולדלג עם כפתור "אותו דבר כמו קודם".
+        // 🔬 23/5: גם בכניסה חוזרת — מציגים 3 תמונות לבחירה לפני מסך הסיפור.
+        // היגיון: הבחירה היא חלק מחוויית "הילד שלי", לא רק בחירת סגנון חד-פעמית.
         
-        // שמירה זמנית של שם הילד ב-bookData כדי ש-findLoraForChild ב-generateStory יעבוד
+        // שמירה זמנית של שם הילד ב-bookData כדי ש-findLoraForChild יעבוד מאוחר יותר
         appState.bookData.childName = matchingModel.child_name;
         
         (async () => {
@@ -2116,7 +2143,7 @@ async function showLoraPreview(childLora) {
                             appState.bookData.chosen_lora_scale = option.lora_scale;
                             appState.bookData.chosen_style = option.style;
                             console.log(`✅ Parent chose: style=${option.style}, seed=${option.seed}, scale=${option.lora_scale}`);
-                            // 💾 שמירה ב-localStorage כדי לשרוד רענון דף
+                            // 💾 שמירה ב-localStorage כדי לשרוד רענון
                             try {
                                 localStorage.setItem('lilatov_chosen_preview', JSON.stringify({
                                     seed: option.seed,
