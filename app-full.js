@@ -1,14 +1,13 @@
 // ==========================================
 // LILATOV / לילוש טובוש - Frontend
 //
-// Last modified by Claude: 2026-05-23 10:30 (Israel time)
+// Last modified by Claude: 2026-05-23 11:00 (Israel time)
 // Changes in this version:
+//   - 🔬 Mobile fix: retry אוטומטי ב-compressImage (Google Photos lazy refs)
+//   - 🔬 Mobile fix: דיאלוג Skip/Cancel אם תמונה נכשלת — לא מפיל את כל הטעינה
 //   - 🔬 EXIF orientation fix — createImageBitmap עם imageOrientation='from-image'
-//     (תיקון תמונות מ-iPhone שבאו "שכובות" וכשלו באימון)
 //   - 🔬 Memory: דחיסה סדרתית במקום מקבילית, שחרור bitmap+canvas מיד
-//     (מונע OOM ב-iPhone ישן עם 10 תמונות 12MP)
 //   - 🔬 Preview: URL.createObjectURL במקום FileReader.readAsDataURL
-//     (פי-100 פחות זיכרון במובייל)
 //   - 💡 פיצ'ר G: מודאל הדרכת תמונות (מופיע פעם אחת)
 //   - 🆕 בכניסה חוזרת עם מודל קיים, מציג 3 תמונות לבחירה
 //   - 🆕 שמירת בחירה ב-localStorage כדי לשרוד רענון
@@ -385,6 +384,29 @@ function clearTrainingPhotos() {
  * @returns {Promise<string>} - data URL של התמונה המכווצת
  */
 async function compressImage(file, maxWidth = 1024, quality = 0.85) {
+    // 🔬 23/5: retry אוטומטי לקבצים מ-Google Photos באנדרואיד.
+    // הקובץ עלול להגיע כ-"lazy reference" שדורש fetch מהענן בניסיון הראשון.
+    // ננסה עד 2 פעמים עם השהיה ביניהן.
+    const MAX_ATTEMPTS = 2;
+    let lastError = null;
+    
+    for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+        try {
+            return await _compressImageOnce(file, maxWidth, quality);
+        } catch (e) {
+            lastError = e;
+            console.warn(`compressImage attempt ${attempt}/${MAX_ATTEMPTS} failed:`, e.message);
+            if (attempt < MAX_ATTEMPTS) {
+                // השהיה קצרה לפני retry — לפעמים Google Photos צריך זמן להעלות מהענן
+                await new Promise(r => setTimeout(r, 300));
+            }
+        }
+    }
+    
+    throw lastError || new Error('Failed to compress image after retries');
+}
+
+async function _compressImageOnce(file, maxWidth, quality) {
     // ניסיון ראשון: createImageBitmap עם תיקון EXIF אוטומטי (מודרני, מהיר, פחות RAM)
     let bitmap = null;
     let img = null;
@@ -462,7 +484,9 @@ async function startTraining() {
         // שזה איכות מצוינת ל-LoRA training, ומקטין כל תמונה פי 10.
         // 🔬 23/5: סדרתי במקום מקבילי — Promise.all על 10 תמונות 12MP גורם
         // ל-OOM ב-iPhone ישן. סדרתי = פי 10 פחות RAM, מחיר זמן זניח (~0.3s לתמונה).
+        // 🔬 23/5: אם תמונה נכשלת אחרי retry — דיאלוג skip/cancel במקום להפיל הכל.
         const photos = [];
+        const skippedIndexes = [];
         for (let i = 0; i < files.length; i++) {
             try {
                 const compressed = await compressImage(files[i], 1024, 0.85);
@@ -473,9 +497,41 @@ async function startTraining() {
                 document.getElementById('trainingStatus').textContent =
                     `מכווץ תמונות... (${i + 1}/${files.length})`;
             } catch (err) {
-                console.error(`Failed to compress photo ${i + 1}:`, err);
-                throw new Error(`שגיאה בעיבוד תמונה ${i + 1}: ${err.message}`);
+                console.error(`Failed to compress photo ${i + 1} (even after retry):`, err);
+                
+                // שואלים את ההורה אם לדלג או לבטל
+                const fileName = files[i].name || `תמונה ${i + 1}`;
+                const remaining = files.length - i - 1;
+                const successSoFar = photos.length;
+                
+                // הסבר ידידותי לפי המקור הסביר ביותר
+                const skipMsg =
+                    `❌ לא הצלחתי לקרוא את התמונה: "${fileName}"\n\n` +
+                    `(זה קורה לפעמים עם תמונות מ-Google Photos שעדיין בענן.\n` +
+                    `נסה להוריד אותה למכשיר ולבחור שוב.)\n\n` +
+                    `יש לי ${successSoFar} תמונות תקינות עד כה, ועוד ${remaining} ממתינות.\n\n` +
+                    `לחץ "אישור" כדי לדלג על התמונה הזו ולהמשיך,\n` +
+                    `או "ביטול" כדי לעצור ולהתחיל מחדש.`;
+                
+                if (confirm(skipMsg)) {
+                    skippedIndexes.push(i + 1);
+                    continue;  // ממשיך לתמונה הבאה
+                } else {
+                    throw new Error(`בוטל ע"י המשתמש בתמונה ${i + 1}`);
+                }
             }
+        }
+        
+        // וידוא שיש לנו מספיק תמונות לאימון
+        if (photos.length < 5) {
+            throw new Error(
+                `נשארו רק ${photos.length} תמונות תקינות (דרושות לפחות 5).\n` +
+                `אנא נסה להעלות שוב, רצוי תמונות שמורות במכשיר ולא מ-Google Photos בענן.`
+            );
+        }
+        
+        if (skippedIndexes.length > 0) {
+            console.log(`⚠️ Skipped ${skippedIndexes.length} photos (${skippedIndexes.join(', ')}), proceeding with ${photos.length}`);
         }
         
         // לוג גודל כולל לאבחון
