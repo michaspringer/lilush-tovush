@@ -4,13 +4,12 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-05-23 06:04 (Israel time)
+Last modified by Claude: 2026-05-23 10:00 (Israel time)
 Changes in this version:
   - LoRA training upgrade: steps 1000→1500, lora_rank→32, caption_dropout_rate=0.05
-    (better child likeness, ~25min training instead of ~15min, ~$0.80 instead of ~$0.50)
-  - 🧪 TEMP: /api/test-style-prompts — endpoint לטסט פרומפטים שונים על LoRA קיים
-    (4 פרומפטים מקבילים, seed קבוע, להשוואת זהות בין סגנונות)
-  - 🧪 TEMP: /test-style route — דף טסט סטנדאלון
+  - 🧪 TEMP: /api/test-style-prompts + /test-style route — endpoint לטסט פרומפטים
+  - 🔬 trigger word: "_kid" → "_subj" (ניטרלי) — מונע bias של LoRA לקונספט "ילד"
+  - 🔬 preview options: כל 3 התמונות עכשיו ב-lora_scale=1.0 (אישור: טסט 23/5)
 """
 
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -339,14 +338,15 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                 "plain clean background, happy smile, looking at viewer"
             )
             
-            # 🎨 3 וריאציות עדינות - ההבדל בא מהסגנון, לא מ-lora_scale קיצוני!
-            # lora_scale נשאר יציב (0.92-1.0) כדי למנוע עיוותים
+            # 🎨 3 וריאציות - ההבדל בא מהסגנון, לא מ-lora_scale!
+            # 🔬 23/5: כל ה-3 ב-scale=1.0 — הטסט מ-23/5 הוכיח שמתחת ל-1.0
+            # הזיהוי נשבר ומגיע ילד גנרי. עדיף scale גבוה תמיד; הסגנון בא מ-style_anchors.
             variations = [
-                {'seed': None, 'lora_scale': 1.0,  'style': 'warm_realistic',
+                {'seed': None, 'lora_scale': 1.0, 'style': 'warm_realistic',
                  'label': 'warm_realistic'},
-                {'seed': None, 'lora_scale': 0.95, 'style': 'classic_illustration',
+                {'seed': None, 'lora_scale': 1.0, 'style': 'classic_illustration',
                  'label': 'classic_illustration'},
-                {'seed': None, 'lora_scale': 0.92, 'style': 'soft_illustration',
+                {'seed': None, 'lora_scale': 1.0, 'style': 'soft_illustration',
                  'label': 'soft_illustration'},
             ]
             
@@ -1553,11 +1553,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
     def handle_test_style_prompts(self):
         """
         🧪 TEMP: endpoint לטסט פרומפטים. רץ 4 קריאות במקביל ומחזיר URLs.
-        מטרה: לבדוק אם LoRA של מבוגר עובד באיורים כשהפרומפט אומר "מבוגר", 
-        ולא "ילד". להשוואת איכות זהות בין סגנונות שונים.
-        
-        Body: { lora_url, trigger_word, lora_version, prompts: [...] }
-        Response: { results: [{ prompt, label, image_url, seed }, ...] }
+        מטרה: לבדוק LoRA על פרומפטים שונים, לבודד משתנים.
         """
         try:
             content_length = int(self.headers['Content-Length'])
@@ -1571,8 +1567,6 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             if not lora_url or not trigger_word:
                 raise Exception('Missing lora_url or trigger_word')
             
-            # 4 פרומפטים לטסט - אומרים "מבוגר" במפורש כדי שלא יסתור עם LoRA
-            # ה-trigger_word ייוסף אוטומטית ע"י generate_image_with_lora
             test_prompts = data.get('prompts') or [
                 {
                     'label': 'control_realistic',
@@ -1582,7 +1576,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 {
                     'label': 'oil_painting',
                     'prompt': 'detailed oil painting portrait of a middle-aged man, classical art style, painterly, plain background, looking at viewer',
-                    'style_name': 'warm_realistic'  # סגנון "ריאליסטי" כדי שה-anchor לא יכפה "ילדים"
+                    'style_name': 'warm_realistic'
                 },
                 {
                     'label': 'comic_book',
@@ -1596,7 +1590,6 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 },
             ]
             
-            # נריץ עם seed קבוע כדי לבודד את משתנה הפרומפט
             import random
             fixed_seed = data.get('seed') or random.randint(1, 999999)
             lora_scale = data.get('lora_scale', 1.0)
@@ -1621,7 +1614,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                         style_name=test.get('style_name', 'warm_realistic'),
                         seed=fixed_seed,
                         lora_scale=lora_scale,
-                        child_gender='boy'  # לא רלוונטי כי הפרומפט אומר adult
+                        child_gender='boy'
                     )
                     if img:
                         results[index] = {
@@ -1917,7 +1910,10 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             )
             
             # 🔧 FIX 2: trigger_word באנגלית בלבד
-            trigger_word = f"{child_slug.replace('-', '_')}_kid"
+            # 🔬 23/5: הוסר הסיומת "_kid" — היא יצרה bias חזק לקונספט "ילד" וגרמה
+            # ל-LoRA לדחוף תוצאות לכיוון איורי-ילד גם כשהפרומפט אומר אחרת.
+            # סיומת ניטרלית "_subj" נותנת ל-FLUX להחליט לפי הפרומפט.
+            trigger_word = f"{child_slug.replace('-', '_')}_subj"
             print(f"  🏷️  Trigger word: {trigger_word}")
             
             # Create ZIP
