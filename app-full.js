@@ -1,8 +1,12 @@
 // ==========================================
 // LILATOV / לילוש טובוש - Frontend
 //
-// Last modified by Claude: 2026-05-23 11:00 (Israel time)
+// Last modified by Claude: 2026-05-23 12:00 (Israel time)
 // Changes in this version:
+//   - 🔬 Mobile fix v2: Blob hydration trick (file.slice + arrayBuffer)
+//     מאלץ את אנדרואיד להוריד מ-Google Photos לפני הקריאה
+//   - 🔬 Mobile fix: אזהרה במודאל ההדרכה — לא לבחור מ-Google Photos
+//   - 🔬 Mobile fix: הודעת skip dialog משופרת עם פתרון ברור
 //   - 🔬 Mobile fix: retry אוטומטי ב-compressImage (Google Photos lazy refs)
 //   - 🔬 Mobile fix: דיאלוג Skip/Cancel אם תמונה נכשלת — לא מפיל את כל הטעינה
 //   - 🔬 EXIF orientation fix — createImageBitmap עם imageOrientation='from-image'
@@ -245,6 +249,17 @@ function showPhotoTipsModal(onContinue, forceShow = false) {
                     <li><b>10 תמונות זהות</b> — גיוון חשוב יותר מכמות</li>
                 </ul>
             </div>
+            <div style="background: #FFF3E0; padding: 1rem 1.2rem; border-radius: 14px; margin-bottom: 1.2rem; border-right: 4px solid #FB8C00;">
+                <div style="font-weight: 700; color: #E65100; margin-bottom: 0.6rem; font-size: 1rem;">📱 חשוב במיוחד למשתמשי אנדרואיד:</div>
+                <p style="margin: 0; color: #2A2118; font-size: 0.92rem; line-height: 1.6;">
+                    בחרו תמונות מ-<b>גלריה</b> או <b>Photos</b> במכשיר —
+                    <u>לא מ-Google Photos</u> בענן.<br>
+                    <span style="color: #5C4A35; font-size: 0.85rem;">
+                        תמונות שעדיין בענן ולא הורדו למכשיר — לא יעלו.
+                    </span>
+                </p>
+            </div>
+            
             <div style="background: #FFF8E1; padding: 0.9rem 1.1rem; border-radius: 12px; margin-bottom: 1.5rem; font-size: 0.88rem; color: #5C4A35; line-height: 1.5;">
                 💡 <b>טיפ:</b> תמונות סלפי עם הילד עובדות מצוין — הפנים גדולות, מבט לפנים, ותאורה טובה.
             </div>
@@ -407,11 +422,31 @@ async function compressImage(file, maxWidth = 1024, quality = 0.85) {
 }
 
 async function _compressImageOnce(file, maxWidth, quality) {
+    // 🔬 23/5: עוקף בעיית Google Photos באנדרואיד.
+    // ה-File שמגיע לפעמים הוא רק "lazy reference" שעדיין בענן ולא קובץ מקומי.
+    // פתרון: שיכפול דרך file.slice() מאלץ את אנדרואיד לקרוא את הביטים בפועל.
+    // אם השיכפול נכשל — תמונה באמת לא זמינה ואין מה לעשות.
+    let sourceBlob = file;
+    try {
+        if (file.size > 0) {
+            // קריאת הביטים בכפיה — אם זה fail כאן, אז אין דרך לקרוא בכלל
+            const blob = file.slice(0, file.size);
+            // arrayBuffer() דחיפה אקטיבית של הנתונים לזיכרון
+            const buf = await blob.arrayBuffer();
+            if (buf.byteLength > 0) {
+                sourceBlob = new Blob([buf], { type: file.type || 'image/jpeg' });
+            }
+        }
+    } catch (e) {
+        console.warn('Blob hydration failed (Google Photos lazy ref?):', e.message);
+        // ממשיכים עם ה-File המקורי — אולי ההמשך יצליח בכל זאת
+    }
+    
     // ניסיון ראשון: createImageBitmap עם תיקון EXIF אוטומטי (מודרני, מהיר, פחות RAM)
     let bitmap = null;
     let img = null;
     try {
-        bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+        bitmap = await createImageBitmap(sourceBlob, { imageOrientation: 'from-image' });
     } catch (e) {
         // Fallback: Image() API (ישן, ללא תיקון EXIF, אבל עובד בכל דפדפן)
         console.warn('createImageBitmap failed, falling back to Image():', e.message);
@@ -424,7 +459,7 @@ async function _compressImageOnce(file, maxWidth, quality) {
                 i.onload = () => resolve(i);
                 i.src = ev.target.result;
             };
-            reader.readAsDataURL(file);
+            reader.readAsDataURL(sourceBlob);
         });
     }
     
@@ -507,11 +542,11 @@ async function startTraining() {
                 // הסבר ידידותי לפי המקור הסביר ביותר
                 const skipMsg =
                     `❌ לא הצלחתי לקרוא את התמונה: "${fileName}"\n\n` +
-                    `(זה קורה לפעמים עם תמונות מ-Google Photos שעדיין בענן.\n` +
-                    `נסה להוריד אותה למכשיר ולבחור שוב.)\n\n` +
-                    `יש לי ${successSoFar} תמונות תקינות עד כה, ועוד ${remaining} ממתינות.\n\n` +
+                    `💡 הסיבה השכיחה: זו תמונה מ-Google Photos שעדיין רק בענן ולא הורדה למכשיר.\n\n` +
+                    `🛠️ פתרון: סגור את הדף, פתח את "Photos" / "גלריה" של המכשיר, ובחר תמונות משם.\n\n` +
+                    `📊 מצב נוכחי: ${successSoFar} תמונות תקינות, ${remaining} עוד ממתינות.\n\n` +
                     `לחץ "אישור" כדי לדלג על התמונה הזו ולהמשיך,\n` +
-                    `או "ביטול" כדי לעצור ולהתחיל מחדש.`;
+                    `או "ביטול" כדי לעצור ולהתחיל מחדש עם תמונות אחרות.`;
                 
                 if (confirm(skipMsg)) {
                     skippedIndexes.push(i + 1);
