@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>🧪 LoRA Style Prompt Test</title>
+<!-- Last modified by Claude: 2026-05-23 06:04 (Israel time) -->
+<style>
+body { font-family: -apple-system, sans-serif; max-width: 1100px; margin: 0 auto; padding: 2rem; background: #f5f5f0; }
+h1 { color: #C95E48; }
+.card { background: white; padding: 1.2rem; border-radius: 12px; margin-bottom: 1rem; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+.info { font-size: 0.9rem; color: #666; }
+button { background: #C95E48; color: white; border: none; padding: 0.9rem 2rem; border-radius: 100px; cursor: pointer; font-size: 1.05rem; font-weight: 700; }
+button:disabled { background: #ccc; cursor: not-allowed; }
+select { padding: 0.6rem; font-size: 1rem; border-radius: 8px; border: 1px solid #ccc; width: 100%; max-width: 400px; margin-bottom: 0.8rem; }
+.results { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.2rem; margin-top: 1.5rem; }
+.result-card { background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+.result-card img { width: 100%; display: block; aspect-ratio: 4/3; object-fit: cover; }
+.result-card .label { padding: 0.5rem 1rem; font-weight: 700; background: #FFF8E1; }
+.result-card .prompt { padding: 0.6rem 1rem; font-size: 0.78rem; color: #5C4A35; line-height: 1.4; border-top: 1px solid #eee; }
+.error { color: #C62828; background: #FFEBEE; padding: 1rem; border-radius: 8px; }
+.loading { text-align: center; padding: 3rem; }
+.spinner { font-size: 3rem; animation: spin 2s linear infinite; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<h1>🧪 LoRA Style Prompt Test</h1>
+<p class="info">בודק האם ה-LoRA עובד באיורים כשהפרומפט אומר "מבוגר" ולא "ילד". 4 פרומפטים, seed קבוע, השוואה ישירה.</p>
+
+<div class="card">
+  <label style="font-weight: 700; display: block; margin-bottom: 0.4rem;">בחר LoRA לטסט:</label>
+  <select id="loraSelect" onchange="updateInfo()"></select>
+  <div id="loraInfo" class="info"></div>
+</div>
+
+<div class="card">
+  <button id="runBtn" onclick="runTest()">🚀 הרץ טסט (יציר 4 תמונות, ~60-90 שניות)</button>
+  <p class="info" style="margin-top: 0.8rem;">עלות משוערת: ~$0.05</p>
+</div>
+
+<div id="output"></div>
+
+<script>
+const SERVER_URL = window.location.origin;
+let allLoras = [];
+let selectedLora = null;
+
+// טען את כל ה-LoRAs מ-localStorage
+try {
+  allLoras = JSON.parse(localStorage.getItem('lora_models') || '[]');
+  const select = document.getElementById('loraSelect');
+  
+  if (allLoras.length === 0) {
+    document.getElementById('loraInfo').innerHTML = '<div class="error">❌ לא נמצא LoRA ב-localStorage.</div>';
+    document.getElementById('runBtn').disabled = true;
+  } else {
+    allLoras.forEach((m, i) => {
+      const opt = document.createElement('option');
+      opt.value = i;
+      opt.textContent = `${m.child_name} (access_code: ${m.access_code || 'N/A'})`;
+      select.appendChild(opt);
+    });
+    
+    // ברירת מחדל: מיכאל (access_code "300") אם קיים, אחרת הראשון
+    const michaelIdx = allLoras.findIndex(m => m.access_code === '300' || m.child_name === 'מיכאל');
+    select.value = michaelIdx >= 0 ? michaelIdx : 0;
+    updateInfo();
+  }
+} catch (e) {
+  document.getElementById('loraInfo').innerHTML = `<div class="error">❌ שגיאה: ${e.message}</div>`;
+  document.getElementById('runBtn').disabled = true;
+}
+
+function updateInfo() {
+  const idx = parseInt(document.getElementById('loraSelect').value);
+  selectedLora = allLoras[idx];
+  document.getElementById('loraInfo').innerHTML = `
+    trigger: <code>${selectedLora.trigger_word}</code><br>
+    version: <code style="font-size: 0.75rem;">${selectedLora.version || '(missing!)'}</code><br>
+    url: <code style="font-size: 0.75rem;">${(selectedLora.lora_url || '').slice(0, 60)}...</code>
+  `;
+}
+
+async function runTest() {
+  if (!selectedLora) return;
+  
+  const btn = document.getElementById('runBtn');
+  const output = document.getElementById('output');
+  btn.disabled = true;
+  btn.textContent = '🎨 מייצר 4 תמונות...';
+  
+  output.innerHTML = `
+    <div class="card loading">
+      <div class="spinner">🎨</div>
+      <p style="margin-top: 1rem;">יוצר 4 תמונות במקביל...</p>
+      <p class="info">60-90 שניות</p>
+    </div>`;
+  
+  try {
+    const response = await fetch(`${SERVER_URL}/api/test-style-prompts`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        lora_url: selectedLora.lora_url,
+        trigger_word: selectedLora.trigger_word,
+        lora_version: selectedLora.version,
+        lora_scale: 1.0
+      })
+    });
+    
+    const data = await response.json();
+    
+    if (!data.success) {
+      throw new Error(data.error || 'שגיאה לא ידועה');
+    }
+    
+    let html = `<div class="card">
+      <strong>✅ הושלם!</strong> &nbsp;
+      <span class="info">LoRA=${selectedLora.child_name} &middot; seed=${data.seed} &middot; lora_scale=${data.lora_scale}</span>
+    </div>
+    <div class="results">`;
+    
+    data.results.forEach(r => {
+      if (r.image_url) {
+        html += `
+          <div class="result-card">
+            <img src="${r.image_url}" alt="${r.label}">
+            <div class="label">${r.label}</div>
+            <div class="prompt">${r.prompt}</div>
+          </div>`;
+      } else if (r.error) {
+        html += `
+          <div class="result-card">
+            <div class="error" style="margin: 1rem;">❌ ${r.label}: ${r.error}</div>
+            <div class="prompt">${r.prompt}</div>
+          </div>`;
+      }
+    });
+    
+    html += '</div>';
+    output.innerHTML = html;
+    
+  } catch (err) {
+    output.innerHTML = `<div class="error">❌ ${err.message}</div>`;
+    console.error(err);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🔄 הרץ שוב';
+  }
+}
+</script>
+
+</body>
+</html>
+
