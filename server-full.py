@@ -4,10 +4,13 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-05-22 (14:30)
+Last modified by Claude: 2026-05-23 06:04 (Israel time)
 Changes in this version:
   - LoRA training upgrade: steps 1000→1500, lora_rank→32, caption_dropout_rate=0.05
     (better child likeness, ~25min training instead of ~15min, ~$0.80 instead of ~$0.50)
+  - 🧪 TEMP: /api/test-style-prompts — endpoint לטסט פרומפטים שונים על LoRA קיים
+    (4 פרומפטים מקבילים, seed קבוע, להשוואת זהות בין סגנונות)
+  - 🧪 TEMP: /test-style route — דף טסט סטנדאלון
 """
 
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -118,6 +121,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.serve_file('app-full.js', 'application/javascript')
         elif self.path == '/styles-full.css':
             self.serve_file('styles-full.css', 'text/css')
+        elif self.path == '/test-style' or self.path == '/test-style.html':
+            # 🧪 TEMP: דף טסט לפרומפטים
+            self.serve_file('test-style.html', 'text/html')
         else:
             # Try default handler
             try:
@@ -161,6 +167,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.handle_preview_lora()
         elif self.path == '/api/preview-options':  # 🆕 NEW: 3 preview options
             self.handle_preview_options()
+        elif self.path == '/api/test-style-prompts':  # 🧪 TEMP: prompt experimentation
+            self.handle_test_style_prompts()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -1541,6 +1549,122 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
 }
 """
         return prompt
+    
+    def handle_test_style_prompts(self):
+        """
+        🧪 TEMP: endpoint לטסט פרומפטים. רץ 4 קריאות במקביל ומחזיר URLs.
+        מטרה: לבדוק אם LoRA של מבוגר עובד באיורים כשהפרומפט אומר "מבוגר", 
+        ולא "ילד". להשוואת איכות זהות בין סגנונות שונים.
+        
+        Body: { lora_url, trigger_word, lora_version, prompts: [...] }
+        Response: { results: [{ prompt, label, image_url, seed }, ...] }
+        """
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            lora_url = data.get('lora_url')
+            trigger_word = data.get('trigger_word')
+            lora_version = data.get('lora_version')
+            
+            if not lora_url or not trigger_word:
+                raise Exception('Missing lora_url or trigger_word')
+            
+            # 4 פרומפטים לטסט - אומרים "מבוגר" במפורש כדי שלא יסתור עם LoRA
+            # ה-trigger_word ייוסף אוטומטית ע"י generate_image_with_lora
+            test_prompts = data.get('prompts') or [
+                {
+                    'label': 'control_realistic',
+                    'prompt': 'realistic photograph portrait of an adult man, professional photo, plain background, looking at viewer',
+                    'style_name': 'warm_realistic'
+                },
+                {
+                    'label': 'oil_painting',
+                    'prompt': 'detailed oil painting portrait of a middle-aged man, classical art style, painterly, plain background, looking at viewer',
+                    'style_name': 'warm_realistic'  # סגנון "ריאליסטי" כדי שה-anchor לא יכפה "ילדים"
+                },
+                {
+                    'label': 'comic_book',
+                    'prompt': 'comic book illustration portrait of an adult man, graphic novel art style, bold outlines, vivid colors, plain background',
+                    'style_name': 'warm_realistic'
+                },
+                {
+                    'label': 'soft_watercolor',
+                    'prompt': 'soft watercolor painting portrait of an adult man, gentle painterly style, warm tones, plain background',
+                    'style_name': 'warm_realistic'
+                },
+            ]
+            
+            # נריץ עם seed קבוע כדי לבודד את משתנה הפרומפט
+            import random
+            fixed_seed = data.get('seed') or random.randint(1, 999999)
+            lora_scale = data.get('lora_scale', 1.0)
+            
+            print(f"\n🧪 STYLE PROMPT TEST")
+            print(f"   Trigger: {trigger_word}")
+            print(f"   Seed (fixed): {fixed_seed}")
+            print(f"   LoRA scale: {lora_scale}")
+            print(f"   Testing {len(test_prompts)} prompts...")
+            
+            import threading
+            results = [None] * len(test_prompts)
+            
+            def generate_one(index, test):
+                try:
+                    print(f"   🖼️  [{index+1}/{len(test_prompts)}] {test['label']}: {test['prompt'][:60]}...")
+                    img = self.generate_image_with_lora(
+                        prompt=test['prompt'],
+                        lora_url=lora_url,
+                        trigger_word=trigger_word,
+                        lora_version=lora_version,
+                        style_name=test.get('style_name', 'warm_realistic'),
+                        seed=fixed_seed,
+                        lora_scale=lora_scale,
+                        child_gender='boy'  # לא רלוונטי כי הפרומפט אומר adult
+                    )
+                    if img:
+                        results[index] = {
+                            'label': test['label'],
+                            'prompt': test['prompt'],
+                            'image_url': img,
+                            'seed': fixed_seed
+                        }
+                        print(f"   ✅ [{index+1}] done")
+                    else:
+                        print(f"   ❌ [{index+1}] returned None")
+                except Exception as e:
+                    print(f"   ❌ [{index+1}] error: {e}")
+                    results[index] = {
+                        'label': test['label'],
+                        'prompt': test['prompt'],
+                        'error': str(e)
+                    }
+            
+            threads = []
+            for i, test in enumerate(test_prompts):
+                t = threading.Thread(target=generate_one, args=(i, test))
+                t.start()
+                threads.append(t)
+            
+            for t in threads:
+                t.join()
+            
+            successful = [r for r in results if r and 'image_url' in r]
+            print(f"   📊 Completed: {len(successful)}/{len(test_prompts)} successful")
+            
+            self.send_json_response({
+                'success': True,
+                'seed': fixed_seed,
+                'lora_scale': lora_scale,
+                'trigger_word': trigger_word,
+                'results': [r for r in results if r is not None]
+            })
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({'success': False, 'error': str(e)}, status=500)
     
     def handle_suggest_alternative(self):
         """מציע חלופות לטקסט"""
