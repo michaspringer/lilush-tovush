@@ -1,10 +1,14 @@
 // ==========================================
 // LILATOV / לילוש טובוש - Frontend
 // 
-// Last modified by Claude: 2026-05-22
+// Last modified by Claude: 2026-05-22 (14:30)
 // Changes in this version:
-//   - Photo tips modal (פיצ'ר G): מופיע פעם אחת לפני העלאת תמונות,
-//     6 כללי זהב לבחירת תמונות אימון איכותיות (חלק משיפור דמיון הילד)
+//   - FIX: childLora is not defined ב-generateStory (קריסת יצירת סיפור)
+//   - FIX: בכניסה חוזרת לקוד גישה עם מודל קיים, מציג 3 תמונות לבחירה
+//          (לא קופץ ישר ל-creatorScreen)
+//   - NEW: שמירת בחירת 3-תמונות ב-localStorage כדי לשרוד רענון
+//   - NEW: Photo tips modal (פיצ'ר G): מופיע פעם אחת לפני העלאת תמונות
+//          (משולב גם ב-DOMContentLoaded וגם ב-showProfileCreation)
 // ==========================================
 
 // ==========================================
@@ -187,17 +191,15 @@ function showProfileCreation() {
 
 /**
  * 💡 פיצ'ר G: מודאל הדרכה לבחירת תמונות אימון נקיות
- * מופיע פעם אחת לכל גישה חדשה - נשמר ב-localStorage לפי קוד גישה.
+ * מופיע פעם אחת לכל קוד גישה - נשמר ב-localStorage.
  * 
  * @param {Function} onContinue - callback שייקרא כשההורה מאשר
- * @param {boolean} forceShow - אם true, מציג גם אם המשתמש כבר ראה (לכפתור "צפה שוב")
+ * @param {boolean} forceShow - אם true, מציג גם אם המשתמש כבר ראה
  */
 function showPhotoTipsModal(onContinue, forceShow = false) {
-    // מפתח השמירה כולל את קוד הגישה - כדי שכל משתמש יראה פעם אחת
     const accessCode = localStorage.getItem('lilatov_access_code') || 'default';
     const STORAGE_KEY = `lilatov_seen_photo_tips_${accessCode}_v1`;
     
-    // אם כבר ראה ולא מבקש לכפות - דלג
     if (!forceShow && localStorage.getItem(STORAGE_KEY) === 'yes') {
         if (onContinue) onContinue();
         return;
@@ -275,10 +277,6 @@ function showPhotoTipsModal(onContinue, forceShow = false) {
     };
 }
 
-/**
- * כפתור עזר ל-profileScreen — מאפשר להורה לפתוח שוב את ההדרכה.
- * נקרא מ-HTML או מקונסול לבדיקות.
- */
 function showPhotoTipsAgain() {
     showPhotoTipsModal(null, true);
 }
@@ -914,6 +912,10 @@ async function generateStory() {
     try {
         const aiModel = AITrainingManager.loadModel();
         
+        // 🐛 FIX: הגדרת childLora — בלי זה השורות למטה זורקות "childLora is not defined".
+        // findLoraForChild מחפש ב-lora_models[] לפי שם הילד.
+        const childLora = findLoraForChild(appState.bookData.childName);
+        
         console.log('📸 uploadedPhotos:', uploadedPhotos);
         console.log('📸 uploadedPhotos.length:', uploadedPhotos.length);
         
@@ -1477,9 +1479,28 @@ document.addEventListener('DOMContentLoaded', () => {
     
     if (matchingModel) {
         console.log('🤖 AI Model found for this access code:', matchingModel.child_name);
-        // יש מודל לקוד הזה - המשך ישר לסיפור
-        showScreen('creatorScreen');
-        resetForm();
+        // 🆕 גם בכניסה חוזרת — מציגים 3 תמונות לבחירה לפני מסך הסיפור.
+        // היגיון: הבחירה היא חלק מחוויית "הילד שלי" — לא רק בחירת סגנון חד-פעמית.
+        // נוסף: אם רוצים, בעתיד אפשר לזכור את הבחירה האחרונה ולדלג עם כפתור "אותו דבר כמו קודם".
+        
+        // שמירה זמנית של שם הילד ב-bookData כדי ש-findLoraForChild ב-generateStory יעבוד
+        appState.bookData.childName = matchingModel.child_name;
+        
+        (async () => {
+            const previewApproved = await showLoraPreview(matchingModel);
+            if (previewApproved) {
+                showScreen('creatorScreen');
+                resetForm();
+                // לוודא שהשם נשאר בטופס (resetForm עשוי לנקות אותו)
+                const nameInput = document.getElementById('childName');
+                if (nameInput && !nameInput.value) {
+                    nameInput.value = matchingModel.child_name;
+                }
+            } else {
+                // ההורה ביטל - חזרה למסך הראשי / העלאה
+                showScreen('profileScreen');
+            }
+        })();
     } else {
         // אין מודל לקוד הזה - בודק אם יש אימון בתהליך
         const pendingRaw = localStorage.getItem('lilatov_training_pending');
@@ -2095,6 +2116,15 @@ async function showLoraPreview(childLora) {
                             appState.bookData.chosen_lora_scale = option.lora_scale;
                             appState.bookData.chosen_style = option.style;
                             console.log(`✅ Parent chose: style=${option.style}, seed=${option.seed}, scale=${option.lora_scale}`);
+                            // 💾 שמירה ב-localStorage כדי לשרוד רענון דף
+                            try {
+                                localStorage.setItem('lilatov_chosen_preview', JSON.stringify({
+                                    seed: option.seed,
+                                    lora_scale: option.lora_scale,
+                                    style: option.style,
+                                    chosen_at: Date.now()
+                                }));
+                            } catch (e) { console.warn('Could not save preview choice:', e); }
                             cleanup(true);
                         });
                         
