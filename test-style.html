@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <title>🧪 LoRA Style Prompt Test</title>
-<!-- Last modified by Claude: 2026-05-23 06:04 (Israel time) -->
+<!-- Last modified by Claude: 2026-05-23 09:35 (Israel time) — added lora_scale slider -->
 <style>
 body { font-family: -apple-system, sans-serif; max-width: 1100px; margin: 0 auto; padding: 2rem; background: #f5f5f0; }
 h1 { color: #C95E48; }
@@ -32,6 +32,19 @@ select { padding: 0.6rem; font-size: 1rem; border-radius: 8px; border: 1px solid
   <label style="font-weight: 700; display: block; margin-bottom: 0.4rem;">בחר LoRA לטסט:</label>
   <select id="loraSelect" onchange="updateInfo()"></select>
   <div id="loraInfo" class="info"></div>
+  
+  <hr style="border: none; border-top: 1px solid #eee; margin: 1.2rem 0;">
+  
+  <label style="font-weight: 700; display: block; margin-bottom: 0.4rem;">
+    LoRA scale: <span id="scaleValue" style="color: #C95E48;">0.7</span>
+  </label>
+  <input type="range" id="scaleSlider" min="0.4" max="1.1" step="0.05" value="0.7" 
+         style="width: 100%; max-width: 400px;" 
+         oninput="document.getElementById('scaleValue').textContent = this.value">
+  <p class="info" style="margin-top: 0.3rem;">
+    💡 ערכים נמוכים (0.4-0.7) = ה-LoRA פחות דומיננטי → סגנון איורי בולט יותר.<br>
+    גבוהים (0.9-1.1) = ה-LoRA חזק → דמיון מקסימלי לפנים אבל סגנון נחלש.
+  </p>
 </div>
 
 <div class="card">
@@ -98,6 +111,7 @@ async function runTest() {
     </div>`;
   
   try {
+    const scale = parseFloat(document.getElementById('scaleSlider').value);
     const response = await fetch(`${SERVER_URL}/api/test-style-prompts`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -105,7 +119,7 @@ async function runTest() {
         lora_url: selectedLora.lora_url,
         trigger_word: selectedLora.trigger_word,
         lora_version: selectedLora.version,
-        lora_scale: 1.0
+        lora_scale: scale
       })
     });
     
