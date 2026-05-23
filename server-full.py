@@ -4,7 +4,7 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-05-22
+Last modified by Claude: 2026-05-22 (14:30)
 Changes in this version:
   - LoRA training upgrade: steps 1000→1500, lora_rank→32, caption_dropout_rate=0.05
     (better child likeness, ~25min training instead of ~15min, ~$0.80 instead of ~$0.50)
