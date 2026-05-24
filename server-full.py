@@ -4,16 +4,17 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-05-24 19:50 (Israel time)
+Last modified by Claude: 2026-05-24 20:30 (Israel time)
 Changes in this version:
+  - 🎨 soft_illustration: חוזק עם "watercolor + hand-drawn + NOT photorealistic"
+    (היה חוזר ריאליסטי כי המילים "painterly+luminous" לא חזקות מספיק נגד LoRA)
   - 🔥 PRE-WARM DECONFLICTION: preview-options ממתין ל-pre-warm במקום להריץ במקביל
-    (מונע 6 קריאות מקבילות שגורמות ל-rate limit 429)
-  - 🔥 ERROR MESSAGES: זיהוי rate-limit + יתרה נמוכה והודעה ידידותית במקום stack trace
-  - 🔥 PRE-WARMING: ברגע שאימון מסתיים, השרת יוצר 3 פריוויו ברקע ושומר /tmp/previews/{id}.json
+  - 🔥 ERROR MESSAGES: זיהוי rate-limit + יתרה נמוכה והודעה ידידותית
+  - 🔥 PRE-WARMING: ברגע שאימון מסתיים, השרת יוצר 3 פריוויו ברקע
   - LoRA training upgrade: steps 1000→1500, lora_rank→32, caption_dropout_rate=0.05
-  - 🧪 TEMP: /api/test-style-prompts + /test-style route — endpoint לטסט פרומפטים
-  - 🔬 trigger word: "_kid" → "_subj" (ניטרלי) — מונע bias של LoRA לקונספט "ילד"
-  - 🔬 preview options: כל 3 התמונות עכשיו ב-lora_scale=1.0 (אישור: טסט 23/5)
+  - 🧪 TEMP: /api/test-style-prompts + /test-style route
+  - 🔬 trigger word: "_kid" → "_subj"
+  - 🔬 preview options: כל 3 התמונות ב-lora_scale=1.0
 """
 
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -2339,7 +2340,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 # 3 הסגנונות החדשים - צבעים חיים ועשירים
                 "warm_realistic": "high quality, detailed, warm vivid tones, rich natural colors",
                 "classic_illustration": "children's book illustration style, vibrant saturated colors, bright cheerful palette, soft lighting, detailed",
-                "soft_illustration": "soft painterly style, vivid pastel colors, bright and luminous, gentle, detailed",
+                "soft_illustration": "hand-drawn watercolor illustration, soft pastel washes, painterly, dreamy, NOT photorealistic",
                 # legacy
                 "illustration": "children's book illustration style, vibrant colors, soft lighting, detailed",
                 "watercolor": "watercolor painting, soft colors, artistic, gentle",
@@ -2395,13 +2396,16 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     )
                 },
                 # ✏️ איור רך - עדין, חלומי, painterly
+                # 🔬 24/5: חוזק עם "watercolor" + "hand-drawn" + "not photorealistic"
+                # כדי שה-LoRA הריאליסטי לא ינצח. בלי המילים האלה — FLUX מחזיר ריאליזם.
                 'soft_illustration': {
-                    'start': "a soft gentle painterly children's illustration, ",
+                    'start': "a hand-drawn watercolor children's book illustration, soft painterly storybook art, ",
                     'end': (
-                        ", dreamy soft illustration, delicate painterly style, "
-                        "luminous vivid pastel colors, bright and warm, "
-                        "gentle soft lighting, "
-                        "tender storybook art"
+                        ", traditional watercolor painting on paper, "
+                        "visible brush strokes, soft pastel washes, "
+                        "delicate hand-painted illustration, "
+                        "dreamy storybook art, NOT photorealistic, NOT a photograph, "
+                        "artistic illustration style"
                     )
                 },
             }
