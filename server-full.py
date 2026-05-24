@@ -4,8 +4,11 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-05-23 10:00 (Israel time)
+Last modified by Claude: 2026-05-23 13:00 (Israel time)
 Changes in this version:
+  - 🔥 PRE-WARMING: ברגע שאימון מסתיים, השרת יוצר 3 פריוויו ברקע ושומר /tmp/previews/{id}.json
+  - 🔥 handle_preview_options בודק cache קודם — אם יש, מחזיר מיד
+  - 🔥 חדש: training meta נשמר ב-/tmp/previews/{id}.meta.json בתחילת אימון (trigger+gender)
   - LoRA training upgrade: steps 1000→1500, lora_rank→32, caption_dropout_rate=0.05
   - 🧪 TEMP: /api/test-style-prompts + /test-style route — endpoint לטסט פרומפטים
   - 🔬 trigger word: "_kid" → "_subj" (ניטרלי) — מונע bias של LoRA לקונספט "ילד"
@@ -313,6 +316,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         🆕 יוצר 3 תמונות תצוגה מקדימה במקביל.
         כל אחת עם seed שונה + lora_scale שונה (גיוון אמיתי).
         רקע נקי - כדי שההורה יוכל לבדוק בקלות את זיהוי הילד.
+        
+        🔥 23/5: מחפש קודם cache מ-pre-warming. אם קיים — מחזיר מיד (~0 שניות).
         """
         try:
             content_length = int(self.headers['Content-Length'])
@@ -323,9 +328,37 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             lora_url = data.get('lora_url')
             trigger_word = data.get('trigger_word')
             lora_version = data.get('lora_version')
+            training_id = data.get('training_id')  # 🔥 חדש: לזיהוי cache
             
             if not lora_url or not trigger_word:
                 raise Exception('LoRA not configured for this child')
+            
+            # 🔥 PRE-WARM CACHE CHECK: אם הורה לחץ "צור 3 חדשות" — force=true מ-frontend
+            force_regenerate = data.get('force_regenerate', False)
+            if training_id and not force_regenerate:
+                import os as _os
+                cache_path = f'/tmp/previews/{training_id}.json'
+                if _os.path.exists(cache_path):
+                    try:
+                        with open(cache_path, 'r', encoding='utf-8') as _f:
+                            cached = json.load(_f)
+                        print(f"\n🔥 PRE-WARM CACHE HIT for {training_id} ({child_name})")
+                        print(f"   Returning {len(cached.get('options', []))} cached options instantly")
+                        # מוחקים את ה-cache כדי שלחיצה הבאה ("צור 3 חדשות") תייצר מחדש
+                        try:
+                            _os.remove(cache_path)
+                            print(f"   🗑️  Cache cleared for next request")
+                        except Exception:
+                            pass
+                        self.send_json_response({
+                            'success': True,
+                            'options': cached.get('options', []),
+                            'child_name': child_name,
+                            'from_cache': True  # debug info
+                        })
+                        return
+                    except Exception as _e:
+                        print(f"   ⚠️  Cache read failed, falling through: {_e}")
             
             child_gender = data.get('child_gender', 'boy')  # 🚻 מגדר - מונע החלקה מגדרית
             
@@ -2041,6 +2074,23 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             
             print(f"  ✅ Training started: {training.id}")
             
+            # 🔥 שמירת meta לקובץ — דרוש ל-pre-warming כשהאימון מסתיים.
+            # בלי זה, ב-handle_lora_status אין לנו את ה-trigger_word.
+            try:
+                import os as _os
+                _os.makedirs('/tmp/previews', exist_ok=True)
+                _meta_path = f'/tmp/previews/{training.id}.meta.json'
+                with open(_meta_path, 'w', encoding='utf-8') as _f:
+                    json.dump({
+                        'trigger_word': trigger_word,
+                        'child_name': child_name_raw,
+                        'child_gender': data.get('child_gender', 'boy'),
+                        'started_at': time.time()
+                    }, _f, ensure_ascii=False)
+                print(f"  💾 Saved training meta to {_meta_path}")
+            except Exception as _e:
+                print(f"  ⚠️  Could not save training meta (pre-warming disabled for this training): {_e}")
+            
             self.send_json_response({
                 'success': True,
                 'training_id': training.id,
@@ -2080,6 +2130,15 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 response['lora_url'] = training.output.get('weights')
                 response['version'] = training.output.get('version')
                 print(f"  ✅ Training completed!")
+                
+                # 🔥 PRE-WARMING: מתחיל לייצר 3 פריוויו ברקע ברגע שזיהינו succeeded.
+                # ההורה כנראה לוקח לפחות עוד דקה לרענן/לפתוח את הדפדפן — מספיק לסיים.
+                # פעם אחת בלבד פר training_id (ראה _prewarming_already_started).
+                self._maybe_start_prewarming(
+                    training_id=training_id,
+                    lora_url=response['lora_url'],
+                    lora_version=response['version']
+                )
             elif training.status == 'failed':
                 response['error'] = training.error
                 print(f"  ❌ Training failed: {training.error}")
@@ -2094,6 +2153,136 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 'status': 'error',
                 'error': str(e)
             }, status=500)
+    
+    def _maybe_start_prewarming(self, training_id, lora_url, lora_version):
+        """🔥 מפעיל pre-warming של 3 תמונות פריוויו ברקע.
+        משתמש בקובץ lock כדי לא להפעיל פעמיים. נשמור את התוצאה ב-/tmp/previews/.
+        """
+        import os, json, threading
+        
+        previews_dir = '/tmp/previews'
+        os.makedirs(previews_dir, exist_ok=True)
+        
+        lock_path = os.path.join(previews_dir, f'{training_id}.lock')
+        result_path = os.path.join(previews_dir, f'{training_id}.json')
+        
+        # אם התוצאה כבר קיימת — לא להתחיל שוב
+        if os.path.exists(result_path):
+            print(f"  🔥 Pre-warming: cached results already exist for {training_id}")
+            return
+        
+        # אם lock כבר תפוס (יש thread רץ) — לא להתחיל שוב
+        if os.path.exists(lock_path):
+            print(f"  🔥 Pre-warming: already in progress for {training_id} (lock exists)")
+            return
+        
+        # נדרשים trigger_word + child_gender — נטענים מהקובץ של start_training
+        meta_path = os.path.join(previews_dir, f'{training_id}.meta.json')
+        if not os.path.exists(meta_path):
+            print(f"  🔥 Pre-warming SKIP: no meta file at {meta_path} (training started before this code?)")
+            return
+        try:
+            with open(meta_path, 'r', encoding='utf-8') as f:
+                meta = json.load(f)
+        except Exception as e:
+            print(f"  🔥 Pre-warming: failed to read meta: {e}")
+            return
+        
+        trigger_word = meta.get('trigger_word')
+        child_gender = meta.get('child_gender', 'boy')
+        child_name = meta.get('child_name', '')
+        
+        if not trigger_word:
+            print(f"  🔥 Pre-warming SKIP: no trigger_word in meta")
+            return
+        
+        # יצירת lock
+        try:
+            with open(lock_path, 'w') as f:
+                f.write(str(os.getpid()))
+        except Exception as e:
+            print(f"  🔥 Pre-warming: failed to create lock: {e}")
+            return
+        
+        # רצים ברקע — לא חוסם את התגובה ל-Status
+        def prewarm():
+            try:
+                print(f"\n🔥 PRE-WARMING starting for {training_id} ({child_name})")
+                clean_scene = (
+                    "standing against a simple soft pastel background, "
+                    "plain clean background, happy smile, looking at viewer"
+                )
+                
+                import random
+                variations = [
+                    {'seed': random.randint(1, 999999), 'lora_scale': 1.0, 'style': 'warm_realistic', 'label': 'warm_realistic'},
+                    {'seed': random.randint(1, 999999), 'lora_scale': 1.0, 'style': 'classic_illustration', 'label': 'classic_illustration'},
+                    {'seed': random.randint(1, 999999), 'lora_scale': 1.0, 'style': 'soft_illustration', 'label': 'soft_illustration'},
+                ]
+                
+                results = [None, None, None]
+                
+                def generate_one(index, variation):
+                    try:
+                        img = self.generate_image_with_lora(
+                            prompt=f"medium shot, {clean_scene}",
+                            lora_url=lora_url,
+                            trigger_word=trigger_word,
+                            lora_version=lora_version,
+                            style_name=variation['style'],
+                            seed=variation['seed'],
+                            lora_scale=variation['lora_scale'],
+                            child_gender=child_gender
+                        )
+                        if img:
+                            results[index] = {
+                                'image': img,
+                                'seed': variation['seed'],
+                                'lora_scale': variation['lora_scale'],
+                                'style': variation['style'],
+                                'label': variation['label']
+                            }
+                    except Exception as e:
+                        print(f"  🔥 Pre-warm option {index+1} failed: {e}")
+                
+                threads = []
+                for i, v in enumerate(variations):
+                    t = threading.Thread(target=generate_one, args=(i, v))
+                    threads.append(t)
+                    t.start()
+                for t in threads:
+                    t.join()
+                
+                options = [r for r in results if r and r.get('image')]
+                if not options:
+                    print(f"  🔥 Pre-warming: no successful options — aborting")
+                    return
+                
+                # שמירה לקובץ
+                with open(result_path, 'w', encoding='utf-8') as f:
+                    json.dump({
+                        'training_id': training_id,
+                        'child_name': child_name,
+                        'options': options,
+                        'created_at': __import__('time').time()
+                    }, f, ensure_ascii=False)
+                
+                print(f"  🔥 Pre-warming COMPLETE: saved {len(options)} options to {result_path}")
+            
+            except Exception as e:
+                print(f"  🔥 Pre-warming THREAD ERROR: {e}")
+                import traceback
+                traceback.print_exc()
+            finally:
+                # שחרור lock
+                try:
+                    if os.path.exists(lock_path):
+                        os.remove(lock_path)
+                except Exception:
+                    pass
+        
+        threading.Thread(target=prewarm, daemon=True).start()
+        print(f"  🔥 Pre-warming thread spawned for {training_id}")
     
     def generate_image_with_lora(self, prompt, lora_url, trigger_word, style_name="illustration", lora_version=None, outfit=None, character_descriptions=None, seed=None, lora_scale=1.0, child_gender='boy'):
         """יוצר תמונה עם LoRA מאומן.
