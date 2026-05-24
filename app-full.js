@@ -1,8 +1,9 @@
 // ==========================================
 // LILATOV / לילוש טובוש - Frontend
 //
-// Last modified by Claude: 2026-05-23 13:00 (Israel time)
+// Last modified by Claude: 2026-05-24 21:00 (Israel time)
 // Changes in this version:
+//   - 🐛 FIX: childLora is not defined ב-generate-story flow (פספסתי במהדורה הקודמת)
 //   - 🔥 PRE-WARMING: שולח training_id ל-preview-options לחיפוש cache
 //   - 🔥 forceRegenerate=true כשלוחצים "צור 3 חדשות" — מבטיח תמונות חדשות
 //   - 🔥 שמירת training_id בתוך loraModel ב-localStorage
@@ -1038,6 +1039,10 @@ async function generateStory() {
     
     try {
         const aiModel = AITrainingManager.loadModel();
+        
+        // 🐛 FIX: הגדרת childLora — בלי זה הקריאות למטה זורקות "childLora is not defined".
+        // findLoraForChild מחפש ב-lora_models[] לפי שם הילד.
+        const childLora = findLoraForChild(appState.bookData.childName);
         
         console.log('📸 uploadedPhotos:', uploadedPhotos);
         console.log('📸 uploadedPhotos.length:', uploadedPhotos.length);
