@@ -4,11 +4,12 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-05-23 13:00 (Israel time)
+Last modified by Claude: 2026-05-24 19:50 (Israel time)
 Changes in this version:
+  - 🔥 PRE-WARM DECONFLICTION: preview-options ממתין ל-pre-warm במקום להריץ במקביל
+    (מונע 6 קריאות מקבילות שגורמות ל-rate limit 429)
+  - 🔥 ERROR MESSAGES: זיהוי rate-limit + יתרה נמוכה והודעה ידידותית במקום stack trace
   - 🔥 PRE-WARMING: ברגע שאימון מסתיים, השרת יוצר 3 פריוויו ברקע ושומר /tmp/previews/{id}.json
-  - 🔥 handle_preview_options בודק cache קודם — אם יש, מחזיר מיד
-  - 🔥 חדש: training meta נשמר ב-/tmp/previews/{id}.meta.json בתחילת אימון (trigger+gender)
   - LoRA training upgrade: steps 1000→1500, lora_rank→32, caption_dropout_rate=0.05
   - 🧪 TEMP: /api/test-style-prompts + /test-style route — endpoint לטסט פרומפטים
   - 🔬 trigger word: "_kid" → "_subj" (ניטרלי) — מונע bias של LoRA לקונספט "ילד"
@@ -338,6 +339,19 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             if training_id and not force_regenerate:
                 import os as _os
                 cache_path = f'/tmp/previews/{training_id}.json'
+                lock_path = f'/tmp/previews/{training_id}.lock'
+                
+                # 🔥 שיפור 23/5: אם pre-warm רץ עכשיו — נמתין עד שיסיים במקום להריץ במקביל.
+                # זה מונע 6 קריאות מקבילות (3 של pre-warm + 3 של preview-options) שגורמות ל-rate limit.
+                if _os.path.exists(lock_path) and not _os.path.exists(cache_path):
+                    print(f"\n🔥 PRE-WARM IN PROGRESS for {training_id} — waiting up to 120s...")
+                    import time as _time
+                    waited = 0
+                    while _os.path.exists(lock_path) and not _os.path.exists(cache_path) and waited < 120:
+                        _time.sleep(2)
+                        waited += 2
+                    print(f"   ⏳ Waited {waited}s for pre-warm. Cache exists: {_os.path.exists(cache_path)}")
+                
                 if _os.path.exists(cache_path):
                     try:
                         with open(cache_path, 'r', encoding='utf-8') as _f:
@@ -354,7 +368,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                             'success': True,
                             'options': cached.get('options', []),
                             'child_name': child_name,
-                            'from_cache': True  # debug info
+                            'from_cache': True
                         })
                         return
                     except Exception as _e:
@@ -392,6 +406,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # 🚀 יצירת 3 התמונות במקביל (threads)
             import threading
             results = [None, None, None]
+            errors = [None, None, None]  # 🔥 לזיהוי סוג השגיאה (rate limit, יתרה, וכו')
             
             def generate_one(index, variation):
                 try:
@@ -418,6 +433,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                     }
                 except Exception as e:
                     print(f"   ⚠️ Option {index+1} failed: {e}")
+                    errors[index] = str(e)
                     results[index] = None
             
             threads = []
@@ -434,7 +450,28 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             options = [r for r in results if r and r.get('image')]
             
             if not options:
-                raise Exception('Failed to generate any preview options')
+                # 🔥 זיהוי הסיבה השכיחה: rate limit (status 429) או חוסר יתרה
+                error_messages = [e for e in errors if e]
+                joined = ' '.join(error_messages).lower()
+                
+                if '429' in joined or 'throttled' in joined or 'rate limit' in joined:
+                    if 'less than $5' in joined or 'credit' in joined:
+                        # יתרה נמוכה ב-Replicate
+                        user_msg = ('🪙 יתרת השרת נמוכה. '
+                                    'יצירת התמונות הופסקה זמנית. '
+                                    'נסו שוב בעוד 1-2 דקות.')
+                        print(f"   💸 LOW CREDIT detected — likely needs Replicate top-up")
+                    else:
+                        # rate limit רגיל - נוסה עוד דקה
+                        user_msg = ('⏳ השרת עמוס כרגע. '
+                                    'נסו שוב בעוד דקה.')
+                        print(f"   ⏰ Rate limit detected — transient")
+                else:
+                    # שגיאה אחרת — נציג טכנית
+                    user_msg = f'שגיאה ביצירת התמונות. נסו שוב.\n(פרטים בלוגים)'
+                    print(f"   ❌ Non-rate-limit error: {error_messages[:1]}")
+                
+                raise Exception(user_msg)
             
             print(f"   ✅ {len(options)}/3 preview options ready!")
             
