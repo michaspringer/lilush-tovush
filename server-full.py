@@ -4,10 +4,13 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-05-24 20:30 (Israel time)
+Last modified by Claude: 2026-05-24 22:00 (Israel time)
 Changes in this version:
+  - 🎯 TRIGGER REINFORCEMENT: trigger_word מופיע 3× בכל פרומפט (היה 1×)
+    מונע "השכחה" של ה-LoRA בפרומפטים מורכבים → היה גורם לילד גנרי במקום הילד האמיתי
+  - 🎨 STYLE HARDENING: בלוק אנטי-ריאליסטי חוזר עבור classic/soft_illustration
+    "this is an ILLUSTRATION not a photograph" — מונע נסיגה לריאליזם בסצנות מורכבות
   - 🎨 soft_illustration: חוזק עם "watercolor + hand-drawn + NOT photorealistic"
-    (היה חוזר ריאליסטי כי המילים "painterly+luminous" לא חזקות מספיק נגד LoRA)
   - 🔥 PRE-WARM DECONFLICTION: preview-options ממתין ל-pre-warm במקום להריץ במקביל
   - 🔥 ERROR MESSAGES: זיהוי rate-limit + יתרה נמוכה והודעה ידידותית
   - 🔥 PRE-WARMING: ברגע שאימון מסתיים, השרת יוצר 3 פריוויו ברקע
@@ -2414,6 +2417,22 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             style_anchor_start = anchor['start']
             style_anchor_end = anchor['end']
             
+            # 🎨 24/5: STYLE HARDENING — תזכורת אנטי-ריאליסטית עבור סגנונות איור
+            # בפרומפטים מורכבים (סצנה עם דרקון, ים, וכו'), ה-anchor הראשי "נשכח".
+            # הוספת חיזוק שמופיע 3 פעמים בפרומפט מבטיחה שהסגנון יישמר.
+            if style_name in ('classic_illustration', 'soft_illustration'):
+                style_hardener = (
+                    " — this is an ILLUSTRATION not a photograph, "
+                    "drawn/painted art style, NOT photorealistic, NOT a real photo"
+                )
+            else:
+                style_hardener = ""
+            
+            # 🎯 24/5: TRIGGER REINFORCEMENT — ה-trigger מופיע 3 פעמים בפרומפט
+            # במקום פעם אחת. בלי זה, בפרומפטים מורכבים FLUX לפעמים "שוכח" להפעיל את ה-LoRA
+            # והתוצאה היא ילד גנרי במקום הילד האמיתי.
+            trigger_strong = f"{trigger_word}, {trigger_word}"
+            
             # 🎯 בניית הפרומפט - מבנה מובנה עם הפרדה ברורה בין דמויות
             # 🚻 מילת מגדר - מונעת "החלקה" של הילד למגדר אחר
             gender_word = "young girl" if child_gender == 'girl' else "young boy"
@@ -2424,11 +2443,11 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 # כדי שה-outfit לא "ידלוף" לכלב
                 child_block = (
                     f"ONE human {gender_word} as main character "
-                    f"({trigger_word}), the child wearing {outfit_part}, "
+                    f"({trigger_strong}), the child wearing {outfit_part}, "
                     f"detailed facial features, recognizable face"
                     if outfit_part else
                     f"ONE human {gender_word} as main character "
-                    f"({trigger_word}), detailed facial features, recognizable face"
+                    f"({trigger_strong}), detailed facial features, recognizable face"
                 )
                 # 🐕 חיזוק הדמות הנלווית: התיאור מוזכר פעמיים -
                 # פעם כהגדרה מלאה ופעם כתזכורת בסוף - כדי שה-LoRA
@@ -2453,8 +2472,9 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     f"no other kids, no children in the background, "
                     f"no human face on the animal. "
                     f"Scene: {prompt}, "
+                    f"the human child is {trigger_word}, "  # 🎯 חיזוק שלישי של trigger
                     f"{style_prompt}, {clean_composition}"
-                    f"{style_anchor_end}, "
+                    f"{style_anchor_end}{style_hardener}, "
                     f"consistent animal appearance: {char_part}, "
                     f"exactly one human child only, the animal has an animal face"
                 )
@@ -2467,12 +2487,13 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     f"exactly one child in the entire image, "
                     f"only one person, no duplicate figures, "
                     f"no second child, no twin, no other kids in the background, "
-                    f"{trigger_word}, {outfit_clause}"
+                    f"{trigger_strong}, {outfit_clause}"
                     f"detailed facial features, recognizable face, expressive eyes, "
                     f"the child is the main focus of the scene, "
                     f"{prompt}, "
+                    f"the child is {trigger_word}, "  # 🎯 חיזוק שלישי של trigger
                     f"{style_prompt}, {clean_composition}"
-                    f"{style_anchor_end}, "
+                    f"{style_anchor_end}{style_hardener}, "
                     f"exactly one human child only, single child"
                 )
             
