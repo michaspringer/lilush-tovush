@@ -1,10 +1,13 @@
 // ==========================================
 // LILATOV / לילוש טובוש - Frontend
 //
-// Last modified by Claude: 2026-05-23 12:00 (Israel time)
+// Last modified by Claude: 2026-05-23 13:00 (Israel time)
 // Changes in this version:
+//   - 🔥 PRE-WARMING: שולח training_id ל-preview-options לחיפוש cache
+//   - 🔥 forceRegenerate=true כשלוחצים "צור 3 חדשות" — מבטיח תמונות חדשות
+//   - 🔥 שמירת training_id בתוך loraModel ב-localStorage
+//   - 🔥 הודעה דינמית: "טוען את התמונות..." (cache) או "יוצר 3 תמונות..." (חדש)
 //   - 🔬 Mobile fix v2: Blob hydration trick (file.slice + arrayBuffer)
-//     מאלץ את אנדרואיד להוריד מ-Google Photos לפני הקריאה
 //   - 🔬 Mobile fix: אזהרה במודאל ההדרכה — לא לבחור מ-Google Photos
 //   - 🔬 Mobile fix: הודעת skip dialog משופרת עם פתרון ברור
 //   - 🔬 Mobile fix: retry אוטומטי ב-compressImage (Google Photos lazy refs)
@@ -715,6 +718,7 @@ async function checkTrainingStatus(trainingState) {
                 trigger_word: trainingState.trigger_word,
                 lora_url: statusData.lora_url,
                 version: statusData.version,
+                training_id: trainingState.training_id,  // 🔥 דרוש ל-pre-warm cache
                 created_at: new Date().toISOString(),
                 photo_count: trainingState.photo_count
             };
@@ -2122,7 +2126,7 @@ async function showLoraPreview(childLora) {
                     <div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 2rem;">
                         <div style="font-size: 2.5rem; margin-bottom: 1rem;">🎨</div>
                         <div style="color: #5C4A35; font-weight: 600;">יוצר 3 תמונות...</div>
-                        <div style="color: #999; font-size: 0.85rem; margin-top: 0.5rem;">60-90 שניות</div>
+                        <div style="color: #999; font-size: 0.85rem; margin-top: 0.5rem;">עד 3 דקות</div>
                     </div>
                 </div>
                 
@@ -2165,14 +2169,20 @@ async function showLoraPreview(childLora) {
             resolve(result);
         }
         
-        async function generateOptions() {
+        async function generateOptions(forceRegenerate = false) {
             document.getElementById('previewActions').style.display = 'none';
             document.getElementById('previewError').style.display = 'none';
+            
+            // 🔥 אם יש training_id והמשתמש לא לחץ "צור חדשות" — סביר שיש cache מ-pre-warming
+            const likelyFromCache = childLora.training_id && !forceRegenerate;
+            const loadingMsg = likelyFromCache ? 'טוען את התמונות...' : 'יוצר 3 תמונות...';
+            const loadingTime = likelyFromCache ? 'כמה שניות' : 'עד 3 דקות';
+            
             document.getElementById('previewOptionsContainer').innerHTML = `
                 <div style="grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; flex-direction: column; padding: 2rem;">
                     <div style="font-size: 2.5rem; margin-bottom: 1rem;">🎨</div>
-                    <div style="color: #5C4A35; font-weight: 600;">יוצר 3 תמונות...</div>
-                    <div style="color: #999; font-size: 0.85rem; margin-top: 0.5rem;">60-90 שניות</div>
+                    <div style="color: #5C4A35; font-weight: 600;">${loadingMsg}</div>
+                    <div style="color: #999; font-size: 0.85rem; margin-top: 0.5rem;">${loadingTime}</div>
                 </div>
             `;
             
@@ -2185,6 +2195,8 @@ async function showLoraPreview(childLora) {
                         lora_url: childLora.lora_url,
                         trigger_word: childLora.trigger_word,
                         lora_version: childLora.version,
+                        training_id: childLora.training_id || null,  // 🔥 ל-pre-warm cache lookup
+                        force_regenerate: forceRegenerate || false,  // 🔥 true כשלוחצים "צור 3 חדשות"
                         theme: appState.bookData.theme || 'animals',
                         child_gender: appState.bookData.childGender === 'girl' ? 'girl' : 'boy'
                     })
@@ -2271,7 +2283,8 @@ async function showLoraPreview(childLora) {
             if (e.target.id === 'previewCancel') {
                 cleanup(false);
             } else if (e.target.id === 'previewRetry') {
-                generateOptions();
+                // 🔥 "צור 3 חדשות" — תמיד יוצר חדשים, לא משתמש ב-cache
+                generateOptions(true);
             } else if (e.target.id === 'previewRetrain') {
                 // 🔁 ההורה החליט שהתמונות לא טובות ורוצה לאמן מחדש.
                 // מאשרים, מוחקים את ה-LoRA הקיים, וחוזרים ל-profileScreen.
