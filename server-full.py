@@ -1708,7 +1708,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     "height": 1024,
                     "max_sequence_length": 128,
                     "id_weight": 1,            # זהות חזק (default)
-                    "output_format": "jpg",
+                    "output_format": "webp",
                     "output_quality": 90,
                     "num_outputs": 1,
                 }
