@@ -1695,8 +1695,8 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 print(f"   🎨 Calling bytedance/flux-pulid...")
                 start_time = time.time()
                 
-                # הפרמטרים הקריטיים — לפי תיעוד Replicate:
-                # https://replicate.com/bytedance/flux-pulid
+                # הפרמטרים הקריטיים — לפי schema של Replicate:
+                # https://replicate.com/bytedance/flux-pulid/versions/8baa7ef2.../api
                 input_params = {
                     "main_face_image": ref_image_url,
                     "prompt": prompt,
@@ -1707,14 +1707,14 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     "width": 1024,
                     "height": 1024,
                     "max_sequence_length": 128,
-                    "id_weight": 1.0,          # זהות חזק (max)
+                    "id_weight": 1,            # זהות חזק (default)
                     "output_format": "jpg",
                     "output_quality": 90,
                     "num_outputs": 1,
                 }
                 
                 output = replicate.run(
-                    "bytedance/flux-pulid",
+                    "bytedance/flux-pulid:8baa7ef2255075b46f4d91cd238c21d31181b3e6a864463f967960bb0112525b",
                     input=input_params
                 )
                 
