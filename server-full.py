@@ -144,8 +144,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         elif self.path == '/styles-full.css':
             self.serve_file('styles-full.css', 'text/css')
         elif self.path == '/test-pulid' or self.path == '/test-pulid.html':
-            # 🧪 POC: דף טסט PuLID
+            # 🧪 POC: דף טסט PuLID (פרומפט בודד)
             self.serve_file('test-pulid.html', 'text/html')
+        elif self.path == '/test-pulid-preview' or self.path == '/test-pulid-preview.html':
+            # 🧪 STEP 2A: דף טסט לזרימה המלאה של PuLID (3 וריאציות)
+            self.serve_file('test-pulid-preview.html', 'text/html')
         else:
             # Try default handler
             try:
