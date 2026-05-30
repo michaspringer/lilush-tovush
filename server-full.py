@@ -4,8 +4,18 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-05-30 3322  19:00 (Israel time)
+Last modified by Claude: 2026-05-30 20:00 (Israel time)
 Changes in this version:
+  - 🆕 STEP 2A: PuLID infrastructure בשרת:
+    * handle_upload_reference (POST /api/upload-reference) — מעלה תמונת
+      רפרנס יחידה ל-Cloudinary, מחזיר URL ציבורי
+    * handle_preview_options_pulid (POST /api/preview-options-pulid) —
+      יוצר 3 וריאציות סגנון: classic_illustration, soft_illustration,
+      pixar_3d (במקום warm_realistic — PuLID חלש בריאליזם)
+    * generate_image_with_pulid (method חדש) — אנלוגי ל-generate_image_with_lora
+      אבל לזרימה החדשה. start_step אוטומטי לפי סגנון.
+    הקוד הישן של LoRA נשאר פעיל לתאימות; ה-frontend עוד לא מדבר עם
+    ה-endpoints החדשים — יעודכן בשלב 2C.
   - 🧹 STEP 1 CLEANUP: הוסרו endpoints/handlers ישנים שלא בשימוש מה-frontend:
     * handle_preview_lora (היה /api/preview-lora) — תצוגה מקדימה ישנה של LoRA
     * handle_test_style_prompts (היה /api/test-style-prompts) — דף טסט פרומפטים
@@ -179,6 +189,10 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.handle_preview_options()
         elif self.path == '/api/test-pulid':  # 🧪 POC: PuLID identity preservation
             self.handle_test_pulid()
+        elif self.path == '/api/upload-reference':  # 🆕 PuLID: upload reference image
+            self.handle_upload_reference()
+        elif self.path == '/api/preview-options-pulid':  # 🆕 PuLID: 3 style variations
+            self.handle_preview_options_pulid()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -1704,6 +1718,407 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 'success': False,
                 'error': str(e)
             }, status=500)
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 🆕 PuLID FLOW — 2A: שמירת תמונת רפרנס + יצירת 3 וריאציות סגנון
+    # ═══════════════════════════════════════════════════════════════════
+    
+    def handle_upload_reference(self):
+        """
+        🆕 PuLID: מעלה תמונת רפרנס יחידה ל-Cloudinary ומחזיר URL ציבורי.
+        
+        הזרימה: ההורה בוחר 1-3 תמונות. בשבילה הראשית הוא בוחר את
+        הטובה ביותר. רק היא נשמרת בענן ומשמשת לכל יצירת תמונה.
+        
+        מקבל: { child_name: str, child_image: base64_data_url }
+        מחזיר: { success: bool, reference_url: str }
+        """
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            child_name = data.get('child_name', 'child').strip()
+            child_image_b64 = data.get('child_image')
+            
+            if not child_image_b64:
+                raise Exception('Missing child_image (base64 data URL required)')
+            
+            # ניקוי שם — לשמירה ב-Cloudinary public_id
+            safe_name = safe_slug(child_name)
+            
+            print(f"\n📤 PuLID upload-reference for: {child_name}")
+            
+            # פיענוח base64 ושמירה לקובץ זמני
+            import base64 as _b64
+            import tempfile
+            import cloudinary.uploader
+            
+            if ',' in child_image_b64:
+                child_image_b64 = child_image_b64.split(',', 1)[1]
+            
+            img_bytes = _b64.b64decode(child_image_b64)
+            print(f"   image size: {len(img_bytes)} bytes")
+            
+            with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
+                f.write(img_bytes)
+                tmp_path = f.name
+            
+            try:
+                # העלאה ל-Cloudinary
+                print(f"   ☁️  Uploading to Cloudinary...")
+                upload_result = cloudinary.uploader.upload(
+                    tmp_path,
+                    folder="pulid_references",
+                    public_id=f"pulid_{safe_name}_{int(time.time())}",
+                    access_mode="public",
+                    overwrite=True
+                )
+                ref_url = upload_result['secure_url']
+                print(f"   ✅ Uploaded: {ref_url}")
+                
+                self.send_json_response({
+                    'success': True,
+                    'reference_url': ref_url,
+                    'child_name': child_name
+                })
+            finally:
+                try:
+                    import os as _os
+                    if _os.path.exists(tmp_path):
+                        _os.remove(tmp_path)
+                except Exception:
+                    pass
+        
+        except Exception as e:
+            print(f"   ❌ upload-reference error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+    
+    def handle_preview_options_pulid(self):
+        """
+        🆕 PuLID: יוצר 3 וריאציות סגנון של הילד.
+        
+        ההורה כבר בחר תמונת רפרנס (נשמרה ב-Cloudinary).
+        עכשיו אנחנו יוצרים 3 וריאציות כדי שיבחר את הסגנון המועדף.
+        
+        מקבל: { child_name, reference_url, child_gender }
+        מחזיר: { success, options: [ { style, seed, image_url, label } ] }
+        """
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            child_name = data.get('child_name', '').strip()
+            reference_url = data.get('reference_url', '').strip()
+            child_gender = data.get('child_gender', 'boy')
+            
+            if not reference_url:
+                raise Exception('Missing reference_url (upload reference first)')
+            
+            print(f"\n🎨 PuLID preview-options for: {child_name}")
+            print(f"   reference: {reference_url[:80]}...")
+            print(f"   gender: {child_gender}")
+            
+            # סצנה נקייה — לזיהוי מהיר של ההורה
+            # 🎯 הסתכלות לצדדים מעט עוזרת לאיורים להיראות פחות סטטיים מצילום
+            clean_scene = (
+                "standing in a simple soft pastel room, "
+                "warm cheerful expression, looking towards the viewer with a smile, "
+                "plain clean background"
+            )
+            
+            # 🎨 3 הוריאציות לבטא: 2 איורים + 3D pixar (במקום ריאליסטי)
+            # 🔬 25/5: הוכח אמפירית ש-PuLID חזק ב-start_step=0 לאיורים
+            import random
+            variations = [
+                {
+                    'style': 'classic_illustration',
+                    'label': 'classic_illustration',
+                    'seed': random.randint(1, 999999),
+                    'start_step': 0,
+                },
+                {
+                    'style': 'soft_illustration',
+                    'label': 'soft_illustration',
+                    'seed': random.randint(1, 999999),
+                    'start_step': 0,
+                },
+                {
+                    'style': 'pixar_3d',
+                    'label': 'pixar_3d',
+                    'seed': random.randint(1, 999999),
+                    'start_step': 2,
+                },
+            ]
+            
+            print(f"   variations: {[(v['style'], v['start_step']) for v in variations]}")
+            
+            # יצירת 3 התמונות במקביל
+            import threading
+            results = [None, None, None]
+            errors = [None, None, None]
+            
+            def generate_one(index, variation):
+                try:
+                    print(f"   🖼️  Option {index+1}/3 (style={variation['style']}, seed={variation['seed']})...")
+                    img = self.generate_image_with_pulid(
+                        reference_url=reference_url,
+                        prompt=clean_scene,
+                        style_name=variation['style'],
+                        seed=variation['seed'],
+                        start_step=variation['start_step'],
+                        child_gender=child_gender,
+                    )
+                    if img:
+                        results[index] = {
+                            'image': img,
+                            'seed': variation['seed'],
+                            'style': variation['style'],
+                            'label': variation['label'],
+                            'start_step': variation['start_step'],
+                        }
+                        print(f"   ✅ Option {index+1} done")
+                    else:
+                        errors[index] = 'returned None'
+                        print(f"   ❌ Option {index+1} returned None")
+                except Exception as e:
+                    errors[index] = str(e)
+                    print(f"   ❌ Option {index+1} error: {e}")
+            
+            threads = []
+            for i, v in enumerate(variations):
+                t = threading.Thread(target=generate_one, args=(i, v))
+                t.start()
+                threads.append(t)
+            for t in threads:
+                t.join()
+            
+            options = [r for r in results if r and r.get('image')]
+            print(f"   📊 Completed: {len(options)}/3 successful")
+            
+            if not options:
+                # זיהוי שגיאת rate limit / יתרה
+                err_blob = ' | '.join([e for e in errors if e]) or 'unknown'
+                if '429' in err_blob or 'rate' in err_blob.lower():
+                    raise Exception('Rate limit ב-Replicate. בדוק את היתרה (auto-reload < $5).')
+                raise Exception(f'Failed to generate any preview options. Errors: {err_blob}')
+            
+            self.send_json_response({
+                'success': True,
+                'options': options,
+                'child_name': child_name,
+                'reference_url': reference_url,
+            })
+        
+        except Exception as e:
+            print(f"   ❌ preview-options-pulid error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+    
+    def generate_image_with_pulid(
+        self,
+        reference_url,
+        prompt,
+        style_name='classic_illustration',
+        seed=None,
+        start_step=None,
+        character_descriptions=None,
+        outfit=None,
+        child_gender='boy',
+    ):
+        """
+        🆕 PuLID-Flux: יוצר תמונה יחידה עם זהות ילד מהתמונת הרפרנס.
+        
+        אנלוגי ל-generate_image_with_lora, אבל בלי צורך באימון.
+        מבוסס על ה-POC שהוכח ב-25/5 (handle_test_pulid).
+        
+        Args:
+            reference_url: URL ציבורי לתמונת הרפרנס (Cloudinary)
+            prompt: תיאור הסצנה באנגלית
+            style_name: 'classic_illustration' / 'soft_illustration' / 'pixar_3d'
+            seed: לעקביות בין עמודים — אותו seed = אותה דמות
+            start_step: 0 לסטיילים, 2 ל-3D, 4 לריאליסטי. None = לפי style.
+            character_descriptions: רשימת תיאורי דמויות נוספות (Character Bible)
+            outfit: בגדים ספציפיים (אופציונלי)
+            child_gender: 'boy' / 'girl' — לפרומפט
+        
+        Returns:
+            str: URL לתמונה שנוצרה, או None במקרה של כשל
+        """
+        if not HAS_REPLICATE:
+            print("   ❌ Replicate not configured")
+            return None
+        
+        # ────────────────────────────────────────────────────────────
+        # 1. תרגום עברית לאנגלית (PuLID לא תומך עברית)
+        # ────────────────────────────────────────────────────────────
+        if any(ord(c) > 127 for c in prompt):
+            prompt = self.translate_to_english(prompt)
+        
+        # ────────────────────────────────────────────────────────────
+        # 2. הגדרת start_step אוטומטית אם לא נשלח
+        # ────────────────────────────────────────────────────────────
+        style_to_start_step = {
+            'classic_illustration': 0,
+            'soft_illustration': 0,
+            'pixar_3d': 2,
+            'warm_realistic': 4,  # אם בכל זאת נצטרך
+        }
+        if start_step is None:
+            start_step = style_to_start_step.get(style_name, 0)
+        
+        # ────────────────────────────────────────────────────────────
+        # 3. בניית פרומפט עם style anchor
+        # 🎯 style anchors מעוגנים בתחילת + סוף הפרומפט
+        # זה הוכח אמפירית כעובד היטב (POC 25/5)
+        # ────────────────────────────────────────────────────────────
+        style_anchors = {
+            'classic_illustration': {
+                'start': "a classic children's book illustration, ",
+                'end': (
+                    ", traditional storybook illustration art, "
+                    "vibrant rich colors, bright cheerful palette, "
+                    "clean illustration style, professional children's book art"
+                ),
+                'hardener': (
+                    " — this is an ILLUSTRATION not a photograph, "
+                    "drawn/painted art style, NOT photorealistic, NOT a real photo"
+                ),
+            },
+            'soft_illustration': {
+                'start': "a hand-drawn watercolor children's book illustration, soft painterly storybook art, ",
+                'end': (
+                    ", traditional watercolor painting on paper, "
+                    "visible brush strokes, soft pastel washes, "
+                    "delicate hand-painted illustration, "
+                    "dreamy storybook art, NOT photorealistic, NOT a photograph, "
+                    "artistic illustration style"
+                ),
+                'hardener': (
+                    " — this is a WATERCOLOR ILLUSTRATION not a photograph, "
+                    "painted on paper, NOT photorealistic"
+                ),
+            },
+            'pixar_3d': {
+                'start': "a 3D animated movie still in Pixar/Disney style, ",
+                'end': (
+                    ", 3D rendered animation, cinematic lighting, "
+                    "stylized 3D character, animated movie art style, "
+                    "smooth 3D textures, expressive animated face, "
+                    "high quality CGI animation, NOT photorealistic, NOT a real photo"
+                ),
+                'hardener': (
+                    " — this is a 3D ANIMATED scene, "
+                    "Pixar-style render, NOT a photograph"
+                ),
+            },
+        }
+        anchor = style_anchors.get(style_name, style_anchors['classic_illustration'])
+        
+        # Character Bible (אם יש)
+        char_part = ""
+        if character_descriptions:
+            char_list = ". ".join(character_descriptions)
+            char_part = char_list
+        
+        # Outfit (אם יש)
+        outfit_part = f"{outfit}" if outfit else ""
+        
+        # קומפוזיציה נקייה
+        clean_composition = (
+            "clean composition, well-framed, centered subject, "
+            "full scene visible, no cropped people, no body parts at edges"
+        )
+        
+        # 🎯 הרכבת הפרומפט הסופי:
+        # [סגנון start] + [תיאור הילד מסומן] + [סצנה] + [דמויות נוספות] + [בגדים] + [סגנון end] + [hardener]
+        # ה-token "id" מסמן ל-PuLID איפה הילד נמצא בסצנה
+        child_token = "id"  # PuLID זיהוי הילד — דרך התמונה לא דרך הטקסט
+        
+        prompt_parts = [
+            anchor['start'],
+            f"a {child_gender} child ",
+            prompt,
+        ]
+        if outfit_part:
+            prompt_parts.append(f", wearing {outfit_part}")
+        if char_part:
+            prompt_parts.append(f". {char_part}")
+        prompt_parts.append(f", {clean_composition}")
+        prompt_parts.append(anchor['end'])
+        prompt_parts.append(anchor['hardener'])
+        
+        full_prompt = "".join(prompt_parts)
+        
+        print(f"      🎨 PuLID: style={style_name}, start_step={start_step}, seed={seed}")
+        print(f"      📝 prompt: {full_prompt[:200]}...")
+        
+        # ────────────────────────────────────────────────────────────
+        # 4. קריאה ל-PuLID-Flux ב-Replicate
+        # ────────────────────────────────────────────────────────────
+        import replicate as _replicate
+        
+        input_params = {
+            "main_face_image": reference_url,
+            "prompt": full_prompt,
+            "num_steps": 20,
+            "start_step": start_step,
+            "guidance_scale": 4,
+            "true_cfg": 1,                # 1 = fake CFG (default, מנצח לפי POC)
+            "width": 1024,
+            "height": 1024,
+            "max_sequence_length": 128,
+            "id_weight": 1,
+            "output_format": "webp",
+            "output_quality": 90,
+            "num_outputs": 1,
+        }
+        if seed is not None:
+            input_params["seed"] = seed
+        
+        try:
+            start_time = time.time()
+            output = _replicate.run(
+                "bytedance/flux-pulid:8baa7ef2255075b46f4d91cd238c21d31181b3e6a864463f967960bb0112525b",
+                input=input_params
+            )
+            elapsed = time.time() - start_time
+            
+            # output הוא list / iterator / FileOutput
+            if hasattr(output, '__iter__') and not isinstance(output, str):
+                output_list = list(output)
+                result = output_list[0] if output_list else None
+            else:
+                result = output
+            
+            if not result:
+                print(f"      ❌ PuLID returned no image")
+                return None
+            
+            # FileOutput → URL string
+            if hasattr(result, 'url'):
+                result = result.url
+            
+            print(f"      ✅ PuLID done in {elapsed:.1f}s: {str(result)[:80]}...")
+            return str(result)
+        
+        except Exception as e:
+            err_str = str(e)
+            print(f"      ❌ PuLID error: {err_str}")
+            # זיהוי rate limit ל-frontend
+            if '429' in err_str or 'rate' in err_str.lower():
+                raise Exception(f'Rate limit: {err_str}')
+            return None
     
     def handle_suggest_alternative(self):
         """מציע חלופות לטקסט"""
