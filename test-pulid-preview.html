@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎨 בדיקת 3 וריאציות — לילוש טובוש</title>
+<!-- Last modified by Claude: 2026-05-30 20:30 (Israel time) -->
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: 'Heebo', -apple-system, sans-serif;
+        background: linear-gradient(135deg, #fef6e4 0%, #f9e2c4 100%);
+        min-height: 100vh;
+        padding: 2rem 1rem;
+        color: #2A2118;
+    }
+    .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 24px;
+        padding: 2rem;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    }
+    h1 {
+        text-align: center;
+        color: #C95E48;
+        margin-bottom: 0.3rem;
+    }
+    .subtitle {
+        text-align: center;
+        color: #5C4A35;
+        margin-bottom: 2rem;
+        font-size: 0.95rem;
+    }
+    .section {
+        background: #fef6e4;
+        padding: 1.5rem;
+        border-radius: 16px;
+        margin-bottom: 1.5rem;
+    }
+    .section h2 {
+        font-size: 1.1rem;
+        margin-bottom: 1rem;
+        color: #C95E48;
+    }
+    .input-row {
+        display: flex;
+        gap: 0.8rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+    }
+    .input-row label {
+        flex: 1;
+        min-width: 150px;
+    }
+    .input-row label span {
+        display: block;
+        font-size: 0.85rem;
+        color: #5C4A35;
+        margin-bottom: 0.3rem;
+    }
+    .input-row input, .input-row select {
+        width: 100%;
+        padding: 0.6rem;
+        border: 2px solid #D4A574;
+        border-radius: 8px;
+        font-family: inherit;
+        font-size: 1rem;
+        background: white;
+    }
+    .upload-area {
+        border: 3px dashed #D4A574;
+        border-radius: 16px;
+        padding: 2rem;
+        text-align: center;
+        cursor: pointer;
+        transition: background 0.2s;
+        background: white;
+    }
+    .upload-area:hover { background: #fffbf2; }
+    .upload-area.has-image {
+        padding: 1rem;
+        border-style: solid;
+        border-color: #4CAF50;
+    }
+    #refPreview {
+        max-width: 220px;
+        max-height: 220px;
+        border-radius: 12px;
+        margin: 0 auto;
+        display: block;
+    }
+    button.primary {
+        background: #C95E48;
+        color: white;
+        border: none;
+        padding: 0.9rem 2rem;
+        border-radius: 12px;
+        font-size: 1rem;
+        cursor: pointer;
+        font-family: inherit;
+        font-weight: 600;
+        transition: opacity 0.2s;
+    }
+    button.primary:hover { opacity: 0.9; }
+    button.primary:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+    .status {
+        background: #fff8e7;
+        border: 2px solid #D4A574;
+        padding: 1rem;
+        border-radius: 12px;
+        margin: 1rem 0;
+        text-align: center;
+        font-size: 0.95rem;
+    }
+    .status.success {
+        background: #e8f5e9;
+        border-color: #4CAF50;
+        color: #1b5e20;
+    }
+    .status.error {
+        background: #ffebee;
+        border-color: #e53935;
+        color: #b71c1c;
+    }
+    .results-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 1.5rem;
+        margin-top: 1rem;
+    }
+    .result-card {
+        background: white;
+        border-radius: 16px;
+        padding: 1rem;
+        border: 3px solid transparent;
+        text-align: center;
+    }
+    .result-card img {
+        width: 100%;
+        height: auto;
+        border-radius: 8px;
+        margin-bottom: 0.8rem;
+    }
+    .result-card h3 {
+        color: #C95E48;
+        margin-bottom: 0.4rem;
+        font-size: 1.05rem;
+    }
+    .result-card p {
+        font-size: 0.85rem;
+        color: #5C4A35;
+        margin-bottom: 0.3rem;
+    }
+    .result-card .meta {
+        font-size: 0.75rem;
+        color: #999;
+        font-family: monospace;
+    }
+    .timing {
+        text-align: center;
+        margin-top: 1rem;
+        color: #5C4A35;
+        font-size: 0.9rem;
+    }
+    .hidden { display: none; }
+    .ref-display {
+        margin-top: 0.5rem;
+        font-size: 0.8rem;
+        color: #777;
+        word-break: break-all;
+    }
+    .ref-display a {
+        color: #C95E48;
+    }
+    .footer-back {
+        text-align: center;
+        margin-top: 2rem;
+        font-size: 0.9rem;
+    }
+    .footer-back a {
+        color: #C95E48;
+        text-decoration: none;
+    }
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>🎨 בדיקת 3 וריאציות סגנון</h1>
+    <p class="subtitle">הזרימה החדשה: תמונה אחת → 3 סגנונות PuLID לבחירה</p>
+
+    <!-- ───── שלב 1: פרטי הילד + תמונה ───── -->
+    <div class="section">
+        <h2>1️⃣ פרטי הילד</h2>
+        <div class="input-row">
+            <label>
+                <span>שם הילד</span>
+                <input type="text" id="childName" placeholder="דולב" value="דולב">
+            </label>
+            <label>
+                <span>מגדר</span>
+                <select id="childGender">
+                    <option value="boy">ילד</option>
+                    <option value="girl">ילדה</option>
+                </select>
+            </label>
+        </div>
+
+        <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+            <input type="file" id="fileInput" accept="image/*" style="display:none">
+            <div id="uploadHint">
+                📷 לחץ להעלאת תמונה של הילד<br>
+                <small style="color:#777">תמונה ברורה, פנים גלויות, רקע פשוט</small>
+            </div>
+            <img id="refPreview" class="hidden" alt="תצוגה מקדימה">
+        </div>
+    </div>
+
+    <!-- ───── שלב 2: כפתור התחלה ───── -->
+    <div style="text-align:center; margin-bottom:1.5rem;">
+        <button class="primary" id="startBtn" onclick="run()" disabled>
+            🎨 צור 3 וריאציות סגנון
+        </button>
+    </div>
+
+    <!-- ───── שלב 3: סטטוס + תוצאות ───── -->
+    <div id="statusBox" class="hidden"></div>
+
+    <div id="referenceBox" class="section hidden">
+        <h2>📤 תמונת רפרנס שנשמרה</h2>
+        <p class="ref-display">URL ציבורי: <a id="refUrlLink" href="#" target="_blank"></a></p>
+    </div>
+
+    <div id="resultsSection" class="section hidden">
+        <h2>🎨 3 הוריאציות שנוצרו</h2>
+        <div class="results-grid" id="resultsGrid"></div>
+        <p class="timing" id="timingInfo"></p>
+    </div>
+
+    <div class="footer-back">
+        <a href="/test-pulid">← לדף ה-POC הישן (פרומפט בודד)</a> · 
+        <a href="/app">לאפליקציה הראשית →</a>
+    </div>
+</div>
+
+<script>
+    // ───── State ─────
+    let refImageBase64 = null;
+    let referenceUrl = null;
+    
+    // ───── העלאת תמונה ─────
+    const fileInput = document.getElementById('fileInput');
+    const uploadArea = document.getElementById('uploadArea');
+    const refPreview = document.getElementById('refPreview');
+    const uploadHint = document.getElementById('uploadHint');
+    const startBtn = document.getElementById('startBtn');
+    
+    fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        // המרה ל-base64
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            refImageBase64 = ev.target.result;
+            refPreview.src = refImageBase64;
+            refPreview.classList.remove('hidden');
+            uploadHint.style.display = 'none';
+            uploadArea.classList.add('has-image');
+            startBtn.disabled = false;
+        };
+        reader.readAsDataURL(file);
+    });
+    
+    // ───── הצגת סטטוס ─────
+    function showStatus(message, type = 'info') {
+        const box = document.getElementById('statusBox');
+        box.className = 'status ' + (type === 'success' ? 'success' : type === 'error' ? 'error' : '');
+        box.classList.remove('hidden');
+        box.textContent = message;
+    }
+    
+    function hideStatus() {
+        document.getElementById('statusBox').classList.add('hidden');
+    }
+    
+    // ───── הזרימה המלאה ─────
+    async function run() {
+        const childName = document.getElementById('childName').value.trim() || 'child';
+        const childGender = document.getElementById('childGender').value;
+        
+        if (!refImageBase64) {
+            alert('נא להעלות תמונה');
+            return;
+        }
+        
+        startBtn.disabled = true;
+        document.getElementById('referenceBox').classList.add('hidden');
+        document.getElementById('resultsSection').classList.add('hidden');
+        
+        const totalStart = Date.now();
+        
+        try {
+            // ───── שלב 1: העלאת תמונת רפרנס ─────
+            showStatus('⏳ שלב 1/2: מעלה תמונת רפרנס ל-Cloudinary...');
+            
+            const uploadResp = await fetch('/api/upload-reference', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    child_name: childName,
+                    child_image: refImageBase64
+                })
+            });
+            
+            const uploadData = await uploadResp.json();
+            if (!uploadData.success) {
+                throw new Error('Upload failed: ' + (uploadData.error || 'unknown'));
+            }
+            
+            referenceUrl = uploadData.reference_url;
+            
+            // הצגת ה-URL
+            const link = document.getElementById('refUrlLink');
+            link.href = referenceUrl;
+            link.textContent = referenceUrl;
+            document.getElementById('referenceBox').classList.remove('hidden');
+            
+            // ───── שלב 2: יצירת 3 וריאציות ─────
+            showStatus('⏳ שלב 2/2: מייצר 3 וריאציות סגנון... (כ-15-30 שניות, רץ במקביל)');
+            
+            const previewResp = await fetch('/api/preview-options-pulid', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    child_name: childName,
+                    reference_url: referenceUrl,
+                    child_gender: childGender
+                })
+            });
+            
+            const previewData = await previewResp.json();
+            if (!previewData.success) {
+                throw new Error('Preview failed: ' + (previewData.error || 'unknown'));
+            }
+            
+            const totalElapsed = ((Date.now() - totalStart) / 1000).toFixed(1);
+            
+            // ───── תצוגת התוצאות ─────
+            const styleNames = {
+                'classic_illustration': '🎨 איור קלאסי',
+                'soft_illustration': '✏️ איור רך (Watercolor)',
+                'pixar_3d': '🎬 3D פיקסר'
+            };
+            
+            const grid = document.getElementById('resultsGrid');
+            grid.innerHTML = '';
+            
+            previewData.options.forEach(opt => {
+                const card = document.createElement('div');
+                card.className = 'result-card';
+                card.innerHTML = `
+                    <img src="${opt.image}" alt="${opt.style}">
+                    <h3>${styleNames[opt.style] || opt.style}</h3>
+                    <p>סגנון: ${opt.style}</p>
+                    <p class="meta">seed: ${opt.seed} · start_step: ${opt.start_step}</p>
+                `;
+                grid.appendChild(card);
+            });
+            
+            document.getElementById('timingInfo').textContent = 
+                `⏱️ סה״כ זמן: ${totalElapsed} שניות · עלות: ~$${(0.021 * previewData.options.length).toFixed(3)}`;
+            
+            document.getElementById('resultsSection').classList.remove('hidden');
+            showStatus(`✅ הצלחה! ${previewData.options.length}/3 וריאציות נוצרו ב-${totalElapsed}s`, 'success');
+            
+        } catch (err) {
+            console.error('Error:', err);
+            showStatus('❌ שגיאה: ' + err.message, 'error');
+        } finally {
+            startBtn.disabled = false;
+        }
+    }
+</script>
+</body>
+</html>
