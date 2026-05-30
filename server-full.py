@@ -4,7 +4,7 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-05-30 19:00 (Israel time)
+Last modified by Claude: 2026-05-30   19:00 (Israel time)
 Changes in this version:
   - 🧹 STEP 1 CLEANUP: הוסרו endpoints/handlers ישנים שלא בשימוש מה-frontend:
     * handle_preview_lora (היה /api/preview-lora) — תצוגה מקדימה ישנה של LoRA
