@@ -191,7 +191,7 @@
 <body>
 <div class="container">
     <h1>🎨 בדיקת 3 וריאציות סגנון</h1>
-    <p class="subtitle">הזרימה החדשה: תמונה אחת → 3 סגנונות PuLID לבחירה</p>
+    <p class="subtitle">הזרימה החדשה: תמונה אחת → 4 סגנונות PuLID לבחירה</p>
 
     <!-- ───── שלב 1: פרטי הילד + תמונה ───── -->
     <div class="section">
@@ -223,7 +223,7 @@
     <!-- ───── שלב 2: כפתור התחלה ───── -->
     <div style="text-align:center; margin-bottom:1.5rem;">
         <button class="primary" id="startBtn" onclick="run()" disabled>
-            🎨 צור 3 וריאציות סגנון
+            🎨 צור 4 וריאציות סגנון
         </button>
     </div>
 
@@ -236,7 +236,7 @@
     </div>
 
     <div id="resultsSection" class="section hidden">
-        <h2>🎨 3 הוריאציות שנוצרו</h2>
+        <h2>🎨 4 הוריאציות שנוצרו</h2>
         <div class="results-grid" id="resultsGrid"></div>
         <p class="timing" id="timingInfo"></p>
     </div>
@@ -331,7 +331,7 @@
             document.getElementById('referenceBox').classList.remove('hidden');
             
             // ───── שלב 2: יצירת 3 וריאציות ─────
-            showStatus('⏳ שלב 2/2: מייצר 3 וריאציות סגנון... (כ-15-30 שניות, רץ במקביל)');
+            showStatus('⏳ שלב 2/2: מייצר 4 וריאציות סגנון... (כ-15-30 שניות, רץ במקביל)');
             
             const previewResp = await fetch('/api/preview-options-pulid', {
                 method: 'POST',
@@ -354,7 +354,8 @@
             const styleNames = {
                 'classic_illustration': '🎨 איור קלאסי',
                 'soft_illustration': '✏️ איור רך (Watercolor)',
-                'pixar_3d': '🎬 3D פיקסר'
+                'pixar_3d': '🎬 3D פיקסר',
+                'warm_realistic': '📷 ריאליסטי (צילום)'
             };
             
             const grid = document.getElementById('resultsGrid');
@@ -376,7 +377,7 @@
                 `⏱️ סה״כ זמן: ${totalElapsed} שניות · עלות: ~$${(0.021 * previewData.options.length).toFixed(3)}`;
             
             document.getElementById('resultsSection').classList.remove('hidden');
-            showStatus(`✅ הצלחה! ${previewData.options.length}/3 וריאציות נוצרו ב-${totalElapsed}s`, 'success');
+            showStatus(`✅ הצלחה! ${previewData.options.length}/4 וריאציות נוצרו ב-${totalElapsed}s`, 'success');
             
         } catch (err) {
             console.error('Error:', err);
