@@ -4,8 +4,12 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-05-30 20:00 (Israel time)
+Last modified by Claude: 2026-05-30 21:00 (Israel time)
 Changes in this version:
+  - 🔧 STEP 2A.1: בדיקת ריאליסטי שוב (בעקבות פידבק שדולב חסר ריאליסטי)
+    * הוסף warm_realistic ל-style_anchors ב-generate_image_with_pulid
+    * preview-options-pulid עכשיו מחזיר 4 וריאציות במקום 3
+    * המטרה: לראות אם start_step=4 לריאליסטי שומר על זיהוי טוב
   - 🆕 STEP 2A: PuLID infrastructure בשרת:
     * handle_upload_reference (POST /api/upload-reference) — מעלה תמונת
       רפרנס יחידה ל-Cloudinary, מחזיר URL ציבורי
@@ -1836,8 +1840,9 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 "plain clean background"
             )
             
-            # 🎨 3 הוריאציות לבטא: 2 איורים + 3D pixar (במקום ריאליסטי)
-            # 🔬 25/5: הוכח אמפירית ש-PuLID חזק ב-start_step=0 לאיורים
+            # 🎨 4 וריאציות לבדיקה: 2 איורים + 3D pixar + ריאליסטי
+            # 🔬 25/5: PuLID חזק ב-start_step=0 לאיורים
+            # 🔬 30/5: בודקים שוב ריאליסטי כי המוצר צריך זאת
             import random
             variations = [
                 {
@@ -1858,18 +1863,24 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     'seed': random.randint(1, 999999),
                     'start_step': 2,
                 },
+                {
+                    'style': 'warm_realistic',
+                    'label': 'warm_realistic',
+                    'seed': random.randint(1, 999999),
+                    'start_step': 4,
+                },
             ]
             
             print(f"   variations: {[(v['style'], v['start_step']) for v in variations]}")
             
-            # יצירת 3 התמונות במקביל
+            # יצירת 4 התמונות במקביל
             import threading
-            results = [None, None, None]
-            errors = [None, None, None]
+            results = [None, None, None, None]
+            errors = [None, None, None, None]
             
             def generate_one(index, variation):
                 try:
-                    print(f"   🖼️  Option {index+1}/3 (style={variation['style']}, seed={variation['seed']})...")
+                    print(f"   🖼️  Option {index+1}/4 (style={variation['style']}, seed={variation['seed']})...")
                     img = self.generate_image_with_pulid(
                         reference_url=reference_url,
                         prompt=clean_scene,
@@ -1903,7 +1914,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 t.join()
             
             options = [r for r in results if r and r.get('image')]
-            print(f"   📊 Completed: {len(options)}/3 successful")
+            print(f"   📊 Completed: {len(options)}/4 successful")
             
             if not options:
                 # זיהוי שגיאת rate limit / יתרה
@@ -2023,6 +2034,19 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 'hardener': (
                     " — this is a 3D ANIMATED scene, "
                     "Pixar-style render, NOT a photograph"
+                ),
+            },
+            'warm_realistic': {
+                'start': "a realistic photograph, professional portrait photography, ",
+                'end': (
+                    ", photorealistic, natural skin texture, realistic lighting, "
+                    "shot on DSLR camera, sharp focus, lifelike, "
+                    "real photograph quality, warm natural tones, "
+                    "detailed facial features, authentic"
+                ),
+                'hardener': (
+                    " — this is a REAL PHOTOGRAPH, "
+                    "shot with a camera, NOT a drawing, NOT an illustration"
                 ),
             },
         }
