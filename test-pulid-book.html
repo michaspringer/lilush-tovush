@@ -1,0 +1,625 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📖 בדיקת ספר מלא — לילוש טובוש</title>
+<!--
+    Last modified by Claude: 2026-06-06 20:00 (Israel time)
+    
+    Purpose:
+    A standalone test page that walks through the full PuLID flow end-to-end:
+      1. Parent uploads a single reference photo
+      2. PuLID generates 4 style variations
+      3. Parent picks a style (this locks the seed for the whole book)
+      4. Parent fills in story details (child name, theme, age)
+      5. Server generates a full 8-page book via /api/generate-story
+      6. All 8 pages are displayed with their text + image
+    
+    This page exists to validate Step 2B (PuLID in add_images_to_story)
+    BEFORE we touch the main app UI in Step 2C.
+-->
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    
+    body {
+        font-family: 'Heebo', -apple-system, sans-serif;
+        background: linear-gradient(135deg, #fef6e4 0%, #f9e2c4 100%);
+        min-height: 100vh;
+        padding: 2rem 1rem;
+        color: #2A2118;
+    }
+    
+    .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 24px;
+        padding: 2rem;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    }
+    
+    h1 {
+        text-align: center;
+        color: #C95E48;
+        margin-bottom: 0.3rem;
+    }
+    
+    .subtitle {
+        text-align: center;
+        color: #5C4A35;
+        margin-bottom: 2rem;
+        font-size: 0.95rem;
+    }
+    
+    .step {
+        background: #fef6e4;
+        padding: 1.5rem;
+        border-radius: 16px;
+        margin-bottom: 1.5rem;
+        opacity: 0.6;
+        transition: opacity 0.3s;
+    }
+    
+    .step.active { opacity: 1; }
+    .step.done { opacity: 0.9; background: #e8f5e9; }
+    
+    .step h2 {
+        font-size: 1.1rem;
+        margin-bottom: 1rem;
+        color: #C95E48;
+    }
+    
+    .input-row {
+        display: flex;
+        gap: 0.8rem;
+        margin-bottom: 1rem;
+        flex-wrap: wrap;
+    }
+    
+    .input-row label {
+        flex: 1;
+        min-width: 150px;
+    }
+    
+    .input-row label span {
+        display: block;
+        font-size: 0.85rem;
+        color: #5C4A35;
+        margin-bottom: 0.3rem;
+    }
+    
+    .input-row input,
+    .input-row select,
+    .input-row textarea {
+        width: 100%;
+        padding: 0.6rem;
+        border: 2px solid #D4A574;
+        border-radius: 8px;
+        font-family: inherit;
+        font-size: 1rem;
+        background: white;
+    }
+    
+    .input-row textarea {
+        min-height: 80px;
+        resize: vertical;
+    }
+    
+    .upload-area {
+        border: 3px dashed #D4A574;
+        border-radius: 16px;
+        padding: 2rem;
+        text-align: center;
+        cursor: pointer;
+        transition: background 0.2s;
+        background: white;
+    }
+    
+    .upload-area:hover { background: #fffbf2; }
+    .upload-area.has-image { padding: 1rem; border-style: solid; border-color: #4CAF50; }
+    
+    #refPreview {
+        max-width: 220px;
+        max-height: 220px;
+        border-radius: 12px;
+        margin: 0 auto;
+        display: block;
+    }
+    
+    button.primary {
+        background: #C95E48;
+        color: white;
+        border: none;
+        padding: 0.9rem 2rem;
+        border-radius: 12px;
+        font-size: 1rem;
+        cursor: pointer;
+        font-family: inherit;
+        font-weight: 600;
+        transition: opacity 0.2s;
+        margin: 0 auto;
+        display: block;
+    }
+    
+    button.primary:hover { opacity: 0.9; }
+    button.primary:disabled { opacity: 0.4; cursor: not-allowed; }
+    
+    .status {
+        background: #fff8e7;
+        border: 2px solid #D4A574;
+        padding: 1rem;
+        border-radius: 12px;
+        margin: 1rem 0;
+        text-align: center;
+        font-size: 0.95rem;
+    }
+    
+    .status.success { background: #e8f5e9; border-color: #4CAF50; color: #1b5e20; }
+    .status.error { background: #ffebee; border-color: #e53935; color: #b71c1c; }
+    
+    .results-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+    
+    .style-card {
+        background: white;
+        border-radius: 16px;
+        padding: 0.8rem;
+        border: 3px solid transparent;
+        cursor: pointer;
+        text-align: center;
+        transition: transform 0.15s, border-color 0.15s;
+    }
+    
+    .style-card:hover { transform: translateY(-2px); }
+    .style-card.selected { border-color: #4CAF50; background: #e8f5e9; }
+    
+    .style-card img {
+        width: 100%;
+        height: auto;
+        border-radius: 8px;
+        margin-bottom: 0.5rem;
+    }
+    
+    .style-card h3 {
+        color: #C95E48;
+        font-size: 0.95rem;
+        margin-bottom: 0.2rem;
+    }
+    
+    .style-card .meta {
+        font-size: 0.7rem;
+        color: #999;
+        font-family: monospace;
+    }
+    
+    .pages-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1.5rem;
+        margin-top: 1rem;
+    }
+    
+    @media (max-width: 700px) {
+        .pages-grid { grid-template-columns: 1fr; }
+    }
+    
+    .page-card {
+        background: white;
+        border-radius: 16px;
+        padding: 1rem;
+        border: 1px solid #D4A574;
+    }
+    
+    .page-card img {
+        width: 100%;
+        height: auto;
+        border-radius: 12px;
+        margin-bottom: 0.8rem;
+    }
+    
+    .page-card .page-num {
+        background: #C95E48;
+        color: white;
+        display: inline-block;
+        padding: 0.2rem 0.6rem;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .page-card .page-text {
+        font-size: 1rem;
+        color: #2A2118;
+        line-height: 1.5;
+    }
+    
+    .timing {
+        text-align: center;
+        margin-top: 1rem;
+        color: #5C4A35;
+        font-size: 0.9rem;
+    }
+    
+    .hidden { display: none; }
+    
+    .footer-back {
+        text-align: center;
+        margin-top: 2rem;
+        font-size: 0.9rem;
+    }
+    
+    .footer-back a {
+        color: #C95E48;
+        text-decoration: none;
+        margin: 0 0.5rem;
+    }
+    
+    .progress-msg {
+        background: #fff8e7;
+        border-radius: 12px;
+        padding: 1rem;
+        text-align: center;
+        margin-top: 1rem;
+        font-size: 0.9rem;
+        color: #5C4A35;
+    }
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>📖 בדיקת ספר מלא</h1>
+    <p class="subtitle">הזרימה המלאה: תמונה → סגנון → ספר 8 עמודים</p>
+
+    <!-- ───── שלב 1: פרטי הילד + תמונה ───── -->
+    <div class="step active" id="step1">
+        <h2>1️⃣ פרטי הילד ותמונת רפרנס</h2>
+        <div class="input-row">
+            <label>
+                <span>שם הילד</span>
+                <input type="text" id="childName" placeholder="דולב" value="דולב">
+            </label>
+            <label>
+                <span>קבוצת גיל</span>
+                <select id="childAge">
+                    <option value="0-2">0-2</option>
+                    <option value="3-5" selected>3-5</option>
+                    <option value="6-8">6-8</option>
+                    <option value="9-12">9-12</option>
+                </select>
+            </label>
+            <label>
+                <span>מגדר</span>
+                <select id="childGender">
+                    <option value="boy">ילד</option>
+                    <option value="girl">ילדה</option>
+                </select>
+            </label>
+        </div>
+
+        <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+            <input type="file" id="fileInput" accept="image/*" style="display:none">
+            <div id="uploadHint">
+                📷 לחץ להעלאת תמונה של הילד
+                <br>
+                <small style="color:#777">פנים מקרוב, עיניים פתוחות וברורות, אור על הפנים</small>
+            </div>
+            <img id="refPreview" class="hidden" alt="">
+        </div>
+
+        <button class="primary" id="btnStep1" onclick="step1_run()" disabled style="margin-top:1rem">
+            צור 4 וריאציות סגנון →
+        </button>
+    </div>
+
+    <!-- ───── שלב 2: בחירת סגנון ───── -->
+    <div class="step" id="step2">
+        <h2>2️⃣ בחר סגנון לספר</h2>
+        <div id="step2Status"></div>
+        <div class="results-grid" id="stylesGrid"></div>
+        <button class="primary" id="btnStep2" onclick="step2_run()" disabled style="margin-top:1rem">
+            כתוב ספר עם הסגנון הזה →
+        </button>
+    </div>
+
+    <!-- ───── שלב 3: פרטי הסיפור ───── -->
+    <div class="step" id="step3">
+        <h2>3️⃣ פרטי הסיפור</h2>
+        <div class="input-row">
+            <label>
+                <span>נושא הסיפור</span>
+                <select id="storyTheme">
+                    <option value="animals">חיות וטבע</option>
+                    <option value="family">משפחה ואהבה</option>
+                    <option value="space">חלל וכוכבים</option>
+                    <option value="magic">קסם ופנטזיה</option>
+                </select>
+            </label>
+            <label>
+                <span>פרטים נוספים (אופציונלי)</span>
+                <input type="text" id="storyCustom" placeholder="למשל: עם דרקון ידידותי">
+            </label>
+        </div>
+        <div class="progress-msg" id="step3Progress" style="display:none"></div>
+    </div>
+
+    <!-- ───── שלב 4: תצוגת הספר ───── -->
+    <div class="step" id="step4">
+        <h2>4️⃣ הספר המוכן</h2>
+        <div id="step4Status"></div>
+        <div class="pages-grid" id="pagesGrid"></div>
+        <p class="timing" id="totalTiming"></p>
+    </div>
+
+    <div class="footer-back">
+        <a href="/test-pulid-preview">← דף הוריאציות</a>
+        <a href="/test-pulid">דף POC הישן</a>
+        <a href="/app">אפליקציה ראשית →</a>
+    </div>
+</div>
+
+<script>
+    // ════════════════════════════════════════════════════════════════
+    // State
+    // ════════════════════════════════════════════════════════════════
+    let refImageBase64 = null;
+    let referenceUrl = null;
+    let styleOptions = [];
+    let selectedStyle = null;  // { style, seed, image, ... }
+    let bookStartTime = null;
+    
+    // ════════════════════════════════════════════════════════════════
+    // העלאת תמונה
+    // ════════════════════════════════════════════════════════════════
+    const fileInput = document.getElementById('fileInput');
+    const uploadArea = document.getElementById('uploadArea');
+    const refPreview = document.getElementById('refPreview');
+    const uploadHint = document.getElementById('uploadHint');
+    const btnStep1 = document.getElementById('btnStep1');
+    
+    fileInput.addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            refImageBase64 = ev.target.result;
+            refPreview.src = refImageBase64;
+            refPreview.classList.remove('hidden');
+            uploadHint.style.display = 'none';
+            uploadArea.classList.add('has-image');
+            btnStep1.disabled = false;
+        };
+        reader.readAsDataURL(file);
+    });
+    
+    // ════════════════════════════════════════════════════════════════
+    // Utils
+    // ════════════════════════════════════════════════════════════════
+    function showStatusIn(elementId, message, type = 'info') {
+        const box = document.getElementById(elementId);
+        box.innerHTML = '<div class="status ' + 
+            (type === 'success' ? 'success' : type === 'error' ? 'error' : '') + 
+            '">' + message + '</div>';
+    }
+    
+    function activateStep(num) {
+        for (let i = 1; i <= 4; i++) {
+            const el = document.getElementById('step' + i);
+            if (i < num) {
+                el.classList.remove('active');
+                el.classList.add('done');
+            } else if (i === num) {
+                el.classList.add('active');
+                el.classList.remove('done');
+            } else {
+                el.classList.remove('active', 'done');
+            }
+        }
+        document.getElementById('step' + num).scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+    
+    // ════════════════════════════════════════════════════════════════
+    // שלב 1: העלאת תמונה + יצירת 4 וריאציות
+    // ════════════════════════════════════════════════════════════════
+    async function step1_run() {
+        const childName = document.getElementById('childName').value.trim() || 'child';
+        const childGender = document.getElementById('childGender').value;
+        
+        if (!refImageBase64) {
+            alert('נא להעלות תמונה');
+            return;
+        }
+        
+        btnStep1.disabled = true;
+        activateStep(2);
+        showStatusIn('step2Status', '⏳ מעלה תמונה ל-Cloudinary...');
+        
+        try {
+            // העלאת תמונת רפרנס
+            const uploadResp = await fetch('/api/upload-reference', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    child_name: childName,
+                    child_image: refImageBase64
+                })
+            });
+            const uploadData = await uploadResp.json();
+            if (!uploadData.success) {
+                throw new Error('Upload failed: ' + (uploadData.error || 'unknown'));
+            }
+            referenceUrl = uploadData.reference_url;
+            
+            showStatusIn('step2Status', '⏳ יוצר 4 וריאציות סגנון... (~30-50 שניות)');
+            
+            // יצירת 4 וריאציות
+            const previewResp = await fetch('/api/preview-options-pulid', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    child_name: childName,
+                    reference_url: referenceUrl,
+                    child_gender: childGender
+                })
+            });
+            const previewData = await previewResp.json();
+            if (!previewData.success) {
+                throw new Error('Preview failed: ' + (previewData.error || 'unknown'));
+            }
+            
+            styleOptions = previewData.options;
+            
+            // הצגת הוריאציות
+            const styleLabels = {
+                'classic_illustration': '🎨 איור קלאסי',
+                'soft_illustration': '✏️ איור רך',
+                'pixar_3d': '🎬 3D פיקסר',
+                'warm_realistic': '📷 ריאליסטי'
+            };
+            
+            const grid = document.getElementById('stylesGrid');
+            grid.innerHTML = '';
+            styleOptions.forEach((opt, idx) => {
+                const card = document.createElement('div');
+                card.className = 'style-card';
+                card.onclick = () => selectStyle(idx);
+                card.innerHTML = 
+                    '<img src="' + opt.image + '" alt="">' +
+                    '<h3>' + (styleLabels[opt.style] || opt.style) + '</h3>' +
+                    '<p class="meta">seed: ' + opt.seed + '</p>';
+                grid.appendChild(card);
+            });
+            
+            showStatusIn('step2Status', '✅ ' + styleOptions.length + ' וריאציות מוכנות — בחר אחת', 'success');
+            
+        } catch (err) {
+            console.error(err);
+            showStatusIn('step2Status', '❌ שגיאה: ' + err.message, 'error');
+            btnStep1.disabled = false;
+        }
+    }
+    
+    // ════════════════════════════════════════════════════════════════
+    // שלב 2: בחירת סגנון
+    // ════════════════════════════════════════════════════════════════
+    function selectStyle(idx) {
+        selectedStyle = styleOptions[idx];
+        document.querySelectorAll('.style-card').forEach((card, i) => {
+            card.classList.toggle('selected', i === idx);
+        });
+        document.getElementById('btnStep2').disabled = false;
+    }
+    
+    async function step2_run() {
+        if (!selectedStyle) {
+            alert('נא לבחור סגנון');
+            return;
+        }
+        document.getElementById('btnStep2').disabled = true;
+        activateStep(3);
+        
+        // קצר השהייה כדי שהמשתמש יראה את המעבר, ואז יוצר ספר אוטומטית
+        setTimeout(() => step3_run(), 600);
+    }
+    
+    // ════════════════════════════════════════════════════════════════
+    // שלב 3 + 4: יצירת ספר + תצוגה
+    // ════════════════════════════════════════════════════════════════
+    async function step3_run() {
+        const childName = document.getElementById('childName').value.trim() || 'child';
+        const childAge = document.getElementById('childAge').value;  // range string: '0-2' / '3-5' / '6-8' / '9-12'
+        const childGender = document.getElementById('childGender').value;
+        const theme = document.getElementById('storyTheme').value;
+        const customInput = document.getElementById('storyCustom').value.trim();
+        
+        // הצגת progress
+        const progressEl = document.getElementById('step3Progress');
+        progressEl.style.display = 'block';
+        progressEl.innerHTML = 
+            '⏳ <strong>יוצר ספר 8 עמודים מלא...</strong><br>' +
+            '<small>זה לוקח כ-2-3 דקות. Claude כותב את הסיפור, ואז PuLID יוצר 8 תמונות.</small>';
+        
+        bookStartTime = Date.now();
+        activateStep(4);
+        showStatusIn('step4Status', '⏳ ממתין לסיפור...');
+        
+        try {
+            const requestBody = {
+                childName: childName,
+                childAge: childAge,
+                childGender: childGender,
+                theme: theme,
+                customInput: customInput || '',
+                // 🆕 פרמטרי PuLID
+                reference_url: referenceUrl,
+                chosen_seed: selectedStyle.seed,
+                chosen_style: selectedStyle.style
+            };
+            
+            console.log('Sending request:', requestBody);
+            
+            const resp = await fetch('/api/generate-story', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(requestBody)
+            });
+            
+            const data = await resp.json();
+            console.log('Response:', data);
+            
+            if (!data.success && !data.pages) {
+                throw new Error('Story generation failed: ' + (data.error || 'unknown'));
+            }
+            
+            const totalElapsed = ((Date.now() - bookStartTime) / 1000).toFixed(1);
+            const pages = data.pages || [];
+            const pagesWithImages = pages.filter(p => p.imageUrl).length;
+            
+            // תצוגת העמודים
+            const grid = document.getElementById('pagesGrid');
+            grid.innerHTML = '';
+            pages.forEach((page, idx) => {
+                const card = document.createElement('div');
+                card.className = 'page-card';
+                let imgHtml = '';
+                if (page.imageUrl) {
+                    imgHtml = '<img src="' + page.imageUrl + '" alt="עמוד ' + (idx+1) + '">';
+                } else {
+                    imgHtml = '<div style="background:#fff3e0;padding:2rem;border-radius:12px;text-align:center;color:#bf360c;margin-bottom:0.8rem">⚠️ תמונה לא נוצרה</div>';
+                }
+                card.innerHTML = 
+                    '<span class="page-num">עמוד ' + (idx+1) + '</span>' +
+                    imgHtml +
+                    '<p class="page-text">' + (page.text || '') + '</p>';
+                grid.appendChild(card);
+            });
+            
+            const cost = (0.021 * pagesWithImages).toFixed(3);
+            document.getElementById('totalTiming').innerHTML = 
+                '⏱️ סה״כ זמן: ' + totalElapsed + ' שניות · ' +
+                '🖼️ ' + pagesWithImages + '/' + pages.length + ' תמונות · ' +
+                '💰 עלות תמונות: ~$' + cost;
+            
+            if (pagesWithImages === pages.length) {
+                showStatusIn('step4Status', '✅ הספר מוכן! כל ' + pages.length + ' התמונות נוצרו.', 'success');
+            } else {
+                showStatusIn('step4Status', 
+                    '⚠️ הספר נוצר עם ' + pagesWithImages + '/' + pages.length + ' תמונות. ' +
+                    'חלק נכשלו (אולי rate limit). פתח DevTools לבדוק.', 'error');
+            }
+            
+            progressEl.style.display = 'none';
+            
+        } catch (err) {
+            console.error(err);
+            showStatusIn('step4Status', '❌ שגיאה: ' + err.message, 'error');
+            progressEl.style.display = 'none';
+        }
+    }
+</script>
+</body>
+</html>
