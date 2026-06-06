@@ -4,8 +4,20 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-05-30 21:00 (Israel time)
+Last modified by Claude: 2026-06-06 20:00 (Israel time)
 Changes in this version:
+  - 🧪 STEP 2B test page: routing חדש ל-/test-pulid-book
+    דף בדיקה עצמאי לזרימה המלאה: תמונה → 4 וריאציות → בחירה → ספר 8 עמודים
+    מאמת ש-handle_generate_story + add_images_to_story עובדים נכון עם PuLID
+    לפני שנוגעים ב-UI הראשי בשלב 2C.
+    הוראות Character Bible חלות עכשיו גם על PuLID (use_identity_model).
+  - 🆕 STEP 2B: handle_generate_story + add_images_to_story תומכים ב-PuLID
+    * חדש: handle_generate_story מקבל reference_url מהבקשה
+    * חדש: סדר עדיפות מסלולים: PuLID > LoRA > FLUX face swap > FLUX
+    * outfit נבחר גם ל-PuLID (לעקביות בין עמודים)
+    * Throttle 5s ב-PuLID (קל יותר מ-12s של LoRA)
+    * הזרימה הישנה של LoRA נשארת פעילה לתאימות
+    * ה-frontend עוד לא מעביר reference_url — יבוצע בשלב 2C
   - 🔧 STEP 2A.1: בדיקת ריאליסטי שוב (בעקבות פידבק שדולב חסר ריאליסטי)
     * הוסף warm_realistic ל-style_anchors ב-generate_image_with_pulid
     * preview-options-pulid עכשיו מחזיר 4 וריאציות במקום 3
@@ -151,8 +163,11 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # 🧪 POC: דף טסט PuLID (פרומפט בודד)
             self.serve_file('test-pulid.html', 'text/html')
         elif self.path == '/test-pulid-preview' or self.path == '/test-pulid-preview.html':
-            # 🧪 STEP 2A: דף טסט לזרימה המלאה של PuLID (3 וריאציות)
+            # 🧪 STEP 2A: דף טסט לזרימה המלאה של PuLID (4 וריאציות סגנון)
             self.serve_file('test-pulid-preview.html', 'text/html')
+        elif self.path == '/test-pulid-book' or self.path == '/test-pulid-book.html':
+            # 🧪 STEP 2B: דף טסט לספר 8 עמודים מלא עם PuLID
+            self.serve_file('test-pulid-book.html', 'text/html')
         else:
             # Try default handler
             try:
@@ -222,6 +237,10 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             lora_version = request_data.get('lora_version')  # 🆕 NEW: trained model version
             use_lora = request_data.get('use_lora', False) and lora_url and trigger_word
             
+            # 🆕 PuLID parameters (החדש — מחליף LoRA בזרימה הראשית)
+            reference_url = request_data.get('reference_url')  # תמונת רפרנס מ-Cloudinary
+            use_pulid = reference_url is not None and not use_lora  # PuLID לא רץ במקביל ל-LoRA
+            
             # 🎲 NEW: chosen seed - ה-seed שההורה בחר בתצוגה המקדימה
             chosen_seed = request_data.get('chosen_seed')
             # 💪 NEW: chosen lora_scale - האיזון שההורה בחר (דמיון מול איור)
@@ -230,7 +249,13 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             chosen_style = request_data.get('chosen_style', 'classic_illustration')
             
             print(f"\n📖 Creating story for: {child_name}")
-            if use_lora:
+            if use_pulid:
+                print(f"🆕 USING PuLID! (no training, direct identity)")
+                print(f"   Reference URL: {reference_url[:80]}...")
+                if chosen_seed is not None:
+                    print(f"   🎲 Chosen seed: {chosen_seed} (consistent for whole book)")
+                print(f"   🎨 Chosen style: {chosen_style}")
+            elif use_lora:
                 print(f"🎓 USING TRAINED LoRA MODEL!")
                 print(f"   Trigger word: {trigger_word}")
                 print(f"   LoRA URL: {lora_url[:80]}...")
@@ -253,15 +278,16 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             if IMAGE_MODE != 'none' and story_data.get('pages'):
                 print(f"🎨 Step 2: Generating images ({IMAGE_MODE})...")
-                # 🎓 העבר את ה-LoRA, ה-seed, ה-scale וה-style לפונקציה
+                # 🎓 העבר את ה-LoRA/PuLID, ה-seed, ה-scale וה-style לפונקציה
                 story_data = self.add_images_to_story(
                     story_data,
                     child_photo,
                     lora_url=lora_url if use_lora else None,
                     trigger_word=trigger_word if use_lora else None,
                     lora_version=lora_version if use_lora else None,
+                    reference_url=reference_url if use_pulid else None,  # 🆕 PuLID
                     chosen_seed=chosen_seed,  # 🎲 עקביות לכל הספר
-                    chosen_lora_scale=chosen_lora_scale,  # 💪 האיזון שנבחר
+                    chosen_lora_scale=chosen_lora_scale,  # 💪 האיזון שנבחר (LoRA only)
                     chosen_style=chosen_style,  # 🎨 הסגנון שנבחר
                     child_gender='girl' if request_data.get('childGender') == 'girl' else 'boy'  # 🚻
                 )
@@ -486,15 +512,22 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             story_data = json.loads(clean_content)
             return story_data
     
-    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None, lora_version=None, chosen_seed=None, chosen_lora_scale=1.0, chosen_style='classic_illustration', child_gender='boy'):
-        """מוסיף תמונות לסיפור - עם LoRA אם יש, אחרת FLUX + face swap.
+    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None, lora_version=None, reference_url=None, chosen_seed=None, chosen_lora_scale=1.0, chosen_style='classic_illustration', child_gender='boy'):
+        """מוסיף תמונות לסיפור.
+        
+        🆕 סדר עדיפות:
+          1. PuLID (אם reference_url קיים) — החדש, הזרימה הראשית
+          2. LoRA (אם lora_url + trigger_word) — הישן, לתאימות
+          3. FLUX + face swap (אם child_photo בלבד) — fallback
+          4. FLUX רגיל (אם אין כלום) — בלי הילד
         
         chosen_seed: אם ניתן - כל עמודי הספר ישתמשו ב-seed הזה (עקביות מלאה!).
         child_gender: 'boy' או 'girl' - מונע החלקה מגדרית.
         """
         pages = story_data.get('pages', [])
         
-        use_lora = lora_url and trigger_word
+        use_pulid = reference_url is not None
+        use_lora = (not use_pulid) and lora_url and trigger_word  # PuLID גוברת על LoRA
         
         # 📖 NEW: Character Bible - מילון דמויות שClaude יצר
         characters = story_data.get('characters', [])
@@ -510,9 +543,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             for name, desc in char_dict.items():
                 print(f"     - {name}: {desc[:60]}...")
         
-        # 🎽 בחירת ביגוד אחיד לכל הספר
+        # 🎽 בחירת ביגוד אחיד לכל הספר (גם ל-PuLID — שומר עקביות בין עמודים)
         consistent_outfit = None
-        if use_lora:
+        if use_pulid or use_lora:
             import random
             outfits = [
                 "wearing a yellow t-shirt and blue jeans",
@@ -530,7 +563,13 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         # שמירת ה-Character Bible כך שיהיה זמין לrenegerate
         story_data['character_bible'] = char_dict
         
-        if use_lora:
+        if use_pulid:
+            print(f"  🆕 Creating {len(pages)} images with PuLID!")
+            print(f"  📸 Reference: {reference_url[:80]}...")
+            if chosen_seed:
+                print(f"  🎲 Locked seed: {chosen_seed}")
+            print(f"  🎨 Style: {chosen_style}")
+        elif use_lora:
             print(f"  🎓 Creating {len(pages)} images with LoRA model!")
             print(f"  🏷️  Trigger word: {trigger_word}")
             if lora_version:
@@ -544,32 +583,33 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         for i, page in enumerate(pages):
             print(f"\n  🖼️  Image {i+1}/{len(pages)}...")
             
-            # 🐌 Throttle - חכה בין בקשות LoRA
-            # 🎯 NEW: גם לפני הראשון! כי Claude קרא ל-API קודם וצורך 1 בקשה
-            if use_lora:
-                wait_seconds = 12 if i > 0 else 8  # Wait less before first since Claude was earlier
+            # 🐌 Throttle - חכה בין בקשות לAPI
+            # LoRA: 8-12s (rate limit חזק). PuLID: 5s (קל יותר).
+            if use_pulid:
+                wait_seconds = 5 if i > 0 else 3
+                print(f"  ⏱️  Waiting {wait_seconds}s (PuLID rate limit protection)...")
+                time.sleep(wait_seconds)
+            elif use_lora:
+                wait_seconds = 12 if i > 0 else 8
                 print(f"  ⏱️  Waiting {wait_seconds}s (rate limit protection)...")
                 time.sleep(wait_seconds)
             
             try:
-                if use_lora:
-                    # 🎓 מסלול LoRA עם Character Bible
+                # 🎯 לוגיקה משותפת לכל הסניפים שמשתמשים בדמות הילד (PuLID/LoRA):
+                # זיהוי אוטומטי של דמויות נוספות בעמוד + הזרקה מ-Character Bible
+                if use_pulid or use_lora:
                     illustration = page.get('illustration', '')
-                    page_text = page.get('text', '')  # הטקסט העברי של העמוד
+                    page_text = page.get('text', '')
                     chars_in_scene = page.get('characters_in_scene', [])
                     
                     # 🛡️ FIX: זיהוי אוטומטי של דמויות בעמוד
-                    # לא סומכים רק על characters_in_scene של Claude!
-                    # סורקים את הטקסט והתיאור - אם שם דמות מופיע, מוסיפים אותה
                     detected_chars = set(chars_in_scene)
                     for char_name in char_dict.keys():
-                        # בדיקה אם שם הדמות מופיע בטקסט העברי או בתיאור
                         if char_name in page_text or char_name in illustration:
                             if char_name not in detected_chars:
                                 detected_chars.add(char_name)
                                 print(f"  🔍 Auto-detected character '{char_name}' in page text")
                     
-                    # 🎯 בנה description עם Character Bible
                     char_descriptions = []
                     for char_name in detected_chars:
                         if char_name in char_dict:
@@ -577,26 +617,46 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                     
                     if char_descriptions:
                         print(f"  📖 Using {len(char_descriptions)} character description(s) from Bible")
+                
+                # 🆕 PuLID: הזרימה הראשית החדשה
+                if use_pulid:
+                    image_url = self.generate_image_with_pulid(
+                        reference_url=reference_url,
+                        prompt=illustration,
+                        style_name=chosen_style,
+                        seed=chosen_seed,  # 🎲 אותו seed לכל הספר
+                        character_descriptions=char_descriptions,
+                        outfit=consistent_outfit,
+                        child_gender=child_gender,
+                    )
                     
+                    # Fallback אם נכשל — FLUX + face swap אם יש child_photo, אחרת FLUX רגיל
+                    if not image_url:
+                        print(f"  ⚠️  PuLID failed, falling back to FLUX...")
+                        if child_photo:
+                            image_url = self.generate_image_flux_with_face(
+                                illustration, child_photo
+                            )
+                
+                elif use_lora:
+                    # 🎓 מסלול LoRA עם Character Bible
                     image_url = self.generate_image_with_lora(
                         prompt=illustration,
                         lora_url=lora_url,
                         trigger_word=trigger_word,
                         lora_version=lora_version,
-                        style_name=chosen_style,  # 🎨 הסגנון שההורה בחר
+                        style_name=chosen_style,
                         outfit=consistent_outfit,
-                        character_descriptions=char_descriptions,  # 🆕
-                        seed=chosen_seed,  # 🎲 אותו seed לכל הספר - עקביות!
-                        lora_scale=chosen_lora_scale,  # 💪 אותו scale שההורה בחר
-                        child_gender=child_gender  # 🚻 מונע החלקה מגדרית
+                        character_descriptions=char_descriptions,
+                        seed=chosen_seed,
+                        lora_scale=chosen_lora_scale,
+                        child_gender=child_gender
                     )
                     
-                    # Fallback אם נכשל
                     if not image_url:
                         print(f"  ⚠️  LoRA failed after retries, falling back to FLUX...")
                         image_url = self.generate_image_flux_with_face(
-                            illustration,
-                            child_photo
+                            illustration, child_photo
                         )
                 else:
                     # מסלול רגיל - FLUX + face swap
@@ -1392,8 +1452,10 @@ Return ONLY the English description, nothing else."""
         theme = theme_names.get(data.get('theme', ''), 'הרפתקאות')
         style = style_names.get(data.get('style', ''), 'מצחיק')
         
-        # 🎯 NEW: בדיקה אם משתמשים ב-LoRA - אם כן, נשנה את הוראות התמונות
+        # 🎯 NEW: בדיקה אם משתמשים ב-LoRA או PuLID - אם כן, נשנה את הוראות התמונות
         use_lora = bool(data.get('use_lora') and data.get('trigger_word'))
+        use_pulid = bool(data.get('reference_url'))  # 🆕 PuLID flow
+        use_identity_model = use_lora or use_pulid  # שניהם דורשים Character Bible
         
         prompt = f"""צור סיפור ילדים בעברית:
 
@@ -1409,8 +1471,8 @@ Return ONLY the English description, nothing else."""
             prompt += f"פרטים: {data['customInput']}\n"
         
         # 🎯 שתי גרסאות שונות של הוראות תיאור התמונה - תלוי אם יש LoRA
-        if use_lora:
-            # 🎓 גרסה ל-LoRA: Character Bible + הוראות מחמירות לדמות יחידה
+        if use_identity_model:
+            # 🎓 גרסה ל-LoRA / PuLID: Character Bible + הוראות מחמירות לדמות יחידה
             prompt += """
 חשוב מאוד! הוראות לכתיבת הסיפור:
 
