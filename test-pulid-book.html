@@ -5,9 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>📖 בדיקת ספר מלא — לילוש טובוש</title>
 <!--
-    Last modified by Claude: 2026-06-06 21:30 (Israel time)
+    Last modified by Claude: 2026-06-08 23:30 (Israel time)
     
     Changes since last version:
+      - 🐛 FIX: btnStep3 התחיל פעיל — לחיצה לפני בחירת סגנון = קריסה
+        ('Cannot read properties of null reading seed'). תיקון: disabled כברירת מחדל,
+        רמז ויזואלי לבחור סגנון, guard מפורש ב-step3_run.
       - 🆕 ASYNC: זרימה אסינכרונית עם job_id + polling במקום fetch סינכרוני
         (פותר timeout של Cloudflare/Railway proxy אחרי ~90s)
       - 🆕 BUTTON: כפתור "כתוב את הספר" — לא מתחיל יצירה אוטומטית מבחירת סגנון
@@ -360,9 +363,12 @@
                 <input type="text" id="storyCustom" placeholder="למשל: עם דרקון ידידותי">
             </label>
         </div>
-        <button class="primary" id="btnStep3" onclick="step3_run()" style="margin-top:1rem">
+        <button class="primary" id="btnStep3" onclick="step3_run()" disabled style="margin-top:1rem">
             📖 כתוב את הספר →
         </button>
+        <p id="btnStep3Hint" style="text-align:center; color:#999; font-size:0.85rem; margin-top:0.5rem">
+            בחר סגנון בשלב 2 כדי להמשיך
+        </p>
         <div class="progress-msg" id="step3Progress" style="display:none"></div>
     </div>
 
@@ -531,6 +537,10 @@
             card.classList.toggle('selected', i === idx);
         });
         document.getElementById('btnStep2').disabled = false;
+        // 🆕 גם כפתור step 3 — כי המשתמש כבר בחר סגנון
+        document.getElementById('btnStep3').disabled = false;
+        const hint = document.getElementById('btnStep3Hint');
+        if (hint) hint.style.display = 'none';
     }
     
     async function step2_run() {
@@ -549,11 +559,21 @@
     let pollingInterval = null;
     
     async function step3_run() {
+        // 🛡️ Guard: לוודא שהמשתמש בחר סגנון לפני שמתחילים
+        if (!selectedStyle) {
+            alert('נא לחזור לשלב 2 ולבחור סגנון לפני יצירת הספר');
+            return;
+        }
+        if (!referenceUrl) {
+            alert('שגיאה: אין תמונת רפרנס. אנא רענן את הדף והתחל מהתחלה');
+            return;
+        }
+        
         const childName = document.getElementById('childName').value.trim() || 'child';
         const childAge = document.getElementById('childAge').value;
         const childGender = document.getElementById('childGender').value;
         const theme = document.getElementById('storyTheme').value;
-        const style = document.getElementById('storyStyle').value;  // 🆕 funny/educational
+        const style = document.getElementById('storyStyle').value;  // funny/educational
         const customInput = document.getElementById('storyCustom').value.trim();
         
         // נעילת הכפתור — אסור לחיצה כפולה
