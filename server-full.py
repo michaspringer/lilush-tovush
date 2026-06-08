@@ -4,8 +4,14 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-06-06 20:00 (Israel time)
+Last modified by Claude: 2026-06-06 21:30 (Israel time)
 Changes in this version:
+  - 🆕 ASYNC BOOK GENERATION: פותר timeout של Cloudflare/Railway proxy
+    * POST /api/start-book-generation — מחזיר מיד job_id, יוצר ספר ברקע
+    * GET  /api/book-status/<job_id> — polling להתקדמות
+    * שמירת מצב ב-/tmp/books/<job_id>.json
+    * _add_images_with_progress — שכפול מ-add_images_to_story עם עדכוני התקדמות
+    זה תשתית לפתרון באג #23 (broken pipe במובייל) — כעת גם דסקטופ ייהנה.
   - 🧪 STEP 2B test page: routing חדש ל-/test-pulid-book
     דף בדיקה עצמאי לזרימה המלאה: תמונה → 4 וריאציות → בחירה → ספר 8 עמודים
     מאמת ש-handle_generate_story + add_images_to_story עובדים נכון עם PuLID
@@ -149,6 +155,10 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         elif self.path.startswith('/api/lora-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_lora_status(training_id)
+        elif self.path.startswith('/api/book-status/'):
+            # 🆕 STEP 2B-async: בדיקת סטטוס יצירת ספר ברקע
+            job_id = self.path.split('/')[-1]
+            self.handle_book_status(job_id)
         elif self.path == '/' or self.path == '/landing.html':
             # 🏠 דף הנחיתה - מה שמבקר חדש רואה ראשון
             self.serve_file('landing.html', 'text/html')
@@ -215,6 +225,8 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.handle_upload_reference()
         elif self.path == '/api/preview-options-pulid':  # 🆕 PuLID: 3 style variations
             self.handle_preview_options_pulid()
+        elif self.path == '/api/start-book-generation':  # 🆕 STEP 2B-async: ספר ברקע
+            self.handle_start_book_generation()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -2000,6 +2012,331 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 'success': False,
                 'error': str(e)
             }, status=500)
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # 🆕 ASYNC BOOK GENERATION — STEP 2B
+    # 
+    # הזרימה הסינכרונית של handle_generate_story אורכת 2-3 דקות.
+    # Cloudflare / Railway proxy חותכים את החיבור אחרי ~90 שניות.
+    # התוצאה: הדפדפן מקבל "upstream error" אבל השרת ממשיך לרוץ.
+    # 
+    # הפתרון: זרימה אסינכרונית
+    #   POST /api/start-book-generation → מחזיר מיד job_id, יוצר ברקע
+    #   GET  /api/book-status/<job_id>  → polling כל ~5s לבדיקת התקדמות
+    # 
+    # מצב ה-job נשמר ב-/tmp/books/<job_id>.json:
+    #   { status, progress, total_pages, story_data?, error? }
+    # ═══════════════════════════════════════════════════════════════════
+    
+    def handle_start_book_generation(self):
+        """
+        🆕 מתחיל יצירת ספר ב-thread נפרד, מחזיר מיד job_id.
+        
+        מקבל: אותם פרמטרים כמו /api/generate-story
+        מחזיר: { success: bool, job_id: str }
+        """
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            request_data = json.loads(post_data.decode('utf-8'))
+            
+            # יצירת job_id ייחודי
+            import uuid
+            import os as _os
+            job_id = f"book_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+            
+            # תיקיית עבודה
+            books_dir = '/tmp/books'
+            _os.makedirs(books_dir, exist_ok=True)
+            job_path = f"{books_dir}/{job_id}.json"
+            
+            # שמירת מצב התחלתי
+            initial_state = {
+                'status': 'pending',
+                'progress': 0,
+                'total_pages': 0,
+                'message': 'מתחיל לעבוד...',
+                'created_at': time.time(),
+            }
+            with open(job_path, 'w', encoding='utf-8') as f:
+                json.dump(initial_state, f, ensure_ascii=False)
+            
+            print(f"\n📚 ASYNC BOOK START: {job_id}")
+            print(f"   request: child={request_data.get('childName')}, "
+                  f"theme={request_data.get('theme')}, "
+                  f"use_pulid={bool(request_data.get('reference_url'))}")
+            
+            # הפעלת thread שיעשה את כל העבודה
+            import threading
+            
+            def background_work():
+                try:
+                    # עדכון: התחלנו לעבוד על הסיפור
+                    self._update_book_status(job_id, {
+                        'status': 'in_progress',
+                        'progress': 0,
+                        'total_pages': 0,
+                        'message': 'כותב את הסיפור...',
+                    })
+                    
+                    print(f"   📝 [{job_id}] Step 1: Generating story...")
+                    story_data = self.create_story_with_claude(request_data)
+                    
+                    if not story_data or not story_data.get('pages'):
+                        raise Exception('Story generation failed (no pages)')
+                    
+                    total = len(story_data['pages'])
+                    self._update_book_status(job_id, {
+                        'status': 'in_progress',
+                        'progress': 0,
+                        'total_pages': total,
+                        'message': f'הסיפור מוכן! יוצר {total} תמונות...',
+                    })
+                    
+                    # יצירת תמונות עם callback להתקדמות
+                    print(f"   🎨 [{job_id}] Step 2: Generating {total} images...")
+                    
+                    # נקרא ל-add_images_to_story אבל עם עדכון התקדמות אחרי כל עמוד
+                    story_data = self._add_images_with_progress(
+                        story_data,
+                        request_data,
+                        job_id
+                    )
+                    
+                    # שמירת תוצאה סופית
+                    self._update_book_status(job_id, {
+                        'status': 'complete',
+                        'progress': total,
+                        'total_pages': total,
+                        'message': 'הספר מוכן!',
+                        'story_data': story_data,
+                    })
+                    print(f"   ✅ [{job_id}] Book complete!")
+                
+                except Exception as e:
+                    print(f"   ❌ [{job_id}] Background work failed: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    self._update_book_status(job_id, {
+                        'status': 'error',
+                        'error': str(e),
+                        'message': f'שגיאה: {str(e)}',
+                    })
+            
+            thread = threading.Thread(target=background_work, daemon=True)
+            thread.start()
+            
+            # החזרת job_id מיד
+            self.send_json_response({
+                'success': True,
+                'job_id': job_id,
+                'message': 'יצירת הספר התחילה ברקע',
+            })
+        
+        except Exception as e:
+            print(f"   ❌ start-book-generation error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+    
+    def handle_book_status(self, job_id):
+        """
+        🆕 מחזיר את הסטטוס הנוכחי של יצירת ספר.
+        
+        מחזיר: { success, status, progress, total_pages, message, story_data?, error? }
+        """
+        try:
+            # ניקוי שם — סנט בסיסי
+            if not job_id or '/' in job_id or '..' in job_id:
+                raise Exception('Invalid job_id')
+            
+            job_path = f"/tmp/books/{job_id}.json"
+            
+            import os as _os
+            if not _os.path.exists(job_path):
+                self.send_json_response({
+                    'success': False,
+                    'error': 'Job not found (אולי השרת התאתחל מחדש)',
+                }, status=404)
+                return
+            
+            with open(job_path, 'r', encoding='utf-8') as f:
+                state = json.load(f)
+            
+            # החזרת המצב
+            response = {'success': True, **state}
+            self.send_json_response(response)
+        
+        except Exception as e:
+            print(f"   ❌ book-status error: {str(e)}")
+            self.send_json_response({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+    
+    def _update_book_status(self, job_id, updates):
+        """עוזר: עדכון אטומי של מצב job ב-tmp."""
+        try:
+            job_path = f"/tmp/books/{job_id}.json"
+            import os as _os
+            current = {}
+            if _os.path.exists(job_path):
+                try:
+                    with open(job_path, 'r', encoding='utf-8') as f:
+                        current = json.load(f)
+                except Exception:
+                    current = {}
+            current.update(updates)
+            current['updated_at'] = time.time()
+            tmp_path = job_path + '.tmp'
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(current, f, ensure_ascii=False)
+            _os.replace(tmp_path, job_path)
+        except Exception as e:
+            print(f"   ⚠️  _update_book_status failed: {e}")
+    
+    def _add_images_with_progress(self, story_data, request_data, job_id):
+        """
+        🆕 עוטף את add_images_to_story עם עדכוני התקדמות.
+        
+        במקום לקרוא ישירות ל-add_images_to_story (שלא יודע על job_id),
+        אנחנו עושים כאן את הלולאה ומעדכנים אחרי כל עמוד.
+        
+        זה משכפל קצת קוד מ-add_images_to_story, אבל זה מאפשר
+        progress events בלי לשנות את הפונקציה המקורית.
+        """
+        # פרמטרים מהבקשה
+        reference_url = request_data.get('reference_url')
+        use_pulid = bool(reference_url)
+        
+        lora_url = request_data.get('lora_url')
+        trigger_word = request_data.get('trigger_word')
+        lora_version = request_data.get('lora_version')
+        use_lora = (not use_pulid) and request_data.get('use_lora', False) and lora_url and trigger_word
+        
+        child_photo = request_data.get('childPhoto')
+        chosen_seed = request_data.get('chosen_seed')
+        chosen_lora_scale = request_data.get('chosen_lora_scale', 1.0)
+        chosen_style = request_data.get('chosen_style', 'classic_illustration')
+        child_gender = 'girl' if request_data.get('childGender') == 'girl' else 'boy'
+        
+        pages = story_data.get('pages', [])
+        total = len(pages)
+        
+        # Character Bible
+        characters = story_data.get('characters', [])
+        char_dict = {}
+        for char in characters:
+            name = char.get('name', '').strip()
+            desc = char.get('english_description', '').strip()
+            if name and desc:
+                char_dict[name] = desc
+        
+        # Outfit אחיד
+        consistent_outfit = None
+        if use_pulid or use_lora:
+            import random
+            outfits = [
+                "wearing a yellow t-shirt and blue jeans",
+                "wearing a red striped shirt and khaki shorts",
+                "wearing a green hoodie and dark blue pants",
+                "wearing a white t-shirt with a pattern and beige pants",
+                "wearing an orange sweater and denim shorts",
+                "wearing a purple shirt and gray pants",
+                "wearing a blue polo shirt and brown shorts",
+            ]
+            consistent_outfit = random.choice(outfits)
+            print(f"  🎽 [{job_id}] Outfit: {consistent_outfit}")
+            story_data['outfit'] = consistent_outfit
+        
+        story_data['character_bible'] = char_dict
+        
+        # לולאת יצירת תמונות
+        for i, page in enumerate(pages):
+            # עדכון התקדמות לפני יצירה
+            self._update_book_status(job_id, {
+                'status': 'in_progress',
+                'progress': i,
+                'total_pages': total,
+                'message': f'יוצר תמונה {i+1} מתוך {total}...',
+            })
+            
+            print(f"\n  🖼️  [{job_id}] Image {i+1}/{total}...")
+            
+            # Throttle
+            if use_pulid:
+                wait_seconds = 5 if i > 0 else 3
+                time.sleep(wait_seconds)
+            elif use_lora:
+                wait_seconds = 12 if i > 0 else 8
+                time.sleep(wait_seconds)
+            
+            try:
+                # זיהוי דמויות בעמוד
+                if use_pulid or use_lora:
+                    illustration = page.get('illustration', '')
+                    page_text = page.get('text', '')
+                    chars_in_scene = page.get('characters_in_scene', [])
+                    
+                    detected_chars = set(chars_in_scene)
+                    for char_name in char_dict.keys():
+                        if char_name in page_text or char_name in illustration:
+                            detected_chars.add(char_name)
+                    
+                    char_descriptions = [
+                        char_dict[name] for name in detected_chars if name in char_dict
+                    ]
+                
+                if use_pulid:
+                    image_url = self.generate_image_with_pulid(
+                        reference_url=reference_url,
+                        prompt=illustration,
+                        style_name=chosen_style,
+                        seed=chosen_seed,
+                        character_descriptions=char_descriptions,
+                        outfit=consistent_outfit,
+                        child_gender=child_gender,
+                    )
+                    if not image_url and child_photo:
+                        image_url = self.generate_image_flux_with_face(illustration, child_photo)
+                
+                elif use_lora:
+                    image_url = self.generate_image_with_lora(
+                        prompt=illustration,
+                        lora_url=lora_url,
+                        trigger_word=trigger_word,
+                        lora_version=lora_version,
+                        style_name=chosen_style,
+                        outfit=consistent_outfit,
+                        character_descriptions=char_descriptions,
+                        seed=chosen_seed,
+                        lora_scale=chosen_lora_scale,
+                        child_gender=child_gender
+                    )
+                    if not image_url:
+                        image_url = self.generate_image_flux_with_face(illustration, child_photo)
+                else:
+                    image_url = self.generate_image_flux_with_face(
+                        page['illustration'], child_photo
+                    )
+                
+                page['imageUrl'] = image_url
+            
+            except Exception as e:
+                print(f"  ⚠️  Page {i+1} failed: {e}")
+                page['imageUrl'] = None
+        
+        # עדכון אחרון: כולם נגמרו
+        self._update_book_status(job_id, {
+            'progress': total,
+            'total_pages': total,
+            'message': 'מסיים...',
+        })
+        
+        return story_data
     
     def generate_image_with_pulid(
         self,
