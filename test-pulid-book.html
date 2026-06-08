@@ -5,7 +5,14 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>📖 בדיקת ספר מלא — לילוש טובוש</title>
 <!--
-    Last modified by Claude: 2026-06-06 20:00 (Israel time)
+    Last modified by Claude: 2026-06-06 21:30 (Israel time)
+    
+    Changes since last version:
+      - 🆕 ASYNC: זרימה אסינכרונית עם job_id + polling במקום fetch סינכרוני
+        (פותר timeout של Cloudflare/Railway proxy אחרי ~90s)
+      - 🆕 BUTTON: כפתור "כתוב את הספר" — לא מתחיל יצירה אוטומטית מבחירת סגנון
+      - 🆕 STYLE: בורר סגנון סיפור (funny/educational) שהיה חסר
+      - 🆕 PROGRESS: התקדמות אמיתית "עמוד X מתוך Y" במקום סטטוס סטטי
     
     Purpose:
     A standalone test page that walks through the full PuLID flow end-to-end:
@@ -322,7 +329,7 @@
         <div id="step2Status"></div>
         <div class="results-grid" id="stylesGrid"></div>
         <button class="primary" id="btnStep2" onclick="step2_run()" disabled style="margin-top:1rem">
-            כתוב ספר עם הסגנון הזה →
+            המשך לפרטי הסיפור →
         </button>
     </div>
 
@@ -340,10 +347,22 @@
                 </select>
             </label>
             <label>
+                <span>סגנון הסיפור</span>
+                <select id="storyStyle">
+                    <option value="funny">מצחיק</option>
+                    <option value="educational">חינוכי</option>
+                </select>
+            </label>
+        </div>
+        <div class="input-row">
+            <label>
                 <span>פרטים נוספים (אופציונלי)</span>
                 <input type="text" id="storyCustom" placeholder="למשל: עם דרקון ידידותי">
             </label>
         </div>
+        <button class="primary" id="btnStep3" onclick="step3_run()" style="margin-top:1rem">
+            📖 כתוב את הספר →
+        </button>
         <div class="progress-msg" id="step3Progress" style="display:none"></div>
     </div>
 
@@ -521,31 +540,34 @@
         }
         document.getElementById('btnStep2').disabled = true;
         activateStep(3);
-        
-        // קצר השהייה כדי שהמשתמש יראה את המעבר, ואז יוצר ספר אוטומטית
-        setTimeout(() => step3_run(), 600);
+        // 🚫 לא מתחילים ליצור! מחכים שהמשתמש ימלא פרטים וילחץ "כתוב את הספר"
     }
     
     // ════════════════════════════════════════════════════════════════
-    // שלב 3 + 4: יצירת ספר + תצוגה
+    // שלב 3 + 4: יצירת ספר אסינכרונית (job_id + polling)
     // ════════════════════════════════════════════════════════════════
+    let pollingInterval = null;
+    
     async function step3_run() {
         const childName = document.getElementById('childName').value.trim() || 'child';
-        const childAge = document.getElementById('childAge').value;  // range string: '0-2' / '3-5' / '6-8' / '9-12'
+        const childAge = document.getElementById('childAge').value;
         const childGender = document.getElementById('childGender').value;
         const theme = document.getElementById('storyTheme').value;
+        const style = document.getElementById('storyStyle').value;  // 🆕 funny/educational
         const customInput = document.getElementById('storyCustom').value.trim();
         
-        // הצגת progress
+        // נעילת הכפתור — אסור לחיצה כפולה
+        const btn = document.getElementById('btnStep3');
+        btn.disabled = true;
+        btn.textContent = '⏳ מתחיל יצירה...';
+        
         const progressEl = document.getElementById('step3Progress');
         progressEl.style.display = 'block';
-        progressEl.innerHTML = 
-            '⏳ <strong>יוצר ספר 8 עמודים מלא...</strong><br>' +
-            '<small>זה לוקח כ-2-3 דקות. Claude כותב את הסיפור, ואז PuLID יוצר 8 תמונות.</small>';
+        progressEl.innerHTML = '⏳ <strong>שולח בקשה לשרת...</strong>';
         
         bookStartTime = Date.now();
         activateStep(4);
-        showStatusIn('step4Status', '⏳ ממתין לסיפור...');
+        showStatusIn('step4Status', '⏳ ממתין שהשרת יתחיל...');
         
         try {
             const requestBody = {
@@ -553,6 +575,7 @@
                 childAge: childAge,
                 childGender: childGender,
                 theme: theme,
+                style: style,  // 🆕 חסר עד כה!
                 customInput: customInput || '',
                 // 🆕 פרמטרי PuLID
                 reference_url: referenceUrl,
@@ -560,65 +583,150 @@
                 chosen_style: selectedStyle.style
             };
             
-            console.log('Sending request:', requestBody);
+            console.log('Sending start request:', requestBody);
             
-            const resp = await fetch('/api/generate-story', {
+            // ───── שלב א': בקשה להתחיל יצירה ─────
+            const startResp = await fetch('/api/start-book-generation', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify(requestBody)
             });
             
-            const data = await resp.json();
-            console.log('Response:', data);
+            const startData = await startResp.json();
+            console.log('Start response:', startData);
             
-            if (!data.success && !data.pages) {
-                throw new Error('Story generation failed: ' + (data.error || 'unknown'));
+            if (!startData.success || !startData.job_id) {
+                throw new Error('Failed to start: ' + (startData.error || 'unknown'));
             }
             
-            const totalElapsed = ((Date.now() - bookStartTime) / 1000).toFixed(1);
-            const pages = data.pages || [];
-            const pagesWithImages = pages.filter(p => p.imageUrl).length;
+            const jobId = startData.job_id;
+            console.log('Job started:', jobId);
             
-            // תצוגת העמודים
-            const grid = document.getElementById('pagesGrid');
-            grid.innerHTML = '';
-            pages.forEach((page, idx) => {
-                const card = document.createElement('div');
-                card.className = 'page-card';
-                let imgHtml = '';
-                if (page.imageUrl) {
-                    imgHtml = '<img src="' + page.imageUrl + '" alt="עמוד ' + (idx+1) + '">';
-                } else {
-                    imgHtml = '<div style="background:#fff3e0;padding:2rem;border-radius:12px;text-align:center;color:#bf360c;margin-bottom:0.8rem">⚠️ תמונה לא נוצרה</div>';
-                }
-                card.innerHTML = 
-                    '<span class="page-num">עמוד ' + (idx+1) + '</span>' +
-                    imgHtml +
-                    '<p class="page-text">' + (page.text || '') + '</p>';
-                grid.appendChild(card);
-            });
+            progressEl.innerHTML = '⏳ <strong>השרת מתחיל לעבוד...</strong><br><small>job_id: ' + jobId + '</small>';
             
-            const cost = (0.021 * pagesWithImages).toFixed(3);
-            document.getElementById('totalTiming').innerHTML = 
-                '⏱️ סה״כ זמן: ' + totalElapsed + ' שניות · ' +
-                '🖼️ ' + pagesWithImages + '/' + pages.length + ' תמונות · ' +
-                '💰 עלות תמונות: ~$' + cost;
-            
-            if (pagesWithImages === pages.length) {
-                showStatusIn('step4Status', '✅ הספר מוכן! כל ' + pages.length + ' התמונות נוצרו.', 'success');
-            } else {
-                showStatusIn('step4Status', 
-                    '⚠️ הספר נוצר עם ' + pagesWithImages + '/' + pages.length + ' תמונות. ' +
-                    'חלק נכשלו (אולי rate limit). פתח DevTools לבדוק.', 'error');
-            }
-            
-            progressEl.style.display = 'none';
+            // ───── שלב ב': polling כל 5 שניות ─────
+            startPolling(jobId);
             
         } catch (err) {
-            console.error(err);
-            showStatusIn('step4Status', '❌ שגיאה: ' + err.message, 'error');
+            console.error('start error:', err);
+            showStatusIn('step4Status', '❌ שגיאה בהתחלה: ' + err.message, 'error');
             progressEl.style.display = 'none';
+            btn.disabled = false;
+            btn.textContent = '📖 כתוב את הספר →';
         }
+    }
+    
+    function startPolling(jobId) {
+        // ניקוי polling קודם אם יש
+        if (pollingInterval) {
+            clearInterval(pollingInterval);
+            pollingInterval = null;
+        }
+        
+        let pollCount = 0;
+        const maxPolls = 120;  // 120 × 5s = 10 דקות מקסימום
+        
+        async function poll() {
+            pollCount++;
+            
+            if (pollCount > maxPolls) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+                showStatusIn('step4Status', '⏱️ timeout — עברו 10 דקות. רענן את הדף.', 'error');
+                return;
+            }
+            
+            try {
+                const resp = await fetch('/api/book-status/' + jobId);
+                const data = await resp.json();
+                
+                console.log('Poll #' + pollCount + ':', data);
+                
+                if (!data.success) {
+                    throw new Error(data.error || 'status check failed');
+                }
+                
+                const progressEl = document.getElementById('step3Progress');
+                
+                if (data.status === 'pending' || data.status === 'in_progress') {
+                    // עדכון התקדמות
+                    const pct = data.total_pages > 0 ? 
+                        Math.round((data.progress / data.total_pages) * 100) : 0;
+                    progressEl.innerHTML = 
+                        '⏳ <strong>' + (data.message || 'עובד...') + '</strong><br>' +
+                        (data.total_pages > 0 ? 
+                            '<small>עמוד ' + data.progress + ' מתוך ' + data.total_pages + ' (' + pct + '%)</small>' :
+                            '<small>כותב את הסיפור...</small>');
+                    showStatusIn('step4Status', '⏳ ' + (data.message || 'עובד...'));
+                
+                } else if (data.status === 'complete') {
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                    progressEl.style.display = 'none';
+                    displayBook(data.story_data);
+                
+                } else if (data.status === 'error') {
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                    showStatusIn('step4Status', '❌ שגיאה: ' + (data.error || data.message), 'error');
+                    progressEl.style.display = 'none';
+                    
+                    const btn = document.getElementById('btnStep3');
+                    btn.disabled = false;
+                    btn.textContent = '📖 כתוב את הספר →';
+                }
+                
+            } catch (err) {
+                console.error('poll error:', err);
+                // לא עוצרים — אולי תקלה זמנית. ננסה שוב בעוד 5s.
+            }
+        }
+        
+        // קריאה ראשונה מיידית, ואז כל 5 שניות
+        poll();
+        pollingInterval = setInterval(poll, 5000);
+    }
+    
+    function displayBook(storyData) {
+        const totalElapsed = ((Date.now() - bookStartTime) / 1000).toFixed(1);
+        const pages = (storyData && storyData.pages) || [];
+        const pagesWithImages = pages.filter(p => p.imageUrl).length;
+        
+        const grid = document.getElementById('pagesGrid');
+        grid.innerHTML = '';
+        pages.forEach((page, idx) => {
+            const card = document.createElement('div');
+            card.className = 'page-card';
+            let imgHtml = '';
+            if (page.imageUrl) {
+                imgHtml = '<img src="' + page.imageUrl + '" alt="עמוד ' + (idx+1) + '">';
+            } else {
+                imgHtml = '<div style="background:#fff3e0;padding:2rem;border-radius:12px;text-align:center;color:#bf360c;margin-bottom:0.8rem">⚠️ תמונה לא נוצרה</div>';
+            }
+            card.innerHTML = 
+                '<span class="page-num">עמוד ' + (idx+1) + '</span>' +
+                imgHtml +
+                '<p class="page-text">' + (page.text || '') + '</p>';
+            grid.appendChild(card);
+        });
+        
+        const cost = (0.021 * pagesWithImages).toFixed(3);
+        document.getElementById('totalTiming').innerHTML = 
+            '⏱️ סה״כ זמן: ' + totalElapsed + ' שניות · ' +
+            '🖼️ ' + pagesWithImages + '/' + pages.length + ' תמונות · ' +
+            '💰 עלות תמונות: ~$' + cost;
+        
+        if (pagesWithImages === pages.length) {
+            showStatusIn('step4Status', '✅ הספר מוכן! כל ' + pages.length + ' התמונות נוצרו.', 'success');
+        } else {
+            showStatusIn('step4Status', 
+                '⚠️ הספר נוצר עם ' + pagesWithImages + '/' + pages.length + ' תמונות. חלק נכשלו.', 'error');
+        }
+        
+        // איפוס הכפתור — מאפשר ניסיון נוסף
+        const btn = document.getElementById('btnStep3');
+        btn.disabled = false;
+        btn.textContent = '📖 צור ספר נוסף →';
     }
 </script>
 </body>
