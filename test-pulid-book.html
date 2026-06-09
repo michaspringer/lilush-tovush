@@ -5,9 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>📖 בדיקת ספר מלא — לילוש טובוש</title>
 <!--
-    Last modified by Claude: 2026-06-08 23:30 (Israel time)
+    Last modified by Claude: 2026-06-08 23:55 (Israel time)
     
     Changes since last version:
+      - 🆕 APPEARANCE: שמירה והעברה של תיאור פיזי מ-Claude Vision
+        (נקרא ב-/api/upload-reference, נשלח ל-/api/start-book-generation)
+        תצוגה ויזואלית של מה Claude זיהה — debugging חיוני
       - 🐛 FIX: btnStep3 התחיל פעיל — לחיצה לפני בחירת סגנון = קריסה
         ('Cannot read properties of null reading seed'). תיקון: disabled כברירת מחדל,
         רמז ויזואלי לבחור סגנון, guard מפורש ב-step3_run.
@@ -393,6 +396,7 @@
     // ════════════════════════════════════════════════════════════════
     let refImageBase64 = null;
     let referenceUrl = null;
+    let childAppearance = null;  // 🆕 מ-Claude Vision: "with blue eyes, brown hair..."
     let styleOptions = [];
     let selectedStyle = null;  // { style, seed, image, ... }
     let bookStartTime = null;
@@ -478,6 +482,11 @@
                 throw new Error('Upload failed: ' + (uploadData.error || 'unknown'));
             }
             referenceUrl = uploadData.reference_url;
+            childAppearance = uploadData.appearance || null;  // 🆕 מ-Claude Vision
+            
+            if (childAppearance) {
+                console.log('Child appearance from Claude Vision:', childAppearance);
+            }
             
             showStatusIn('step2Status', '⏳ יוצר 4 וריאציות סגנון... (~30-50 שניות)');
             
@@ -520,6 +529,23 @@
             });
             
             showStatusIn('step2Status', '✅ ' + styleOptions.length + ' וריאציות מוכנות — בחר אחת', 'success');
+            
+            // 🆕 הצגת ה-appearance ש-Claude Vision זיהה
+            // זה חשוב — אם הזיהוי לא נכון (למשל "brown eyes" כשבאמת כחולות),
+            // המשתמש יראה מיד ויוכל לסמן לנו
+            if (childAppearance) {
+                const appearanceBox = document.createElement('div');
+                appearanceBox.style.cssText = 
+                    'background:#fff8e7; border:2px solid #D4A574; padding:0.8rem 1rem; ' +
+                    'border-radius:12px; margin-top:1rem; font-size:0.9rem; text-align:center;';
+                appearanceBox.innerHTML = 
+                    '👁️ <strong>מה Claude Vision זיהה בתמונה:</strong><br>' +
+                    '<code style="background:white; padding:0.3rem 0.6rem; border-radius:6px; ' +
+                    'display:inline-block; margin-top:0.3rem; color:#5C4A35;">' + 
+                    childAppearance + '</code><br>' +
+                    '<small style="color:#777">תיאור זה ייעגן את הזהות בכל 8 העמודים</small>';
+                document.getElementById('step2').appendChild(appearanceBox);
+            }
             
         } catch (err) {
             console.error(err);
@@ -595,12 +621,13 @@
                 childAge: childAge,
                 childGender: childGender,
                 theme: theme,
-                style: style,  // 🆕 חסר עד כה!
+                style: style,  // funny/educational
                 customInput: customInput || '',
                 // 🆕 פרמטרי PuLID
                 reference_url: referenceUrl,
                 chosen_seed: selectedStyle.seed,
-                chosen_style: selectedStyle.style
+                chosen_style: selectedStyle.style,
+                appearance: childAppearance  // 🆕 מ-Claude Vision
             };
             
             console.log('Sending start request:', requestBody);
