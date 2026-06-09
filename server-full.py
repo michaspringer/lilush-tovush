@@ -4,8 +4,16 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-06-06 21:30 (Israel time)
+Last modified by Claude: 2026-06-08 23:55 (Israel time)
 Changes in this version:
+  - 🆕 APPEARANCE ANCHOR: Claude Vision מנתח את תמונת הרפרנס פעם אחת
+    בתחילת הזרימה ומחזיר תיאור פיזי קצר ("with blue eyes, brown hair...").
+    התיאור נכנס לכל פרומפט של PuLID בספר — מעגן צבע עיניים, שיער, וכו'
+    שלפעמים נשבר בסצנות מורכבות.
+    * analyze_child_appearance — קריאה ל-claude-sonnet-4 vision (~$0.003 פעם אחת)
+    * handle_upload_reference — מחזיר את ה-appearance ל-frontend
+    * generate_image_with_pulid — מקבל ומזריק לפרומפט
+    * _add_images_with_progress — מעביר ל-PuLID בכל עמוד
   - 🆕 ASYNC BOOK GENERATION: פותר timeout של Cloudflare/Railway proxy
     * POST /api/start-book-generation — מחזיר מיד job_id, יוצר ספר ברקע
     * GET  /api/book-status/<job_id> — polling להתקדמות
@@ -972,6 +980,113 @@ Return ONLY the English translation, no explanations."""
             print(f"  ⚠️ Translation failed: {str(e)}, using original")
             return hebrew_text
     
+    def analyze_child_appearance(self, image_url):
+        """
+        🆕 מנתח תמונת ילד עם Claude Vision כדי להוציא תיאור פיזי קצר באנגלית.
+        
+        מטרה: לעגן את הזהות (במיוחד צבע עיניים שעלול להישבר ב-PuLID
+        על סצנות מורכבות) דרך תיאור טקסטואלי בפרומפט של כל תמונה בספר.
+        
+        משתמש ב-claude-sonnet-4-20250514 ל-vision quality.
+        עלות: ~$0.003-0.005 לקריאה אחת בלבד בתחילת זרימה.
+        
+        Args:
+            image_url: URL ציבורי לתמונת הילד (מ-Cloudinary)
+        
+        Returns:
+            str: תיאור פיזי קצר באנגלית, או None אם נכשל.
+            דוגמה: "with bright blue eyes, short brown hair, fair skin, rosy cheeks"
+        """
+        try:
+            if not CLAUDE_API_KEY:
+                print("  ⚠️ No CLAUDE_API_KEY — skipping appearance analysis")
+                return None
+            
+            print(f"  👁️  Analyzing child appearance from: {image_url[:80]}...")
+            
+            # 📌 הנחיות:
+            # 1. תיאור מינימלי - רק מה שמשפיע על זיהוי בין תמונות
+            # 2. ללא ביגוד (הוא ייקבע ע"י outfit lock נפרד)
+            # 3. ללא רקע / סצנה
+            # 4. תוצאה כצירוף קצר שאפשר להוסיף לפרומפט באנגלית
+            prompt_text = """Look at this photo of a child and write a concise physical description for use as an anchor in AI image generation.
+
+REQUIRED format: a comma-separated list of features, starting with "with".
+
+INCLUDE:
+- Eye color (be specific: bright blue / hazel green / dark brown / etc.)
+- Hair color and length (short brown / long blonde / curly black / etc.)
+- Skin tone (fair / olive / medium brown / dark)
+- Any distinctive facial features (rosy cheeks, dimples, freckles, etc.) — only if clearly visible
+
+EXCLUDE:
+- Clothing (do not mention what they're wearing)
+- Background / scene / setting
+- Emotion / expression
+- Age
+
+Output EXACTLY one line in this format and nothing else:
+with [eye color] eyes, [hair description], [skin tone] skin, [optional features]
+
+Example: with bright blue eyes, short light-brown hair, fair skin, rosy cheeks"""
+            
+            claude_request = {
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 150,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "url",
+                                "url": image_url
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": prompt_text
+                        }
+                    ]
+                }]
+            }
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'x-api-key': CLAUDE_API_KEY,
+                'anthropic-version': '2023-06-01'
+            }
+            
+            req = urllib.request.Request(
+                CLAUDE_API_URL,
+                data=json.dumps(claude_request).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response_data = json.loads(response.read().decode('utf-8'))
+                appearance = response_data['content'][0]['text'].strip()
+                
+                # ניקוי בסיסי — לפעמים Claude יוסיף הסבר. ניקח רק את השורה הראשונה.
+                first_line = appearance.split('\n')[0].strip()
+                # ולוודא שהיא מתחילה עם "with"
+                if not first_line.lower().startswith('with'):
+                    # חיפוש שורה שמתחילה ב-with
+                    for line in appearance.split('\n'):
+                        if line.strip().lower().startswith('with'):
+                            first_line = line.strip()
+                            break
+                
+                print(f"  ✨ Child appearance: {first_line}")
+                return first_line
+        
+        except Exception as e:
+            print(f"  ⚠️ Appearance analysis failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
     def _story_to_image_description(self, hebrew_story_text, character_bible=None):
         """
         🎯 ממיר טקסט סיפור בעברית לתיאור תמונה באנגלית.
@@ -1858,10 +1973,16 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 ref_url = upload_result['secure_url']
                 print(f"   ✅ Uploaded: {ref_url}")
                 
+                # 🆕 ניתוח מראה הילד עם Claude Vision
+                # זה רץ פעם אחת בלבד פר תמונה, ויעוגן בכל פרומפט של הספר
+                # (קריטי לעקביות צבע עיניים שלפעמים נשבר ב-PuLID)
+                appearance = self.analyze_child_appearance(ref_url)
+                
                 self.send_json_response({
                     'success': True,
                     'reference_url': ref_url,
-                    'child_name': child_name
+                    'child_name': child_name,
+                    'appearance': appearance,  # 🆕 ההורה / ה-frontend יראו מה זוהה
                 })
             finally:
                 try:
@@ -2222,6 +2343,10 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
         chosen_lora_scale = request_data.get('chosen_lora_scale', 1.0)
         chosen_style = request_data.get('chosen_style', 'classic_illustration')
         child_gender = 'girl' if request_data.get('childGender') == 'girl' else 'boy'
+        appearance = request_data.get('appearance')  # 🆕 מ-Claude Vision
+        
+        if appearance:
+            print(f"  ✨ Using appearance anchor: {appearance}")
         
         pages = story_data.get('pages', [])
         total = len(pages)
@@ -2299,6 +2424,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                         character_descriptions=char_descriptions,
                         outfit=consistent_outfit,
                         child_gender=child_gender,
+                        appearance=appearance,  # 🆕 מ-Claude Vision
                     )
                     if not image_url and child_photo:
                         image_url = self.generate_image_flux_with_face(illustration, child_photo)
@@ -2348,6 +2474,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
         character_descriptions=None,
         outfit=None,
         child_gender='boy',
+        appearance=None,
     ):
         """
         🆕 PuLID-Flux: יוצר תמונה יחידה עם זהות ילד מהתמונת הרפרנס.
@@ -2471,9 +2598,16 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
         # ה-token "id" מסמן ל-PuLID איפה הילד נמצא בסצנה
         child_token = "id"  # PuLID זיהוי הילד — דרך התמונה לא דרך הטקסט
         
+        # 🆕 appearance anchor — מעוגן מיד אחרי "a boy child" כדי לחבר את
+        # התכונות הפיזיות (במיוחד צבע עיניים) לזהות.
+        # הגיע מ-Claude Vision שניתח את תמונת הרפרנס.
+        appearance_part = f" {appearance}" if appearance else ""
+        
         prompt_parts = [
             anchor['start'],
-            f"a {child_gender} child ",
+            f"a {child_gender} child",
+            appearance_part,  # 🆕 "with bright blue eyes, short brown hair..."
+            ", ",
             prompt,
         ]
         if outfit_part:
@@ -2487,6 +2621,8 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
         full_prompt = "".join(prompt_parts)
         
         print(f"      🎨 PuLID: style={style_name}, start_step={start_step}, seed={seed}")
+        if appearance:
+            print(f"      ✨ appearance anchor: {appearance}")
         print(f"      📝 prompt: {full_prompt[:200]}...")
         
         # ────────────────────────────────────────────────────────────
