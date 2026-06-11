@@ -4,8 +4,17 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-06-08 23:55 (Israel time)
+Last modified by Claude: 2026-06-09 00:30 (Israel time)
 Changes in this version:
+  - 🐛 FIX FEATURE BLEED: בעמודים עם בעלי חיים, PuLID היה מוסיף לפעמים פיצ׳רים
+    של החיה לילד (אוזני פיל, פרווה וכו'). הילד לא איבד אוזניים אנושיות —
+    הוא צמח נוספות. תיקון:
+    * Claude Vision כעת מתחייב לכלול "small rounded human ears" באחיזה
+    * generate_image_with_pulid מוסיף משפט הפרדה מפורש בפרומפט:
+      "the child is a normal human boy... no animal features... no extra ears,
+       no fur, no trunk, no tail, no wings — the child is fully human"
+    PuLID-Flux לא תומך ב-negative_prompt, אז ההפרדה היא חיובית-בשלילה
+    בתוך הפרומפט עצמו.
   - 🆕 APPEARANCE ANCHOR: Claude Vision מנתח את תמונת הרפרנס פעם אחת
     בתחילת הזרימה ומחזיר תיאור פיזי קצר ("with blue eyes, brown hair...").
     התיאור נכנס לכל פרומפט של PuLID בספר — מעגן צבע עיניים, שיער, וכו'
@@ -1009,14 +1018,17 @@ Return ONLY the English translation, no explanations."""
             # 2. ללא ביגוד (הוא ייקבע ע"י outfit lock נפרד)
             # 3. ללא רקע / סצנה
             # 4. תוצאה כצירוף קצר שאפשר להוסיף לפרומפט באנגלית
+            # 5. 🆕 חובה לכלול תיאור אוזניים — מונע "אוזני פיל" בסצנות עם בעלי חיים
             prompt_text = """Look at this photo of a child and write a concise physical description for use as an anchor in AI image generation.
 
 REQUIRED format: a comma-separated list of features, starting with "with".
 
-INCLUDE:
+INCLUDE (all required):
 - Eye color (be specific: bright blue / hazel green / dark brown / etc.)
 - Hair color and length (short brown / long blonde / curly black / etc.)
 - Skin tone (fair / olive / medium brown / dark)
+- Ears (ALWAYS write "small rounded human ears" — this is critical to prevent
+  feature mixing with animal characters in the scenes)
 - Any distinctive facial features (rosy cheeks, dimples, freckles, etc.) — only if clearly visible
 
 EXCLUDE:
@@ -1026,9 +1038,9 @@ EXCLUDE:
 - Age
 
 Output EXACTLY one line in this format and nothing else:
-with [eye color] eyes, [hair description], [skin tone] skin, [optional features]
+with [eye color] eyes, [hair description], [skin tone] skin, small rounded human ears, [optional features]
 
-Example: with bright blue eyes, short light-brown hair, fair skin, rosy cheeks"""
+Example: with bright blue eyes, short light-brown hair, fair skin, small rounded human ears, rosy cheeks"""
             
             claude_request = {
                 "model": "claude-sonnet-4-20250514",
@@ -2598,15 +2610,26 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
         # ה-token "id" מסמן ל-PuLID איפה הילד נמצא בסצנה
         child_token = "id"  # PuLID זיהוי הילד — דרך התמונה לא דרך הטקסט
         
-        # 🆕 appearance anchor — מעוגן מיד אחרי "a boy child" כדי לחבר את
+        # 🆕 appearance anchor — מעוגן מיד אחרי "a human boy child" כדי לחבר את
         # התכונות הפיזיות (במיוחד צבע עיניים) לזהות.
         # הגיע מ-Claude Vision שניתח את תמונת הרפרנס.
         appearance_part = f" {appearance}" if appearance else ""
         
+        # 🆕 separator anti-feature-bleed:
+        # ב-PuLID-Flux אין negative_prompt, אז מכוונים את המודל בפרומפט החיובי.
+        # במיוחד חשוב בסצנות עם בעלי חיים (פילים, ג'ירפות, חתולים) —
+        # אחרת פיצ׳רים של החיה (אוזניים, צוואר ארוך, פרווה) זולגים לילד.
+        human_separator = (
+            ". the child is a normal human boy, "
+            "the child has only two small normal human ears, "
+            "no animal features on the child, no extra ears, no fur, "
+            "no trunk, no tail, no wings — the child is fully human"
+        )
+        
         prompt_parts = [
             anchor['start'],
-            f"a {child_gender} child",
-            appearance_part,  # 🆕 "with bright blue eyes, short brown hair..."
+            f"a human {child_gender} child",  # 🆕 "human" מוסיף הפרדה מבעלי חיים
+            appearance_part,  # "with bright blue eyes, ..., small rounded human ears, ..."
             ", ",
             prompt,
         ]
@@ -2614,6 +2637,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             prompt_parts.append(f", wearing {outfit_part}")
         if char_part:
             prompt_parts.append(f". {char_part}")
+        prompt_parts.append(human_separator)  # 🆕 ההפרדה לפני קומפוזיציה
         prompt_parts.append(f", {clean_composition}")
         prompt_parts.append(anchor['end'])
         prompt_parts.append(anchor['hardener'])
