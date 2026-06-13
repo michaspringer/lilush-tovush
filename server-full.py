@@ -4,8 +4,14 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-06-12 21:30 (Israel time)
+Last modified by Claude: 2026-06-13 19:00 (Israel time)
 Changes in this version:
+  - 🔙 ROLLBACK appearance ears: "small rounded human ears" הוסר מ-appearance.
+    גרם ל-PuLID להגדיל את האוזניים ולעוות פרופורציות פנים לכיוון "תינוק-קרטון
+    גנרי". מבנה הפנים של 06-06 חוזר.
+  - 🛡️ ההגנה מ-feature-bleed (אוזני פיל וכו') נשארת רק דרך human_separator
+    קצר בפרומפט הסצנה: "the child has only two small human ears and
+    no animal features". אם feature-bleed יחזור — נטפל נקודתית.
   - 🐛 FIX: handle_preview_options_pulid לא קיבל appearance — לכן 3 מ-4 הוריאציות
     יצאו עם צבע עיניים שגוי, למרות ש-Claude Vision זיהה נכון.
     הוסף appearance ל-request, נשלח לכל קריאה ל-generate_image_with_pulid.
@@ -1014,17 +1020,17 @@ Return ONLY the English translation, no explanations."""
             # 2. ללא ביגוד (הוא ייקבע ע"י outfit lock נפרד)
             # 3. ללא רקע / סצנה
             # 4. תוצאה כצירוף קצר שאפשר להוסיף לפרומפט באנגלית
-            # 5. 🆕 חובה לכלול תיאור אוזניים — מונע "אוזני פיל" בסצנות עם בעלי חיים
+            # ⚠️ 13/6: הוסר תיאור אוזניים מ-appearance — גרם ל-PuLID להגדיל
+            # אותן לפרופורציות לא-אנושיות. ההגנה מ-feature-bleed עברה
+            # ל-human_separator בלבד (בפרומפט הסצנה של PuLID).
             prompt_text = """Look at this photo of a child and write a concise physical description for use as an anchor in AI image generation.
 
 REQUIRED format: a comma-separated list of features, starting with "with".
 
-INCLUDE (all required):
+INCLUDE:
 - Eye color (be specific: bright blue / hazel green / dark brown / etc.)
 - Hair color and length (short brown / long blonde / curly black / etc.)
 - Skin tone (fair / olive / medium brown / dark)
-- Ears (ALWAYS write "small rounded human ears" — this is critical to prevent
-  feature mixing with animal characters in the scenes)
 - Any distinctive facial features (rosy cheeks, dimples, freckles, etc.) — only if clearly visible
 
 EXCLUDE:
@@ -1032,11 +1038,12 @@ EXCLUDE:
 - Background / scene / setting
 - Emotion / expression
 - Age
+- Ears (do not mention ears at all)
 
 Output EXACTLY one line in this format and nothing else:
-with [eye color] eyes, [hair description], [skin tone] skin, small rounded human ears, [optional features]
+with [eye color] eyes, [hair description], [skin tone] skin, [optional features]
 
-Example: with bright blue eyes, short light-brown hair, fair skin, small rounded human ears, rosy cheeks"""
+Example: with bright blue eyes, short light-brown hair, fair skin, rosy cheeks"""
             
             claude_request = {
                 "model": "claude-sonnet-4-20250514",
@@ -2626,7 +2633,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
         prompt_parts = [
             anchor['start'],
             f"a human {child_gender} child",  # 🆕 "human" מוסיף הפרדה מבעלי חיים
-            appearance_part,  # "with bright blue eyes, ..., small rounded human ears, ..."
+            appearance_part,  # "with bright blue eyes, short brown hair, fair skin, rosy cheeks"
             ", ",
             prompt,
         ]
