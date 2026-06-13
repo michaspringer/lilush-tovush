@@ -5,9 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>📖 בדיקת ספר מלא — לילוש טובוש</title>
 <!--
-    Last modified by Claude: 2026-06-08 23:55 (Israel time)
+    Last modified by Claude: 2026-06-12 21:30 (Israel time)
     
     Changes since last version:
+      - 🐛 FIX: שליחת appearance גם ל-/api/preview-options-pulid
+        (קודם נשלח רק ל-/api/start-book-generation — לכן הוריאציות לא שמרו עיניים)
       - 🆕 APPEARANCE: שמירה והעברה של תיאור פיזי מ-Claude Vision
         (נקרא ב-/api/upload-reference, נשלח ל-/api/start-book-generation)
         תצוגה ויזואלית של מה Claude זיהה — debugging חיוני
@@ -497,7 +499,8 @@
                 body: JSON.stringify({
                     child_name: childName,
                     reference_url: referenceUrl,
-                    child_gender: childGender
+                    child_gender: childGender,
+                    appearance: childAppearance  // 🆕 מ-Claude Vision — קריטי לעקביות עיניים
                 })
             });
             const previewData = await previewResp.json();
