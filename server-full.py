@@ -4,18 +4,14 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-06-09 00:30 (Israel time)
+Last modified by Claude: 2026-06-12 21:30 (Israel time)
 Changes in this version:
-  - 🐛 FIX FEATURE BLEED: בעמודים עם בעלי חיים, PuLID היה מוסיף לפעמים פיצ׳רים
-    של החיה לילד (אוזני פיל, פרווה וכו'). הילד לא איבד אוזניים אנושיות —
-    הוא צמח נוספות. תיקון:
-    * Claude Vision כעת מתחייב לכלול "small rounded human ears" באחיזה
-    * generate_image_with_pulid מוסיף משפט הפרדה מפורש בפרומפט:
-      "the child is a normal human boy... no animal features... no extra ears,
-       no fur, no trunk, no tail, no wings — the child is fully human"
-    PuLID-Flux לא תומך ב-negative_prompt, אז ההפרדה היא חיובית-בשלילה
-    בתוך הפרומפט עצמו.
-  - 🆕 APPEARANCE ANCHOR: Claude Vision מנתח את תמונת הרפרנס פעם אחת
+  - 🐛 FIX: handle_preview_options_pulid לא קיבל appearance — לכן 3 מ-4 הוריאציות
+    יצאו עם צבע עיניים שגוי, למרות ש-Claude Vision זיהה נכון.
+    הוסף appearance ל-request, נשלח לכל קריאה ל-generate_image_with_pulid.
+  - 🔧 קיצור human_separator — היה עמוס מדי, אולי הציף את הפרומפט.
+    עכשיו: "the child has only two small human ears and no animal features"
+  - 🐛 FIX FEATURE BLEED (קודם): אוזני פיל נוספו לילד
     בתחילת הזרימה ומחזיר תיאור פיזי קצר ("with blue eyes, brown hair...").
     התיאור נכנס לכל פרומפט של PuLID בספר — מעגן צבע עיניים, שיער, וכו'
     שלפעמים נשבר בסצנות מורכבות.
@@ -2031,6 +2027,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             child_name = data.get('child_name', '').strip()
             reference_url = data.get('reference_url', '').strip()
             child_gender = data.get('child_gender', 'boy')
+            appearance = data.get('appearance')  # 🆕 מ-Claude Vision, מה-frontend
             
             if not reference_url:
                 raise Exception('Missing reference_url (upload reference first)')
@@ -2038,6 +2035,8 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             print(f"\n🎨 PuLID preview-options for: {child_name}")
             print(f"   reference: {reference_url[:80]}...")
             print(f"   gender: {child_gender}")
+            if appearance:
+                print(f"   ✨ appearance: {appearance}")
             
             # סצנה נקייה — לזיהוי מהיר של ההורה
             # 🎯 הסתכלות לצדדים מעט עוזרת לאיורים להיראות פחות סטטיים מצילום
@@ -2095,6 +2094,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                         seed=variation['seed'],
                         start_step=variation['start_step'],
                         child_gender=child_gender,
+                        appearance=appearance,  # 🆕 קריטי לעקביות עיניים בכל ה-4
                     )
                     if img:
                         results[index] = {
@@ -2616,14 +2616,11 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
         appearance_part = f" {appearance}" if appearance else ""
         
         # 🆕 separator anti-feature-bleed:
-        # ב-PuLID-Flux אין negative_prompt, אז מכוונים את המודל בפרומפט החיובי.
-        # במיוחד חשוב בסצנות עם בעלי חיים (פילים, ג'ירפות, חתולים) —
-        # אחרת פיצ׳רים של החיה (אוזניים, צוואר ארוך, פרווה) זולגים לילד.
+        # ב-PuLID-Flux אין negative_prompt, אז מכוונים בפרומפט החיובי.
+        # במיוחד בסצנות עם בעלי חיים (פילים, ג'ירפות) — אחרת פיצ׳רים של החיה
+        # זולגים לילד (אוזניים, פרווה וכו'). שומרים את זה קצר כדי לא להציף.
         human_separator = (
-            ". the child is a normal human boy, "
-            "the child has only two small normal human ears, "
-            "no animal features on the child, no extra ears, no fur, "
-            "no trunk, no tail, no wings — the child is fully human"
+            ", the child has only two small human ears and no animal features"
         )
         
         prompt_parts = [
