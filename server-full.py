@@ -4,14 +4,15 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-06-13 19:00 (Israel time)
+Last modified by Claude: 2026-06-13 23:00 (Israel time)
 Changes in this version:
-  - 🔙 ROLLBACK appearance ears: "small rounded human ears" הוסר מ-appearance.
-    גרם ל-PuLID להגדיל את האוזניים ולעוות פרופורציות פנים לכיוון "תינוק-קרטון
-    גנרי". מבנה הפנים של 06-06 חוזר.
-  - 🛡️ ההגנה מ-feature-bleed (אוזני פיל וכו') נשארת רק דרך human_separator
-    קצר בפרומפט הסצנה: "the child has only two small human ears and
-    no animal features". אם feature-bleed יחזור — נטפל נקודתית.
+  - 🔙 FULL ROLLBACK to 06-06 prompt structure:
+    * הוסר human_separator (היה: "the child has only two small human ears
+      and no animal features") — גרם לעיוות פרופורציות פנים
+    * הוסר "human" prefix מ-"a human boy child" — חוזר ל-"a boy child"
+    * appearance ללא ears כבר מההודעה הקודמת
+    זה בדיוק הפרומפט הנקי של 06-06 שעבד מצוין על דולב.
+    feature-bleed (אוזני פיל) אם יחזור — נטפל בדרך אחרת.
   - 🐛 FIX: handle_preview_options_pulid לא קיבל appearance — לכן 3 מ-4 הוריאציות
     יצאו עם צבע עיניים שגוי, למרות ש-Claude Vision זיהה נכון.
     הוסף appearance ל-request, נשלח לכל קריאה ל-generate_image_with_pulid.
@@ -2617,22 +2618,19 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
         # ה-token "id" מסמן ל-PuLID איפה הילד נמצא בסצנה
         child_token = "id"  # PuLID זיהוי הילד — דרך התמונה לא דרך הטקסט
         
-        # 🆕 appearance anchor — מעוגן מיד אחרי "a human boy child" כדי לחבר את
+        # 🆕 appearance anchor — מעוגן מיד אחרי "a boy child" כדי לחבר את
         # התכונות הפיזיות (במיוחד צבע עיניים) לזהות.
         # הגיע מ-Claude Vision שניתח את תמונת הרפרנס.
         appearance_part = f" {appearance}" if appearance else ""
         
-        # 🆕 separator anti-feature-bleed:
-        # ב-PuLID-Flux אין negative_prompt, אז מכוונים בפרומפט החיובי.
-        # במיוחד בסצנות עם בעלי חיים (פילים, ג'ירפות) — אחרת פיצ׳רים של החיה
-        # זולגים לילד (אוזניים, פרווה וכו'). שומרים את זה קצר כדי לא להציף.
-        human_separator = (
-            ", the child has only two small human ears and no animal features"
-        )
+        # 🔙 13/6: הוסר human_separator (היה: "the child has only two small human
+        # ears and no animal features") וה-"human" prefix מ-"a human child".
+        # שניהם גרמו לעיוות פרופורציות פנים. חזרה לפרומפט הנקי של 06-06.
+        # אם feature-bleed יחזור (אוזני פיל וכו') — נטפל נקודתית.
         
         prompt_parts = [
             anchor['start'],
-            f"a human {child_gender} child",  # 🆕 "human" מוסיף הפרדה מבעלי חיים
+            f"a {child_gender} child",
             appearance_part,  # "with bright blue eyes, short brown hair, fair skin, rosy cheeks"
             ", ",
             prompt,
@@ -2641,7 +2639,6 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             prompt_parts.append(f", wearing {outfit_part}")
         if char_part:
             prompt_parts.append(f". {char_part}")
-        prompt_parts.append(human_separator)  # 🆕 ההפרדה לפני קומפוזיציה
         prompt_parts.append(f", {clean_composition}")
         prompt_parts.append(anchor['end'])
         prompt_parts.append(anchor['hardener'])
