@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🍌 Nano Banana POC — לילוש טובוש</title>
+<style>
+    /* Last modified by Claude: 2026-09-17 (Israel time) */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: 'Heebo', -apple-system, sans-serif;
+        background: linear-gradient(135deg, #fff9e6 0%, #ffe8a8 100%);
+        min-height: 100vh;
+        padding: 2rem 1rem;
+        color: #2A2118;
+    }
+    .container {
+        max-width: 1100px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 24px;
+        padding: 2rem;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    }
+    h1 {
+        text-align: center;
+        color: #D97706;
+        margin-bottom: 0.3rem;
+    }
+    .subtitle {
+        text-align: center;
+        color: #5C4A35;
+        margin-bottom: 0.5rem;
+        font-size: 0.95rem;
+    }
+    .badge {
+        display: inline-block;
+        background: #FEF3C7;
+        color: #92400E;
+        padding: 0.25rem 0.75rem;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-bottom: 1.5rem;
+    }
+    .section {
+        background: #fff9e6;
+        padding: 1.5rem;
+        border-radius: 16px;
+        margin-bottom: 1.5rem;
+    }
+    .section h2 {
+        font-size: 1.1rem;
+        margin-bottom: 1rem;
+        color: #D97706;
+    }
+    .upload-area {
+        border: 3px dashed #F59E0B;
+        border-radius: 16px;
+        padding: 2rem;
+        text-align: center;
+        cursor: pointer;
+        transition: background 0.2s;
+        background: white;
+    }
+    .upload-area:hover { background: #fffbf2; }
+    .upload-area.has-image {
+        padding: 1rem;
+        border-style: solid;
+        border-color: #4CAF50;
+    }
+    #refPreview {
+        max-width: 200px;
+        max-height: 200px;
+        border-radius: 12px;
+        margin: 0 auto;
+        display: block;
+    }
+    .prompts-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 0.8rem;
+        margin-top: 1rem;
+    }
+    .prompt-card {
+        background: white;
+        padding: 1rem;
+        border-radius: 12px;
+        border: 2px solid transparent;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 0.85rem;
+    }
+    .prompt-card:hover {
+        border-color: #F59E0B;
+        transform: translateY(-2px);
+    }
+    .prompt-card.selected {
+        border-color: #D97706;
+        background: #FEF3C7;
+    }
+    .prompt-card strong {
+        display: block;
+        margin-bottom: 0.4rem;
+        color: #92400E;
+    }
+    textarea {
+        width: 100%;
+        padding: 1rem;
+        border: 2px solid #E5D3A6;
+        border-radius: 12px;
+        font-family: inherit;
+        font-size: 0.95rem;
+        resize: vertical;
+        min-height: 100px;
+    }
+    textarea:focus { outline: none; border-color: #D97706; }
+    label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        color: #5C4A35;
+        font-size: 0.9rem;
+    }
+    button {
+        background: linear-gradient(135deg, #D97706 0%, #F59E0B 100%);
+        color: white;
+        border: none;
+        padding: 1rem 2rem;
+        font-size: 1rem;
+        font-weight: 700;
+        border-radius: 12px;
+        cursor: pointer;
+        width: 100%;
+        transition: transform 0.15s, opacity 0.15s;
+        font-family: inherit;
+    }
+    button:hover:not(:disabled) { transform: translateY(-2px); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .result {
+        margin-top: 2rem;
+        padding: 1.5rem;
+        background: #F0FDF4;
+        border-radius: 16px;
+        border: 2px solid #86EFAC;
+    }
+    .result.error {
+        background: #FEF2F2;
+        border-color: #FCA5A5;
+    }
+    .result img {
+        max-width: 100%;
+        border-radius: 12px;
+        margin-top: 1rem;
+        box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+    }
+    .comparison {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+    .comparison > div {
+        text-align: center;
+    }
+    .comparison img {
+        max-width: 100%;
+        border-radius: 12px;
+    }
+    .comparison h3 {
+        font-size: 0.9rem;
+        color: #5C4A35;
+        margin-bottom: 0.5rem;
+    }
+    .meta {
+        font-size: 0.85rem;
+        color: #5C4A35;
+        margin-top: 1rem;
+        padding: 0.75rem;
+        background: white;
+        border-radius: 8px;
+    }
+    .meta strong { color: #92400E; }
+    .loading {
+        text-align: center;
+        padding: 2rem;
+        color: #D97706;
+        font-weight: 600;
+    }
+    .spinner {
+        display: inline-block;
+        width: 24px;
+        height: 24px;
+        border: 3px solid #FEF3C7;
+        border-top-color: #D97706;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+        vertical-align: middle;
+        margin-left: 0.5rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .model-selector {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 0.5rem;
+    }
+    .model-btn {
+        flex: 1;
+        padding: 0.6rem;
+        background: white;
+        border: 2px solid #E5D3A6;
+        border-radius: 10px;
+        cursor: pointer;
+        font-size: 0.85rem;
+        font-family: inherit;
+        transition: all 0.2s;
+    }
+    .model-btn.selected {
+        background: #FEF3C7;
+        border-color: #D97706;
+        font-weight: 700;
+    }
+    .info-box {
+        background: #EFF6FF;
+        border: 1px solid #BFDBFE;
+        border-radius: 12px;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        font-size: 0.9rem;
+        color: #1E40AF;
+        line-height: 1.6;
+    }
+    .info-box strong { color: #1E3A8A; }
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>🍌 Nano Banana POC</h1>
+    <p class="subtitle">בדיקת Google Gemini 3 Pro Image לשמירת זהות הילד</p>
+    <div style="text-align:center;">
+        <span class="badge">מודל השוואה ל-PuLID-Flux</span>
+    </div>
+
+    <div class="info-box">
+        <strong>מה זה?</strong> ה-POC הזה בודק את משפחת המודלים <em>Nano Banana</em> של גוגל (Gemini 3.1 Image) — 
+        אלטרנטיבה ל-PuLID שאתה משתמש בו היום. יתרונות: תמיכה בעד <strong>5 דמויות עקביות</strong> (ילד + כלב + אח + ...), 
+        טקסט מדויק בתוך תמונות, ו-4K. <strong>מומלץ:</strong> Nano Banana 2 — האיכות הכי טובה ליחס מחיר/ביצועים.
+    </div>
+
+    <!-- STEP 1: Upload reference -->
+    <div class="section">
+        <h2>1️⃣ תמונת רפרנס של הילד</h2>
+        <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+            <div id="uploadPlaceholder">
+                <div style="font-size:2.5rem; margin-bottom:0.5rem;">📸</div>
+                <div>לחץ להעלאת תמונה</div>
+                <div style="font-size:0.8rem; color:#8B7355; margin-top:0.5rem;">
+                    JPG/PNG · פנים ברורות · עיניים פתוחות
+                </div>
+            </div>
+            <img id="refPreview" style="display:none;" alt="reference">
+        </div>
+        <input type="file" id="fileInput" accept="image/*" style="display:none;" onchange="handleFileSelect(event)">
+    </div>
+
+    <!-- STEP 2: Model choice -->
+    <div class="section">
+        <h2>2️⃣ בחירת מודל</h2>
+        <div class="model-selector">
+            <div class="model-btn selected" data-model="gemini-3.1-flash-image-preview" onclick="selectModel(this)">
+                <div style="font-weight:700;">🚀 Nano Banana 2</div>
+                <div style="font-size:0.75rem; color:#5C4A35;">מומלץ · 4 שניות · $0.034</div>
+            </div>
+            <div class="model-btn" data-model="gemini-3-pro-image-preview" onclick="selectModel(this)">
+                <div style="font-weight:700;">🌟 Nano Banana Pro</div>
+                <div style="font-size:0.75rem; color:#5C4A35;">איכות גבוהה · $0.134</div>
+            </div>
+            <div class="model-btn" data-model="gemini-3.1-flash-lite-image" onclick="selectModel(this)">
+                <div style="font-weight:700;">⚡ Nano Banana 2 Lite</div>
+                <div style="font-size:0.75rem; color:#5C4A35;">הכי מהיר · $0.017</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- STEP 3: Prompt selection -->
+    <div class="section">
+        <h2>3️⃣ בחירת פרומפט לבדיקה</h2>
+        <div class="prompts-grid">
+            <div class="prompt-card selected" onclick="selectPrompt(this)" data-prompt="A children's book illustration of the child from the reference photo, standing in a magical garden with butterflies. Soft watercolor style, warm colors, storybook aesthetic. Preserve the child's exact facial features, hair color, eye color, and skin tone from the reference photo.">
+                <strong>🌸 גן קסום (איור רך)</strong>
+                <div>ילד בגן עם פרפרים, סגנון אקוורל</div>
+            </div>
+            <div class="prompt-card" onclick="selectPrompt(this)" data-prompt="A classic children's book illustration featuring the child from the reference photo, riding a friendly dragon over mountains at sunset. Detailed illustrated style, vibrant colors. Maintain the child's exact appearance from the reference: facial features, hair, eyes, skin tone.">
+                <strong>🐉 דרקון והרים (איור קלאסי)</strong>
+                <div>ילד רוכב על דרקון בשקיעה</div>
+            </div>
+            <div class="prompt-card" onclick="selectPrompt(this)" data-prompt="A Pixar-style 3D animated scene of the child from the reference photo, playing with a golden retriever puppy in a sunny park. Vibrant, cinematic lighting. Keep the child's face, hair, and features identical to the reference photo.">
+                <strong>🐕 גלגול פיקסר עם כלב</strong>
+                <div>ילד משחק עם גור, סגנון 3D</div>
+            </div>
+            <div class="prompt-card" onclick="selectPrompt(this)" data-prompt="A cozy bedtime scene: the child from the reference photo sitting in bed reading a picture book, warm lamp light, teddy bear beside them. Soft illustration style. Preserve the child's identity exactly - same face, hair color, eye color, skin tone.">
+                <strong>🌙 לפני שינה</strong>
+                <div>ילד קורא בספה במיטה</div>
+            </div>
+        </div>
+        <div style="margin-top: 1rem;">
+            <label>או פרומפט מותאם:</label>
+            <textarea id="customPrompt" placeholder="לדוגמה: A watercolor illustration of the child from the reference photo climbing a tree..."></textarea>
+        </div>
+    </div>
+
+    <!-- STEP 4: Generate -->
+    <div class="section">
+        <button id="generateBtn" onclick="generate()" disabled>
+            🎨 יצירת תמונה עם Nano Banana
+        </button>
+    </div>
+
+    <!-- Result -->
+    <div id="resultArea"></div>
+</div>
+
+<script>
+    // Last modified by Claude: 2026-09-17 (Israel time)
+    let referenceImageB64 = null;
+    let selectedPrompt = document.querySelector('.prompt-card.selected').dataset.prompt;
+    let selectedModel = 'gemini-3.1-flash-image-preview';
+
+    function handleFileSelect(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+            referenceImageB64 = ev.target.result;
+            document.getElementById('refPreview').src = referenceImageB64;
+            document.getElementById('refPreview').style.display = 'block';
+            document.getElementById('uploadPlaceholder').style.display = 'none';
+            document.getElementById('uploadArea').classList.add('has-image');
+            document.getElementById('generateBtn').disabled = false;
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function selectPrompt(card) {
+        document.querySelectorAll('.prompt-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        selectedPrompt = card.dataset.prompt;
+        document.getElementById('customPrompt').value = '';
+    }
+
+    function selectModel(btn) {
+        document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+        selectedModel = btn.dataset.model;
+    }
+
+    async function generate() {
+        if (!referenceImageB64) {
+            alert('נא להעלות תמונת רפרנס תחילה');
+            return;
+        }
+
+        // Use custom prompt if provided, else selected card
+        const customPrompt = document.getElementById('customPrompt').value.trim();
+        const prompt = customPrompt || selectedPrompt;
+
+        if (!prompt) {
+            alert('נא לבחור או להזין פרומפט');
+            return;
+        }
+
+        const btn = document.getElementById('generateBtn');
+        btn.disabled = true;
+        btn.textContent = '⏳ יוצר תמונה...';
+
+        const resultArea = document.getElementById('resultArea');
+        resultArea.innerHTML = `
+            <div class="loading">
+                <span class="spinner"></span>
+                Nano Banana עובד... (5-15 שניות)
+            </div>
+        `;
+
+        try {
+            const response = await fetch('/api/test-nano-banana', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    child_image: referenceImageB64,
+                    prompt: prompt,
+                    model: selectedModel
+                })
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                resultArea.innerHTML = `
+                    <div class="result">
+                        <h2 style="color:#166534; margin-bottom:1rem;">✅ הצלחה!</h2>
+                        <div class="comparison">
+                            <div>
+                                <h3>🖼️ תמונת רפרנס</h3>
+                                <img src="${data.reference_url}" alt="reference">
+                            </div>
+                            <div>
+                                <h3>🎨 תוצאה מ-Nano Banana</h3>
+                                <img src="${data.image_url}" alt="generated">
+                            </div>
+                        </div>
+                        <div class="meta">
+                            <strong>מודל:</strong> ${data.model_used}<br>
+                            <strong>זמן:</strong> ${data.elapsed_seconds} שניות<br>
+                            <strong>עלות משוערת:</strong> $${data.cost_estimate_usd}<br>
+                            <strong>פרומפט:</strong> ${data.prompt.substring(0, 120)}${data.prompt.length > 120 ? '...' : ''}
+                        </div>
+                    </div>
+                `;
+            } else {
+                resultArea.innerHTML = `
+                    <div class="result error">
+                        <h2 style="color:#991B1B; margin-bottom:1rem;">❌ שגיאה</h2>
+                        <div style="background:white; padding:1rem; border-radius:8px; font-family:monospace; font-size:0.85rem; white-space:pre-wrap;">${data.error}</div>
+                    </div>
+                `;
+            }
+        } catch (err) {
+            resultArea.innerHTML = `
+                <div class="result error">
+                    <h2 style="color:#991B1B; margin-bottom:1rem;">❌ שגיאת רשת</h2>
+                    <div>${err.message}</div>
+                </div>
+            `;
+        }
+
+        btn.disabled = false;
+        btn.textContent = '🎨 יצירת תמונה עם Nano Banana';
+    }
+</script>
+</body>
+</html>
