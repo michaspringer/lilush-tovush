@@ -2,69 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 Children's Book Generator - Full Server
-Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
+Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID + Nano Banana
 
-Last modified by Claude: 2026-06-13 23:00 (Israel time)
+Last modified by Claude: 2026-09-17 (Israel time)
 Changes in this version:
-  - 🔙 FULL ROLLBACK to 06-06 prompt structure:
-    * הוסר human_separator (היה: "the child has only two small human ears
-      and no animal features") — גרם לעיוות פרופורציות פנים
-    * הוסר "human" prefix מ-"a human boy child" — חוזר ל-"a boy child"
-    * appearance ללא ears כבר מההודעה הקודמת
-    זה בדיוק הפרומפט הנקי של 06-06 שעבד מצוין על דולב.
-    feature-bleed (אוזני פיל) אם יחזור — נטפל בדרך אחרת.
-  - 🐛 FIX: handle_preview_options_pulid לא קיבל appearance — לכן 3 מ-4 הוריאציות
-    יצאו עם צבע עיניים שגוי, למרות ש-Claude Vision זיהה נכון.
-    הוסף appearance ל-request, נשלח לכל קריאה ל-generate_image_with_pulid.
-  - 🔧 קיצור human_separator — היה עמוס מדי, אולי הציף את הפרומפט.
-    עכשיו: "the child has only two small human ears and no animal features"
-  - 🐛 FIX FEATURE BLEED (קודם): אוזני פיל נוספו לילד
-    בתחילת הזרימה ומחזיר תיאור פיזי קצר ("with blue eyes, brown hair...").
-    התיאור נכנס לכל פרומפט של PuLID בספר — מעגן צבע עיניים, שיער, וכו'
-    שלפעמים נשבר בסצנות מורכבות.
-    * analyze_child_appearance — קריאה ל-claude-sonnet-4 vision (~$0.003 פעם אחת)
-    * handle_upload_reference — מחזיר את ה-appearance ל-frontend
-    * generate_image_with_pulid — מקבל ומזריק לפרומפט
-    * _add_images_with_progress — מעביר ל-PuLID בכל עמוד
-  - 🆕 ASYNC BOOK GENERATION: פותר timeout של Cloudflare/Railway proxy
-    * POST /api/start-book-generation — מחזיר מיד job_id, יוצר ספר ברקע
-    * GET  /api/book-status/<job_id> — polling להתקדמות
-    * שמירת מצב ב-/tmp/books/<job_id>.json
-    * _add_images_with_progress — שכפול מ-add_images_to_story עם עדכוני התקדמות
-    זה תשתית לפתרון באג #23 (broken pipe במובייל) — כעת גם דסקטופ ייהנה.
-  - 🧪 STEP 2B test page: routing חדש ל-/test-pulid-book
-    דף בדיקה עצמאי לזרימה המלאה: תמונה → 4 וריאציות → בחירה → ספר 8 עמודים
-    מאמת ש-handle_generate_story + add_images_to_story עובדים נכון עם PuLID
-    לפני שנוגעים ב-UI הראשי בשלב 2C.
-    הוראות Character Bible חלות עכשיו גם על PuLID (use_identity_model).
-  - 🆕 STEP 2B: handle_generate_story + add_images_to_story תומכים ב-PuLID
-    * חדש: handle_generate_story מקבל reference_url מהבקשה
-    * חדש: סדר עדיפות מסלולים: PuLID > LoRA > FLUX face swap > FLUX
-    * outfit נבחר גם ל-PuLID (לעקביות בין עמודים)
-    * Throttle 5s ב-PuLID (קל יותר מ-12s של LoRA)
-    * הזרימה הישנה של LoRA נשארת פעילה לתאימות
-    * ה-frontend עוד לא מעביר reference_url — יבוצע בשלב 2C
-  - 🔧 STEP 2A.1: בדיקת ריאליסטי שוב (בעקבות פידבק שדולב חסר ריאליסטי)
-    * הוסף warm_realistic ל-style_anchors ב-generate_image_with_pulid
-    * preview-options-pulid עכשיו מחזיר 4 וריאציות במקום 3
-    * המטרה: לראות אם start_step=4 לריאליסטי שומר על זיהוי טוב
-  - 🆕 STEP 2A: PuLID infrastructure בשרת:
-    * handle_upload_reference (POST /api/upload-reference) — מעלה תמונת
-      רפרנס יחידה ל-Cloudinary, מחזיר URL ציבורי
-    * handle_preview_options_pulid (POST /api/preview-options-pulid) —
-      יוצר 3 וריאציות סגנון: classic_illustration, soft_illustration,
-      pixar_3d (במקום warm_realistic — PuLID חלש בריאליזם)
-    * generate_image_with_pulid (method חדש) — אנלוגי ל-generate_image_with_lora
-      אבל לזרימה החדשה. start_step אוטומטי לפי סגנון.
-    הקוד הישן של LoRA נשאר פעיל לתאימות; ה-frontend עוד לא מדבר עם
-    ה-endpoints החדשים — יעודכן בשלב 2C.
-  - 🧹 STEP 1 CLEANUP: הוסרו endpoints/handlers ישנים שלא בשימוש מה-frontend:
-    * handle_preview_lora (היה /api/preview-lora) — תצוגה מקדימה ישנה של LoRA
-    * handle_test_style_prompts (היה /api/test-style-prompts) — דף טסט פרומפטים
-    * routing של /test-style ב-do_GET
-    שאר קוד LoRA (training, status, generate_image_with_lora, preview-options) נשאר
-    פעיל עד שלב 2 שבו יוחלף ב-PuLID.
-  - 🧪 POC: /api/test-pulid + /test-pulid HTML — בדיקת PuLID-Flux לזהות
+  - 🍌 POC: /api/test-nano-banana + /test-nano-banana HTML - בדיקת Google Nano Banana
+    (gemini-3.1-flash-image-preview default, גם Pro ו-Lite נתמכים, $0.017-$0.134/תמונה)
+  - 🍌 דורש: google-genai ב-requirements.txt + GEMINI_API_KEY ב-Railway env
+
+Previous changes (2026-05-25):
+  - 🧪 POC: /api/test-pulid + /test-pulid HTML - בדיקת PuLID-Flux לזהות
     (bytedance/flux-pulid, $0.021/תמונה, ~15s)
   - 🎯 TRIGGER REINFORCEMENT: trigger_word מופיע 3× בכל פרומפט (היה 1×)
   - 🎨 STYLE HARDENING: בלוק אנטי-ריאליסטי חוזר עבור classic/soft_illustration
@@ -152,6 +99,16 @@ try:
 except ImportError:
     HAS_REPLICATE = False
     print("⚠️ replicate not installed - LoRA training disabled")
+
+# 🍌 Google GenAI - לבדיקת Nano Banana POC (2026-09-17)
+# Last modified by Claude: 2026-09-17 (Israel time)
+try:
+    from google import genai as google_genai
+    HAS_GEMINI = True
+    print("✅ Google GenAI (Nano Banana) loaded")
+except ImportError:
+    HAS_GEMINI = False
+    print("⚠️  Google GenAI not installed - Nano Banana POC disabled")
 # ========================================
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
@@ -175,10 +132,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         elif self.path.startswith('/api/lora-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_lora_status(training_id)
-        elif self.path.startswith('/api/book-status/'):
-            # 🆕 STEP 2B-async: בדיקת סטטוס יצירת ספר ברקע
-            job_id = self.path.split('/')[-1]
-            self.handle_book_status(job_id)
         elif self.path == '/' or self.path == '/landing.html':
             # 🏠 דף הנחיתה - מה שמבקר חדש רואה ראשון
             self.serve_file('landing.html', 'text/html')
@@ -189,15 +142,16 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.serve_file('app-full.js', 'application/javascript')
         elif self.path == '/styles-full.css':
             self.serve_file('styles-full.css', 'text/css')
+        elif self.path == '/test-style' or self.path == '/test-style.html':
+            # 🧪 TEMP: דף טסט לפרומפטים
+            self.serve_file('test-style.html', 'text/html')
         elif self.path == '/test-pulid' or self.path == '/test-pulid.html':
-            # 🧪 POC: דף טסט PuLID (פרומפט בודד)
+            # 🧪 POC: דף טסט PuLID
             self.serve_file('test-pulid.html', 'text/html')
-        elif self.path == '/test-pulid-preview' or self.path == '/test-pulid-preview.html':
-            # 🧪 STEP 2A: דף טסט לזרימה המלאה של PuLID (4 וריאציות סגנון)
-            self.serve_file('test-pulid-preview.html', 'text/html')
-        elif self.path == '/test-pulid-book' or self.path == '/test-pulid-book.html':
-            # 🧪 STEP 2B: דף טסט לספר 8 עמודים מלא עם PuLID
-            self.serve_file('test-pulid-book.html', 'text/html')
+        elif self.path == '/test-nano-banana' or self.path == '/test-nano-banana.html':
+            # 🍌 POC: דף טסט Nano Banana (Google Gemini)
+            # Last modified by Claude: 2026-09-17 (Israel time)
+            self.serve_file('test-nano-banana.html', 'text/html')
         else:
             # Try default handler
             try:
@@ -237,16 +191,17 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.handle_test_face_swap()
         elif self.path == '/api/start-lora-training':
             self.handle_start_lora_training()
+        elif self.path == '/api/preview-lora':  # 🆕 NEW: LoRA preview check
+            self.handle_preview_lora()
         elif self.path == '/api/preview-options':  # 🆕 NEW: 3 preview options
             self.handle_preview_options()
+        elif self.path == '/api/test-style-prompts':  # 🧪 TEMP: prompt experimentation
+            self.handle_test_style_prompts()
         elif self.path == '/api/test-pulid':  # 🧪 POC: PuLID identity preservation
             self.handle_test_pulid()
-        elif self.path == '/api/upload-reference':  # 🆕 PuLID: upload reference image
-            self.handle_upload_reference()
-        elif self.path == '/api/preview-options-pulid':  # 🆕 PuLID: 3 style variations
-            self.handle_preview_options_pulid()
-        elif self.path == '/api/start-book-generation':  # 🆕 STEP 2B-async: ספר ברקע
-            self.handle_start_book_generation()
+        elif self.path == '/api/test-nano-banana':  # 🍌 POC: Nano Banana (Google Gemini)
+            # Last modified by Claude: 2026-09-17 (Israel time)
+            self.handle_test_nano_banana()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -269,10 +224,6 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             lora_version = request_data.get('lora_version')  # 🆕 NEW: trained model version
             use_lora = request_data.get('use_lora', False) and lora_url and trigger_word
             
-            # 🆕 PuLID parameters (החדש — מחליף LoRA בזרימה הראשית)
-            reference_url = request_data.get('reference_url')  # תמונת רפרנס מ-Cloudinary
-            use_pulid = reference_url is not None and not use_lora  # PuLID לא רץ במקביל ל-LoRA
-            
             # 🎲 NEW: chosen seed - ה-seed שההורה בחר בתצוגה המקדימה
             chosen_seed = request_data.get('chosen_seed')
             # 💪 NEW: chosen lora_scale - האיזון שההורה בחר (דמיון מול איור)
@@ -281,13 +232,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             chosen_style = request_data.get('chosen_style', 'classic_illustration')
             
             print(f"\n📖 Creating story for: {child_name}")
-            if use_pulid:
-                print(f"🆕 USING PuLID! (no training, direct identity)")
-                print(f"   Reference URL: {reference_url[:80]}...")
-                if chosen_seed is not None:
-                    print(f"   🎲 Chosen seed: {chosen_seed} (consistent for whole book)")
-                print(f"   🎨 Chosen style: {chosen_style}")
-            elif use_lora:
+            if use_lora:
                 print(f"🎓 USING TRAINED LoRA MODEL!")
                 print(f"   Trigger word: {trigger_word}")
                 print(f"   LoRA URL: {lora_url[:80]}...")
@@ -310,16 +255,15 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             
             if IMAGE_MODE != 'none' and story_data.get('pages'):
                 print(f"🎨 Step 2: Generating images ({IMAGE_MODE})...")
-                # 🎓 העבר את ה-LoRA/PuLID, ה-seed, ה-scale וה-style לפונקציה
+                # 🎓 העבר את ה-LoRA, ה-seed, ה-scale וה-style לפונקציה
                 story_data = self.add_images_to_story(
                     story_data,
                     child_photo,
                     lora_url=lora_url if use_lora else None,
                     trigger_word=trigger_word if use_lora else None,
                     lora_version=lora_version if use_lora else None,
-                    reference_url=reference_url if use_pulid else None,  # 🆕 PuLID
                     chosen_seed=chosen_seed,  # 🎲 עקביות לכל הספר
-                    chosen_lora_scale=chosen_lora_scale,  # 💪 האיזון שנבחר (LoRA only)
+                    chosen_lora_scale=chosen_lora_scale,  # 💪 האיזון שנבחר
                     chosen_style=chosen_style,  # 🎨 הסגנון שנבחר
                     child_gender='girl' if request_data.get('childGender') == 'girl' else 'boy'  # 🚻
                 )
@@ -335,6 +279,68 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             import traceback
             traceback.print_exc()
             self.send_json_response({'error': str(e)}, status=500)
+    
+    def handle_preview_lora(self):
+        """
+        🆕 יוצר תמונת תצוגה מקדימה אחת של הילד עם ה-LoRA המאומן.
+        זה לפני יצירת ספר שלם - כדי שהמשתמש יראה איך הילד נראה.
+        """
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            child_name = data.get('child_name', '')
+            lora_url = data.get('lora_url')
+            trigger_word = data.get('trigger_word')
+            lora_version = data.get('lora_version')
+            theme = data.get('theme', 'animals')
+            
+            if not lora_url or not trigger_word:
+                raise Exception('LoRA not configured for this child')
+            
+            print(f"\n🔍 Generating LoRA preview for: {child_name}")
+            print(f"   Trigger: {trigger_word}")
+            
+            # 🛡️ פרומפט בדיקה - תמיד ילד יחיד, ללא אנשים נוספים!
+            # חשוב: לא להזכיר "family members" או "friends" - גורם לשכפול דמות
+            theme_scenes = {
+                'animals': 'in a colorful zoo, friendly cartoon animals in the background, happy smile',
+                'family': 'in a cozy warm living room, soft sunlight, happy smile',
+                'space': 'floating among stars and colorful planets, amazed happy expression',
+                'magic': 'in a magical sparkling forest with glowing lights, wondrous happy look'
+            }
+            scene = theme_scenes.get(theme, theme_scenes['animals'])
+            
+            # יצירת תמונה אחת לבדיקה
+            # medium shot (לא close-up) - עקבי עם הספר, מונע שכפול וריאליזם
+            preview_image = self.generate_image_with_lora(
+                prompt=f"medium shot, {scene}",
+                lora_url=lora_url,
+                trigger_word=trigger_word,
+                lora_version=lora_version
+            )
+            
+            if not preview_image:
+                raise Exception('Failed to generate preview image')
+            
+            print(f"   ✅ Preview ready!")
+            
+            self.send_json_response({
+                'success': True,
+                'preview_image': preview_image,
+                'child_name': child_name,
+                'message': f'תצוגה מקדימה של {child_name}'
+            })
+            
+        except Exception as e:
+            print(f"❌ Preview error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': str(e)
+            }, status=500)
     
     def handle_preview_options(self):
         """
@@ -544,22 +550,15 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             story_data = json.loads(clean_content)
             return story_data
     
-    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None, lora_version=None, reference_url=None, chosen_seed=None, chosen_lora_scale=1.0, chosen_style='classic_illustration', child_gender='boy'):
-        """מוסיף תמונות לסיפור.
-        
-        🆕 סדר עדיפות:
-          1. PuLID (אם reference_url קיים) — החדש, הזרימה הראשית
-          2. LoRA (אם lora_url + trigger_word) — הישן, לתאימות
-          3. FLUX + face swap (אם child_photo בלבד) — fallback
-          4. FLUX רגיל (אם אין כלום) — בלי הילד
+    def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None, lora_version=None, chosen_seed=None, chosen_lora_scale=1.0, chosen_style='classic_illustration', child_gender='boy'):
+        """מוסיף תמונות לסיפור - עם LoRA אם יש, אחרת FLUX + face swap.
         
         chosen_seed: אם ניתן - כל עמודי הספר ישתמשו ב-seed הזה (עקביות מלאה!).
         child_gender: 'boy' או 'girl' - מונע החלקה מגדרית.
         """
         pages = story_data.get('pages', [])
         
-        use_pulid = reference_url is not None
-        use_lora = (not use_pulid) and lora_url and trigger_word  # PuLID גוברת על LoRA
+        use_lora = lora_url and trigger_word
         
         # 📖 NEW: Character Bible - מילון דמויות שClaude יצר
         characters = story_data.get('characters', [])
@@ -575,9 +574,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             for name, desc in char_dict.items():
                 print(f"     - {name}: {desc[:60]}...")
         
-        # 🎽 בחירת ביגוד אחיד לכל הספר (גם ל-PuLID — שומר עקביות בין עמודים)
+        # 🎽 בחירת ביגוד אחיד לכל הספר
         consistent_outfit = None
-        if use_pulid or use_lora:
+        if use_lora:
             import random
             outfits = [
                 "wearing a yellow t-shirt and blue jeans",
@@ -595,13 +594,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         # שמירת ה-Character Bible כך שיהיה זמין לrenegerate
         story_data['character_bible'] = char_dict
         
-        if use_pulid:
-            print(f"  🆕 Creating {len(pages)} images with PuLID!")
-            print(f"  📸 Reference: {reference_url[:80]}...")
-            if chosen_seed:
-                print(f"  🎲 Locked seed: {chosen_seed}")
-            print(f"  🎨 Style: {chosen_style}")
-        elif use_lora:
+        if use_lora:
             print(f"  🎓 Creating {len(pages)} images with LoRA model!")
             print(f"  🏷️  Trigger word: {trigger_word}")
             if lora_version:
@@ -615,33 +608,32 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         for i, page in enumerate(pages):
             print(f"\n  🖼️  Image {i+1}/{len(pages)}...")
             
-            # 🐌 Throttle - חכה בין בקשות לAPI
-            # LoRA: 8-12s (rate limit חזק). PuLID: 5s (קל יותר).
-            if use_pulid:
-                wait_seconds = 5 if i > 0 else 3
-                print(f"  ⏱️  Waiting {wait_seconds}s (PuLID rate limit protection)...")
-                time.sleep(wait_seconds)
-            elif use_lora:
-                wait_seconds = 12 if i > 0 else 8
+            # 🐌 Throttle - חכה בין בקשות LoRA
+            # 🎯 NEW: גם לפני הראשון! כי Claude קרא ל-API קודם וצורך 1 בקשה
+            if use_lora:
+                wait_seconds = 12 if i > 0 else 8  # Wait less before first since Claude was earlier
                 print(f"  ⏱️  Waiting {wait_seconds}s (rate limit protection)...")
                 time.sleep(wait_seconds)
             
             try:
-                # 🎯 לוגיקה משותפת לכל הסניפים שמשתמשים בדמות הילד (PuLID/LoRA):
-                # זיהוי אוטומטי של דמויות נוספות בעמוד + הזרקה מ-Character Bible
-                if use_pulid or use_lora:
+                if use_lora:
+                    # 🎓 מסלול LoRA עם Character Bible
                     illustration = page.get('illustration', '')
-                    page_text = page.get('text', '')
+                    page_text = page.get('text', '')  # הטקסט העברי של העמוד
                     chars_in_scene = page.get('characters_in_scene', [])
                     
                     # 🛡️ FIX: זיהוי אוטומטי של דמויות בעמוד
+                    # לא סומכים רק על characters_in_scene של Claude!
+                    # סורקים את הטקסט והתיאור - אם שם דמות מופיע, מוסיפים אותה
                     detected_chars = set(chars_in_scene)
                     for char_name in char_dict.keys():
+                        # בדיקה אם שם הדמות מופיע בטקסט העברי או בתיאור
                         if char_name in page_text or char_name in illustration:
                             if char_name not in detected_chars:
                                 detected_chars.add(char_name)
                                 print(f"  🔍 Auto-detected character '{char_name}' in page text")
                     
+                    # 🎯 בנה description עם Character Bible
                     char_descriptions = []
                     for char_name in detected_chars:
                         if char_name in char_dict:
@@ -649,46 +641,26 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
                     
                     if char_descriptions:
                         print(f"  📖 Using {len(char_descriptions)} character description(s) from Bible")
-                
-                # 🆕 PuLID: הזרימה הראשית החדשה
-                if use_pulid:
-                    image_url = self.generate_image_with_pulid(
-                        reference_url=reference_url,
-                        prompt=illustration,
-                        style_name=chosen_style,
-                        seed=chosen_seed,  # 🎲 אותו seed לכל הספר
-                        character_descriptions=char_descriptions,
-                        outfit=consistent_outfit,
-                        child_gender=child_gender,
-                    )
                     
-                    # Fallback אם נכשל — FLUX + face swap אם יש child_photo, אחרת FLUX רגיל
-                    if not image_url:
-                        print(f"  ⚠️  PuLID failed, falling back to FLUX...")
-                        if child_photo:
-                            image_url = self.generate_image_flux_with_face(
-                                illustration, child_photo
-                            )
-                
-                elif use_lora:
-                    # 🎓 מסלול LoRA עם Character Bible
                     image_url = self.generate_image_with_lora(
                         prompt=illustration,
                         lora_url=lora_url,
                         trigger_word=trigger_word,
                         lora_version=lora_version,
-                        style_name=chosen_style,
+                        style_name=chosen_style,  # 🎨 הסגנון שההורה בחר
                         outfit=consistent_outfit,
-                        character_descriptions=char_descriptions,
-                        seed=chosen_seed,
-                        lora_scale=chosen_lora_scale,
-                        child_gender=child_gender
+                        character_descriptions=char_descriptions,  # 🆕
+                        seed=chosen_seed,  # 🎲 אותו seed לכל הספר - עקביות!
+                        lora_scale=chosen_lora_scale,  # 💪 אותו scale שההורה בחר
+                        child_gender=child_gender  # 🚻 מונע החלקה מגדרית
                     )
                     
+                    # Fallback אם נכשל
                     if not image_url:
                         print(f"  ⚠️  LoRA failed after retries, falling back to FLUX...")
                         image_url = self.generate_image_flux_with_face(
-                            illustration, child_photo
+                            illustration,
+                            child_photo
                         )
                 else:
                     # מסלול רגיל - FLUX + face swap
@@ -991,117 +963,6 @@ Return ONLY the English translation, no explanations."""
         except Exception as e:
             print(f"  ⚠️ Translation failed: {str(e)}, using original")
             return hebrew_text
-    
-    def analyze_child_appearance(self, image_url):
-        """
-        🆕 מנתח תמונת ילד עם Claude Vision כדי להוציא תיאור פיזי קצר באנגלית.
-        
-        מטרה: לעגן את הזהות (במיוחד צבע עיניים שעלול להישבר ב-PuLID
-        על סצנות מורכבות) דרך תיאור טקסטואלי בפרומפט של כל תמונה בספר.
-        
-        משתמש ב-claude-sonnet-4-20250514 ל-vision quality.
-        עלות: ~$0.003-0.005 לקריאה אחת בלבד בתחילת זרימה.
-        
-        Args:
-            image_url: URL ציבורי לתמונת הילד (מ-Cloudinary)
-        
-        Returns:
-            str: תיאור פיזי קצר באנגלית, או None אם נכשל.
-            דוגמה: "with bright blue eyes, short brown hair, fair skin, rosy cheeks"
-        """
-        try:
-            if not CLAUDE_API_KEY:
-                print("  ⚠️ No CLAUDE_API_KEY — skipping appearance analysis")
-                return None
-            
-            print(f"  👁️  Analyzing child appearance from: {image_url[:80]}...")
-            
-            # 📌 הנחיות:
-            # 1. תיאור מינימלי - רק מה שמשפיע על זיהוי בין תמונות
-            # 2. ללא ביגוד (הוא ייקבע ע"י outfit lock נפרד)
-            # 3. ללא רקע / סצנה
-            # 4. תוצאה כצירוף קצר שאפשר להוסיף לפרומפט באנגלית
-            # ⚠️ 13/6: הוסר תיאור אוזניים מ-appearance — גרם ל-PuLID להגדיל
-            # אותן לפרופורציות לא-אנושיות. ההגנה מ-feature-bleed עברה
-            # ל-human_separator בלבד (בפרומפט הסצנה של PuLID).
-            prompt_text = """Look at this photo of a child and write a concise physical description for use as an anchor in AI image generation.
-
-REQUIRED format: a comma-separated list of features, starting with "with".
-
-INCLUDE:
-- Eye color (be specific: bright blue / hazel green / dark brown / etc.)
-- Hair color and length (short brown / long blonde / curly black / etc.)
-- Skin tone (fair / olive / medium brown / dark)
-- Any distinctive facial features (rosy cheeks, dimples, freckles, etc.) — only if clearly visible
-
-EXCLUDE:
-- Clothing (do not mention what they're wearing)
-- Background / scene / setting
-- Emotion / expression
-- Age
-- Ears (do not mention ears at all)
-
-Output EXACTLY one line in this format and nothing else:
-with [eye color] eyes, [hair description], [skin tone] skin, [optional features]
-
-Example: with bright blue eyes, short light-brown hair, fair skin, rosy cheeks"""
-            
-            claude_request = {
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 150,
-                "messages": [{
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "url",
-                                "url": image_url
-                            }
-                        },
-                        {
-                            "type": "text",
-                            "text": prompt_text
-                        }
-                    ]
-                }]
-            }
-            
-            headers = {
-                'Content-Type': 'application/json',
-                'x-api-key': CLAUDE_API_KEY,
-                'anthropic-version': '2023-06-01'
-            }
-            
-            req = urllib.request.Request(
-                CLAUDE_API_URL,
-                data=json.dumps(claude_request).encode('utf-8'),
-                headers=headers,
-                method='POST'
-            )
-            
-            with urllib.request.urlopen(req, timeout=30) as response:
-                response_data = json.loads(response.read().decode('utf-8'))
-                appearance = response_data['content'][0]['text'].strip()
-                
-                # ניקוי בסיסי — לפעמים Claude יוסיף הסבר. ניקח רק את השורה הראשונה.
-                first_line = appearance.split('\n')[0].strip()
-                # ולוודא שהיא מתחילה עם "with"
-                if not first_line.lower().startswith('with'):
-                    # חיפוש שורה שמתחילה ב-with
-                    for line in appearance.split('\n'):
-                        if line.strip().lower().startswith('with'):
-                            first_line = line.strip()
-                            break
-                
-                print(f"  ✨ Child appearance: {first_line}")
-                return first_line
-        
-        except Exception as e:
-            print(f"  ⚠️ Appearance analysis failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return None
     
     def _story_to_image_description(self, hebrew_story_text, character_bible=None):
         """
@@ -1595,10 +1456,8 @@ Return ONLY the English description, nothing else."""
         theme = theme_names.get(data.get('theme', ''), 'הרפתקאות')
         style = style_names.get(data.get('style', ''), 'מצחיק')
         
-        # 🎯 NEW: בדיקה אם משתמשים ב-LoRA או PuLID - אם כן, נשנה את הוראות התמונות
+        # 🎯 NEW: בדיקה אם משתמשים ב-LoRA - אם כן, נשנה את הוראות התמונות
         use_lora = bool(data.get('use_lora') and data.get('trigger_word'))
-        use_pulid = bool(data.get('reference_url'))  # 🆕 PuLID flow
-        use_identity_model = use_lora or use_pulid  # שניהם דורשים Character Bible
         
         prompt = f"""צור סיפור ילדים בעברית:
 
@@ -1614,8 +1473,8 @@ Return ONLY the English description, nothing else."""
             prompt += f"פרטים: {data['customInput']}\n"
         
         # 🎯 שתי גרסאות שונות של הוראות תיאור התמונה - תלוי אם יש LoRA
-        if use_identity_model:
-            # 🎓 גרסה ל-LoRA / PuLID: Character Bible + הוראות מחמירות לדמות יחידה
+        if use_lora:
+            # 🎓 גרסה ל-LoRA: Character Bible + הוראות מחמירות לדמות יחידה
             prompt += """
 חשוב מאוד! הוראות לכתיבת הסיפור:
 
@@ -1931,76 +1790,156 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 'error': str(e)
             }, status=500)
     
-    # ═══════════════════════════════════════════════════════════════════
-    # 🆕 PuLID FLOW — 2A: שמירת תמונת רפרנס + יצירת 3 וריאציות סגנון
-    # ═══════════════════════════════════════════════════════════════════
-    
-    def handle_upload_reference(self):
+    def handle_test_nano_banana(self):
         """
-        🆕 PuLID: מעלה תמונת רפרנס יחידה ל-Cloudinary ומחזיר URL ציבורי.
+        🍌 POC: בדיקת Google Nano Banana (Gemini Image models).
         
-        הזרימה: ההורה בוחר 1-3 תמונות. בשבילה הראשית הוא בוחר את
-        הטובה ביותר. רק היא נשמרת בענן ומשמשת לכל יצירת תמונה.
+        Last modified by Claude: 2026-09-17 (Israel time)
         
-        מקבל: { child_name: str, child_image: base64_data_url }
-        מחזיר: { success: bool, reference_url: str }
+        מקבל: child_image (base64), prompt, model (optional)
+        מחזיר: image_url, elapsed_seconds, cost_estimate
+        
+        מטרה: השוואה ל-PuLID.
+        יתרונות: עד 5 דמויות עקביות, טקסט מדויק, 4K.
+        
+        Default model: gemini-3.1-flash-image-preview (Nano Banana 2)
         """
         try:
+            if not HAS_GEMINI:
+                raise Exception('google-genai not installed. Add "google-genai" to requirements.txt and redeploy.')
+            
+            api_key = os.environ.get('GEMINI_API_KEY')
+            if not api_key:
+                raise Exception('GEMINI_API_KEY not set in environment. Add it in Railway Settings.')
+            
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
             
-            child_name = data.get('child_name', 'child').strip()
             child_image_b64 = data.get('child_image')
+            prompt = data.get('prompt', '').strip()
+            # 🎯 Default: Nano Banana 2 - מהיר + עקביות עד 5 דמויות
+            model = data.get('model', 'gemini-3.1-flash-image-preview')
             
             if not child_image_b64:
                 raise Exception('Missing child_image (base64 data URL required)')
+            if not prompt:
+                raise Exception('Missing prompt')
             
-            # ניקוי שם — לשמירה ב-Cloudinary public_id
-            safe_name = safe_slug(child_name)
+            print(f"\n🍌 Nano Banana POC starting")
+            print(f"   model: {model}")
+            print(f"   prompt: {prompt[:80]}...")
             
-            print(f"\n📤 PuLID upload-reference for: {child_name}")
-            
-            # פיענוח base64 ושמירה לקובץ זמני
+            # 🖼️ פיענוח ה-base64
             import base64 as _b64
-            import tempfile
             import cloudinary.uploader
+            from io import BytesIO as _BytesIO
+            from PIL import Image as PILImage
             
+            # מסיר את ה-prefix "data:image/jpeg;base64,..."
             if ',' in child_image_b64:
                 child_image_b64 = child_image_b64.split(',', 1)[1]
             
             img_bytes = _b64.b64decode(child_image_b64)
             print(f"   image size: {len(img_bytes)} bytes")
             
+            # שמירה לדיסק זמני להעלאה ל-Cloudinary
+            import tempfile
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
                 f.write(img_bytes)
                 tmp_path = f.name
             
             try:
-                # העלאה ל-Cloudinary
-                print(f"   ☁️  Uploading to Cloudinary...")
+                # 📤 העלאה ל-Cloudinary לצפייה בתצוגה מקדימה
+                print(f"   ☁️  Uploading reference image to Cloudinary...")
                 upload_result = cloudinary.uploader.upload(
                     tmp_path,
-                    folder="pulid_references",
-                    public_id=f"pulid_{safe_name}_{int(time.time())}",
+                    folder="nano_banana_test",
+                    public_id=f"nano_ref_{int(time.time())}",
                     access_mode="public",
                     overwrite=True
                 )
-                ref_url = upload_result['secure_url']
-                print(f"   ✅ Uploaded: {ref_url}")
+                ref_image_url = upload_result['secure_url']
+                print(f"   ✅ Reference uploaded: {ref_image_url}")
                 
-                # 🆕 ניתוח מראה הילד עם Claude Vision
-                # זה רץ פעם אחת בלבד פר תמונה, ויעוגן בכל פרומפט של הספר
-                # (קריטי לעקביות צבע עיניים שלפעמים נשבר ב-PuLID)
-                appearance = self.analyze_child_appearance(ref_url)
+                # 🍌 קריאה ל-Nano Banana
+                print(f"   🎨 Calling Gemini {model}...")
+                start_time = time.time()
+                
+                client = google_genai.Client(api_key=api_key)
+                
+                # טעינת התמונה כ-PIL Image
+                ref_pil_image = PILImage.open(_BytesIO(img_bytes))
+                
+                # יצירה עם רפרנס
+                response = client.models.generate_content(
+                    model=model,
+                    contents=[prompt, ref_pil_image],
+                )
+                
+                elapsed = time.time() - start_time
+                print(f"   ✅ Nano Banana done in {elapsed:.1f}s")
+                
+                # 🖼️ חילוץ התמונה מהתגובה
+                result_bytes = None
+                text_response = ""
+                for candidate in response.candidates:
+                    for part in candidate.content.parts:
+                        if hasattr(part, 'inline_data') and part.inline_data is not None:
+                            result_bytes = part.inline_data.data
+                            break
+                        elif hasattr(part, 'text') and part.text:
+                            text_response += part.text
+                    if result_bytes:
+                        break
+                
+                if not result_bytes:
+                    # Debug: מה החזיר המודל?
+                    print(f"   ⚠️  No image in response. Text response:")
+                    print(f"      {text_response[:500]}")
+                    raise Exception(f'Nano Banana returned no image. Text: {text_response[:200]}')
+                
+                # 📤 העלאה של התוצאה ל-Cloudinary
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f_out:
+                    f_out.write(result_bytes)
+                    result_tmp_path = f_out.name
+                
+                try:
+                    result_upload = cloudinary.uploader.upload(
+                        result_tmp_path,
+                        folder="nano_banana_test",
+                        public_id=f"nano_result_{int(time.time())}",
+                        access_mode="public",
+                        overwrite=True
+                    )
+                    result_url = result_upload['secure_url']
+                    print(f"   🖼️  Result uploaded: {result_url}")
+                finally:
+                    import os as _os
+                    if _os.path.exists(result_tmp_path):
+                        _os.remove(result_tmp_path)
+                
+                # מחיר משוער - לפי המודל
+                cost_map = {
+                    'gemini-3-pro-image-preview': 0.134,       # Nano Banana Pro
+                    'gemini-3.1-flash-image-preview': 0.034,   # Nano Banana 2 (מומלץ)
+                    'gemini-3.1-flash-lite-image': 0.017,      # Nano Banana 2 Lite
+                    'gemini-2.5-flash-image': 0.02,            # Nano Banana Original
+                }
+                cost = cost_map.get(model, 0.05)
                 
                 self.send_json_response({
                     'success': True,
-                    'reference_url': ref_url,
-                    'child_name': child_name,
-                    'appearance': appearance,  # 🆕 ההורה / ה-frontend יראו מה זוהה
+                    'image_url': result_url,
+                    'reference_url': ref_image_url,
+                    'elapsed_seconds': round(elapsed, 1),
+                    'cost_estimate_usd': cost,
+                    'model_used': model,
+                    'prompt': prompt
                 })
+                
             finally:
+                # ניקוי הקובץ הזמני
                 try:
                     import os as _os
                     if _os.path.exists(tmp_path):
@@ -2009,7 +1948,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     pass
         
         except Exception as e:
-            print(f"   ❌ upload-reference error: {str(e)}")
+            print(f"   ❌ Nano Banana test error: {str(e)}")
             import traceback
             traceback.print_exc()
             self.send_json_response({
@@ -2017,695 +1956,114 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 'error': str(e)
             }, status=500)
     
-    def handle_preview_options_pulid(self):
+    def handle_test_style_prompts(self):
         """
-        🆕 PuLID: יוצר 3 וריאציות סגנון של הילד.
-        
-        ההורה כבר בחר תמונת רפרנס (נשמרה ב-Cloudinary).
-        עכשיו אנחנו יוצרים 3 וריאציות כדי שיבחר את הסגנון המועדף.
-        
-        מקבל: { child_name, reference_url, child_gender }
-        מחזיר: { success, options: [ { style, seed, image_url, label } ] }
+        🧪 TEMP: endpoint לטסט פרומפטים. רץ 4 קריאות במקביל ומחזיר URLs.
+        מטרה: לבדוק LoRA על פרומפטים שונים, לבודד משתנים.
         """
         try:
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
             
-            child_name = data.get('child_name', '').strip()
-            reference_url = data.get('reference_url', '').strip()
-            child_gender = data.get('child_gender', 'boy')
-            appearance = data.get('appearance')  # 🆕 מ-Claude Vision, מה-frontend
+            lora_url = data.get('lora_url')
+            trigger_word = data.get('trigger_word')
+            lora_version = data.get('lora_version')
             
-            if not reference_url:
-                raise Exception('Missing reference_url (upload reference first)')
+            if not lora_url or not trigger_word:
+                raise Exception('Missing lora_url or trigger_word')
             
-            print(f"\n🎨 PuLID preview-options for: {child_name}")
-            print(f"   reference: {reference_url[:80]}...")
-            print(f"   gender: {child_gender}")
-            if appearance:
-                print(f"   ✨ appearance: {appearance}")
-            
-            # סצנה נקייה — לזיהוי מהיר של ההורה
-            # 🎯 הסתכלות לצדדים מעט עוזרת לאיורים להיראות פחות סטטיים מצילום
-            clean_scene = (
-                "standing in a simple soft pastel room, "
-                "warm cheerful expression, looking towards the viewer with a smile, "
-                "plain clean background"
-            )
-            
-            # 🎨 4 וריאציות לבדיקה: 2 איורים + 3D pixar + ריאליסטי
-            # 🔬 25/5: PuLID חזק ב-start_step=0 לאיורים
-            # 🔬 30/5: בודקים שוב ריאליסטי כי המוצר צריך זאת
-            import random
-            variations = [
+            test_prompts = data.get('prompts') or [
                 {
-                    'style': 'classic_illustration',
-                    'label': 'classic_illustration',
-                    'seed': random.randint(1, 999999),
-                    'start_step': 0,
+                    'label': 'control_realistic',
+                    'prompt': 'realistic photograph portrait of an adult man, professional photo, plain background, looking at viewer',
+                    'style_name': 'warm_realistic'
                 },
                 {
-                    'style': 'soft_illustration',
-                    'label': 'soft_illustration',
-                    'seed': random.randint(1, 999999),
-                    'start_step': 0,
+                    'label': 'oil_painting',
+                    'prompt': 'detailed oil painting portrait of a middle-aged man, classical art style, painterly, plain background, looking at viewer',
+                    'style_name': 'warm_realistic'
                 },
                 {
-                    'style': 'pixar_3d',
-                    'label': 'pixar_3d',
-                    'seed': random.randint(1, 999999),
-                    'start_step': 2,
+                    'label': 'comic_book',
+                    'prompt': 'comic book illustration portrait of an adult man, graphic novel art style, bold outlines, vivid colors, plain background',
+                    'style_name': 'warm_realistic'
                 },
                 {
-                    'style': 'warm_realistic',
-                    'label': 'warm_realistic',
-                    'seed': random.randint(1, 999999),
-                    'start_step': 4,
+                    'label': 'soft_watercolor',
+                    'prompt': 'soft watercolor painting portrait of an adult man, gentle painterly style, warm tones, plain background',
+                    'style_name': 'warm_realistic'
                 },
             ]
             
-            print(f"   variations: {[(v['style'], v['start_step']) for v in variations]}")
-            
-            # יצירת 4 התמונות במקביל
-            import threading
-            results = [None, None, None, None]
-            errors = [None, None, None, None]
-            
-            def generate_one(index, variation):
-                try:
-                    print(f"   🖼️  Option {index+1}/4 (style={variation['style']}, seed={variation['seed']})...")
-                    img = self.generate_image_with_pulid(
-                        reference_url=reference_url,
-                        prompt=clean_scene,
-                        style_name=variation['style'],
-                        seed=variation['seed'],
-                        start_step=variation['start_step'],
-                        child_gender=child_gender,
-                        appearance=appearance,  # 🆕 קריטי לעקביות עיניים בכל ה-4
-                    )
-                    if img:
-                        results[index] = {
-                            'image': img,
-                            'seed': variation['seed'],
-                            'style': variation['style'],
-                            'label': variation['label'],
-                            'start_step': variation['start_step'],
-                        }
-                        print(f"   ✅ Option {index+1} done")
-                    else:
-                        errors[index] = 'returned None'
-                        print(f"   ❌ Option {index+1} returned None")
-                except Exception as e:
-                    errors[index] = str(e)
-                    print(f"   ❌ Option {index+1} error: {e}")
-            
-            threads = []
-            for i, v in enumerate(variations):
-                t = threading.Thread(target=generate_one, args=(i, v))
-                t.start()
-                threads.append(t)
-            for t in threads:
-                t.join()
-            
-            options = [r for r in results if r and r.get('image')]
-            print(f"   📊 Completed: {len(options)}/4 successful")
-            
-            if not options:
-                # זיהוי שגיאת rate limit / יתרה
-                err_blob = ' | '.join([e for e in errors if e]) or 'unknown'
-                if '429' in err_blob or 'rate' in err_blob.lower():
-                    raise Exception('Rate limit ב-Replicate. בדוק את היתרה (auto-reload < $5).')
-                raise Exception(f'Failed to generate any preview options. Errors: {err_blob}')
-            
-            self.send_json_response({
-                'success': True,
-                'options': options,
-                'child_name': child_name,
-                'reference_url': reference_url,
-            })
-        
-        except Exception as e:
-            print(f"   ❌ preview-options-pulid error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            self.send_json_response({
-                'success': False,
-                'error': str(e)
-            }, status=500)
-    
-    # ═══════════════════════════════════════════════════════════════════
-    # 🆕 ASYNC BOOK GENERATION — STEP 2B
-    # 
-    # הזרימה הסינכרונית של handle_generate_story אורכת 2-3 דקות.
-    # Cloudflare / Railway proxy חותכים את החיבור אחרי ~90 שניות.
-    # התוצאה: הדפדפן מקבל "upstream error" אבל השרת ממשיך לרוץ.
-    # 
-    # הפתרון: זרימה אסינכרונית
-    #   POST /api/start-book-generation → מחזיר מיד job_id, יוצר ברקע
-    #   GET  /api/book-status/<job_id>  → polling כל ~5s לבדיקת התקדמות
-    # 
-    # מצב ה-job נשמר ב-/tmp/books/<job_id>.json:
-    #   { status, progress, total_pages, story_data?, error? }
-    # ═══════════════════════════════════════════════════════════════════
-    
-    def handle_start_book_generation(self):
-        """
-        🆕 מתחיל יצירת ספר ב-thread נפרד, מחזיר מיד job_id.
-        
-        מקבל: אותם פרמטרים כמו /api/generate-story
-        מחזיר: { success: bool, job_id: str }
-        """
-        try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            request_data = json.loads(post_data.decode('utf-8'))
-            
-            # יצירת job_id ייחודי
-            import uuid
-            import os as _os
-            job_id = f"book_{int(time.time())}_{uuid.uuid4().hex[:8]}"
-            
-            # תיקיית עבודה
-            books_dir = '/tmp/books'
-            _os.makedirs(books_dir, exist_ok=True)
-            job_path = f"{books_dir}/{job_id}.json"
-            
-            # שמירת מצב התחלתי
-            initial_state = {
-                'status': 'pending',
-                'progress': 0,
-                'total_pages': 0,
-                'message': 'מתחיל לעבוד...',
-                'created_at': time.time(),
-            }
-            with open(job_path, 'w', encoding='utf-8') as f:
-                json.dump(initial_state, f, ensure_ascii=False)
-            
-            print(f"\n📚 ASYNC BOOK START: {job_id}")
-            print(f"   request: child={request_data.get('childName')}, "
-                  f"theme={request_data.get('theme')}, "
-                  f"use_pulid={bool(request_data.get('reference_url'))}")
-            
-            # הפעלת thread שיעשה את כל העבודה
-            import threading
-            
-            def background_work():
-                try:
-                    # עדכון: התחלנו לעבוד על הסיפור
-                    self._update_book_status(job_id, {
-                        'status': 'in_progress',
-                        'progress': 0,
-                        'total_pages': 0,
-                        'message': 'כותב את הסיפור...',
-                    })
-                    
-                    print(f"   📝 [{job_id}] Step 1: Generating story...")
-                    story_data = self.create_story_with_claude(request_data)
-                    
-                    if not story_data or not story_data.get('pages'):
-                        raise Exception('Story generation failed (no pages)')
-                    
-                    total = len(story_data['pages'])
-                    self._update_book_status(job_id, {
-                        'status': 'in_progress',
-                        'progress': 0,
-                        'total_pages': total,
-                        'message': f'הסיפור מוכן! יוצר {total} תמונות...',
-                    })
-                    
-                    # יצירת תמונות עם callback להתקדמות
-                    print(f"   🎨 [{job_id}] Step 2: Generating {total} images...")
-                    
-                    # נקרא ל-add_images_to_story אבל עם עדכון התקדמות אחרי כל עמוד
-                    story_data = self._add_images_with_progress(
-                        story_data,
-                        request_data,
-                        job_id
-                    )
-                    
-                    # שמירת תוצאה סופית
-                    self._update_book_status(job_id, {
-                        'status': 'complete',
-                        'progress': total,
-                        'total_pages': total,
-                        'message': 'הספר מוכן!',
-                        'story_data': story_data,
-                    })
-                    print(f"   ✅ [{job_id}] Book complete!")
-                
-                except Exception as e:
-                    print(f"   ❌ [{job_id}] Background work failed: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    self._update_book_status(job_id, {
-                        'status': 'error',
-                        'error': str(e),
-                        'message': f'שגיאה: {str(e)}',
-                    })
-            
-            thread = threading.Thread(target=background_work, daemon=True)
-            thread.start()
-            
-            # החזרת job_id מיד
-            self.send_json_response({
-                'success': True,
-                'job_id': job_id,
-                'message': 'יצירת הספר התחילה ברקע',
-            })
-        
-        except Exception as e:
-            print(f"   ❌ start-book-generation error: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            self.send_json_response({
-                'success': False,
-                'error': str(e)
-            }, status=500)
-    
-    def handle_book_status(self, job_id):
-        """
-        🆕 מחזיר את הסטטוס הנוכחי של יצירת ספר.
-        
-        מחזיר: { success, status, progress, total_pages, message, story_data?, error? }
-        """
-        try:
-            # ניקוי שם — סנט בסיסי
-            if not job_id or '/' in job_id or '..' in job_id:
-                raise Exception('Invalid job_id')
-            
-            job_path = f"/tmp/books/{job_id}.json"
-            
-            import os as _os
-            if not _os.path.exists(job_path):
-                self.send_json_response({
-                    'success': False,
-                    'error': 'Job not found (אולי השרת התאתחל מחדש)',
-                }, status=404)
-                return
-            
-            with open(job_path, 'r', encoding='utf-8') as f:
-                state = json.load(f)
-            
-            # החזרת המצב
-            response = {'success': True, **state}
-            self.send_json_response(response)
-        
-        except Exception as e:
-            print(f"   ❌ book-status error: {str(e)}")
-            self.send_json_response({
-                'success': False,
-                'error': str(e)
-            }, status=500)
-    
-    def _update_book_status(self, job_id, updates):
-        """עוזר: עדכון אטומי של מצב job ב-tmp."""
-        try:
-            job_path = f"/tmp/books/{job_id}.json"
-            import os as _os
-            current = {}
-            if _os.path.exists(job_path):
-                try:
-                    with open(job_path, 'r', encoding='utf-8') as f:
-                        current = json.load(f)
-                except Exception:
-                    current = {}
-            current.update(updates)
-            current['updated_at'] = time.time()
-            tmp_path = job_path + '.tmp'
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(current, f, ensure_ascii=False)
-            _os.replace(tmp_path, job_path)
-        except Exception as e:
-            print(f"   ⚠️  _update_book_status failed: {e}")
-    
-    def _add_images_with_progress(self, story_data, request_data, job_id):
-        """
-        🆕 עוטף את add_images_to_story עם עדכוני התקדמות.
-        
-        במקום לקרוא ישירות ל-add_images_to_story (שלא יודע על job_id),
-        אנחנו עושים כאן את הלולאה ומעדכנים אחרי כל עמוד.
-        
-        זה משכפל קצת קוד מ-add_images_to_story, אבל זה מאפשר
-        progress events בלי לשנות את הפונקציה המקורית.
-        """
-        # פרמטרים מהבקשה
-        reference_url = request_data.get('reference_url')
-        use_pulid = bool(reference_url)
-        
-        lora_url = request_data.get('lora_url')
-        trigger_word = request_data.get('trigger_word')
-        lora_version = request_data.get('lora_version')
-        use_lora = (not use_pulid) and request_data.get('use_lora', False) and lora_url and trigger_word
-        
-        child_photo = request_data.get('childPhoto')
-        chosen_seed = request_data.get('chosen_seed')
-        chosen_lora_scale = request_data.get('chosen_lora_scale', 1.0)
-        chosen_style = request_data.get('chosen_style', 'classic_illustration')
-        child_gender = 'girl' if request_data.get('childGender') == 'girl' else 'boy'
-        appearance = request_data.get('appearance')  # 🆕 מ-Claude Vision
-        
-        if appearance:
-            print(f"  ✨ Using appearance anchor: {appearance}")
-        
-        pages = story_data.get('pages', [])
-        total = len(pages)
-        
-        # Character Bible
-        characters = story_data.get('characters', [])
-        char_dict = {}
-        for char in characters:
-            name = char.get('name', '').strip()
-            desc = char.get('english_description', '').strip()
-            if name and desc:
-                char_dict[name] = desc
-        
-        # Outfit אחיד
-        consistent_outfit = None
-        if use_pulid or use_lora:
             import random
-            outfits = [
-                "wearing a yellow t-shirt and blue jeans",
-                "wearing a red striped shirt and khaki shorts",
-                "wearing a green hoodie and dark blue pants",
-                "wearing a white t-shirt with a pattern and beige pants",
-                "wearing an orange sweater and denim shorts",
-                "wearing a purple shirt and gray pants",
-                "wearing a blue polo shirt and brown shorts",
-            ]
-            consistent_outfit = random.choice(outfits)
-            print(f"  🎽 [{job_id}] Outfit: {consistent_outfit}")
-            story_data['outfit'] = consistent_outfit
-        
-        story_data['character_bible'] = char_dict
-        
-        # לולאת יצירת תמונות
-        for i, page in enumerate(pages):
-            # עדכון התקדמות לפני יצירה
-            self._update_book_status(job_id, {
-                'status': 'in_progress',
-                'progress': i,
-                'total_pages': total,
-                'message': f'יוצר תמונה {i+1} מתוך {total}...',
-            })
+            fixed_seed = data.get('seed') or random.randint(1, 999999)
+            lora_scale = data.get('lora_scale', 1.0)
             
-            print(f"\n  🖼️  [{job_id}] Image {i+1}/{total}...")
+            print(f"\n🧪 STYLE PROMPT TEST")
+            print(f"   Trigger: {trigger_word}")
+            print(f"   Seed (fixed): {fixed_seed}")
+            print(f"   LoRA scale: {lora_scale}")
+            print(f"   Testing {len(test_prompts)} prompts...")
             
-            # Throttle
-            if use_pulid:
-                wait_seconds = 5 if i > 0 else 3
-                time.sleep(wait_seconds)
-            elif use_lora:
-                wait_seconds = 12 if i > 0 else 8
-                time.sleep(wait_seconds)
+            import threading
+            results = [None] * len(test_prompts)
             
-            try:
-                # זיהוי דמויות בעמוד
-                if use_pulid or use_lora:
-                    illustration = page.get('illustration', '')
-                    page_text = page.get('text', '')
-                    chars_in_scene = page.get('characters_in_scene', [])
-                    
-                    detected_chars = set(chars_in_scene)
-                    for char_name in char_dict.keys():
-                        if char_name in page_text or char_name in illustration:
-                            detected_chars.add(char_name)
-                    
-                    char_descriptions = [
-                        char_dict[name] for name in detected_chars if name in char_dict
-                    ]
-                
-                if use_pulid:
-                    image_url = self.generate_image_with_pulid(
-                        reference_url=reference_url,
-                        prompt=illustration,
-                        style_name=chosen_style,
-                        seed=chosen_seed,
-                        character_descriptions=char_descriptions,
-                        outfit=consistent_outfit,
-                        child_gender=child_gender,
-                        appearance=appearance,  # 🆕 מ-Claude Vision
-                    )
-                    if not image_url and child_photo:
-                        image_url = self.generate_image_flux_with_face(illustration, child_photo)
-                
-                elif use_lora:
-                    image_url = self.generate_image_with_lora(
-                        prompt=illustration,
+            def generate_one(index, test):
+                try:
+                    print(f"   🖼️  [{index+1}/{len(test_prompts)}] {test['label']}: {test['prompt'][:60]}...")
+                    img = self.generate_image_with_lora(
+                        prompt=test['prompt'],
                         lora_url=lora_url,
                         trigger_word=trigger_word,
                         lora_version=lora_version,
-                        style_name=chosen_style,
-                        outfit=consistent_outfit,
-                        character_descriptions=char_descriptions,
-                        seed=chosen_seed,
-                        lora_scale=chosen_lora_scale,
-                        child_gender=child_gender
+                        style_name=test.get('style_name', 'warm_realistic'),
+                        seed=fixed_seed,
+                        lora_scale=lora_scale,
+                        child_gender='boy'
                     )
-                    if not image_url:
-                        image_url = self.generate_image_flux_with_face(illustration, child_photo)
-                else:
-                    image_url = self.generate_image_flux_with_face(
-                        page['illustration'], child_photo
-                    )
-                
-                page['imageUrl'] = image_url
+                    if img:
+                        results[index] = {
+                            'label': test['label'],
+                            'prompt': test['prompt'],
+                            'image_url': img,
+                            'seed': fixed_seed
+                        }
+                        print(f"   ✅ [{index+1}] done")
+                    else:
+                        print(f"   ❌ [{index+1}] returned None")
+                except Exception as e:
+                    print(f"   ❌ [{index+1}] error: {e}")
+                    results[index] = {
+                        'label': test['label'],
+                        'prompt': test['prompt'],
+                        'error': str(e)
+                    }
             
-            except Exception as e:
-                print(f"  ⚠️  Page {i+1} failed: {e}")
-                page['imageUrl'] = None
-        
-        # עדכון אחרון: כולם נגמרו
-        self._update_book_status(job_id, {
-            'progress': total,
-            'total_pages': total,
-            'message': 'מסיים...',
-        })
-        
-        return story_data
-    
-    def generate_image_with_pulid(
-        self,
-        reference_url,
-        prompt,
-        style_name='classic_illustration',
-        seed=None,
-        start_step=None,
-        character_descriptions=None,
-        outfit=None,
-        child_gender='boy',
-        appearance=None,
-    ):
-        """
-        🆕 PuLID-Flux: יוצר תמונה יחידה עם זהות ילד מהתמונת הרפרנס.
-        
-        אנלוגי ל-generate_image_with_lora, אבל בלי צורך באימון.
-        מבוסס על ה-POC שהוכח ב-25/5 (handle_test_pulid).
-        
-        Args:
-            reference_url: URL ציבורי לתמונת הרפרנס (Cloudinary)
-            prompt: תיאור הסצנה באנגלית
-            style_name: 'classic_illustration' / 'soft_illustration' / 'pixar_3d'
-            seed: לעקביות בין עמודים — אותו seed = אותה דמות
-            start_step: 0 לסטיילים, 2 ל-3D, 4 לריאליסטי. None = לפי style.
-            character_descriptions: רשימת תיאורי דמויות נוספות (Character Bible)
-            outfit: בגדים ספציפיים (אופציונלי)
-            child_gender: 'boy' / 'girl' — לפרומפט
-        
-        Returns:
-            str: URL לתמונה שנוצרה, או None במקרה של כשל
-        """
-        if not HAS_REPLICATE:
-            print("   ❌ Replicate not configured")
-            return None
-        
-        # ────────────────────────────────────────────────────────────
-        # 1. תרגום עברית לאנגלית (PuLID לא תומך עברית)
-        # ────────────────────────────────────────────────────────────
-        if any(ord(c) > 127 for c in prompt):
-            prompt = self.translate_to_english(prompt)
-        
-        # ────────────────────────────────────────────────────────────
-        # 2. הגדרת start_step אוטומטית אם לא נשלח
-        # ────────────────────────────────────────────────────────────
-        style_to_start_step = {
-            'classic_illustration': 0,
-            'soft_illustration': 0,
-            'pixar_3d': 2,
-            'warm_realistic': 4,  # אם בכל זאת נצטרך
-        }
-        if start_step is None:
-            start_step = style_to_start_step.get(style_name, 0)
-        
-        # ────────────────────────────────────────────────────────────
-        # 3. בניית פרומפט עם style anchor
-        # 🎯 style anchors מעוגנים בתחילת + סוף הפרומפט
-        # זה הוכח אמפירית כעובד היטב (POC 25/5)
-        # ────────────────────────────────────────────────────────────
-        style_anchors = {
-            'classic_illustration': {
-                'start': "a classic children's book illustration, ",
-                'end': (
-                    ", traditional storybook illustration art, "
-                    "vibrant rich colors, bright cheerful palette, "
-                    "clean illustration style, professional children's book art"
-                ),
-                'hardener': (
-                    " — this is an ILLUSTRATION not a photograph, "
-                    "drawn/painted art style, NOT photorealistic, NOT a real photo"
-                ),
-            },
-            'soft_illustration': {
-                'start': "a hand-drawn watercolor children's book illustration, soft painterly storybook art, ",
-                'end': (
-                    ", traditional watercolor painting on paper, "
-                    "visible brush strokes, soft pastel washes, "
-                    "delicate hand-painted illustration, "
-                    "dreamy storybook art, NOT photorealistic, NOT a photograph, "
-                    "artistic illustration style"
-                ),
-                'hardener': (
-                    " — this is a WATERCOLOR ILLUSTRATION not a photograph, "
-                    "painted on paper, NOT photorealistic"
-                ),
-            },
-            'pixar_3d': {
-                'start': "a 3D animated movie still in Pixar/Disney style, ",
-                'end': (
-                    ", 3D rendered animation, cinematic lighting, "
-                    "stylized 3D character, animated movie art style, "
-                    "smooth 3D textures, expressive animated face, "
-                    "high quality CGI animation, NOT photorealistic, NOT a real photo"
-                ),
-                'hardener': (
-                    " — this is a 3D ANIMATED scene, "
-                    "Pixar-style render, NOT a photograph"
-                ),
-            },
-            'warm_realistic': {
-                'start': "a realistic photograph, professional portrait photography, ",
-                'end': (
-                    ", photorealistic, natural skin texture, realistic lighting, "
-                    "shot on DSLR camera, sharp focus, lifelike, "
-                    "real photograph quality, warm natural tones, "
-                    "detailed facial features, authentic"
-                ),
-                'hardener': (
-                    " — this is a REAL PHOTOGRAPH, "
-                    "shot with a camera, NOT a drawing, NOT an illustration"
-                ),
-            },
-        }
-        anchor = style_anchors.get(style_name, style_anchors['classic_illustration'])
-        
-        # Character Bible (אם יש)
-        char_part = ""
-        if character_descriptions:
-            char_list = ". ".join(character_descriptions)
-            char_part = char_list
-        
-        # Outfit (אם יש)
-        outfit_part = f"{outfit}" if outfit else ""
-        
-        # קומפוזיציה נקייה
-        clean_composition = (
-            "clean composition, well-framed, centered subject, "
-            "full scene visible, no cropped people, no body parts at edges"
-        )
-        
-        # 🎯 הרכבת הפרומפט הסופי:
-        # [סגנון start] + [תיאור הילד מסומן] + [סצנה] + [דמויות נוספות] + [בגדים] + [סגנון end] + [hardener]
-        # ה-token "id" מסמן ל-PuLID איפה הילד נמצא בסצנה
-        child_token = "id"  # PuLID זיהוי הילד — דרך התמונה לא דרך הטקסט
-        
-        # 🆕 appearance anchor — מעוגן מיד אחרי "a boy child" כדי לחבר את
-        # התכונות הפיזיות (במיוחד צבע עיניים) לזהות.
-        # הגיע מ-Claude Vision שניתח את תמונת הרפרנס.
-        appearance_part = f" {appearance}" if appearance else ""
-        
-        # 🔙 13/6: הוסר human_separator (היה: "the child has only two small human
-        # ears and no animal features") וה-"human" prefix מ-"a human child".
-        # שניהם גרמו לעיוות פרופורציות פנים. חזרה לפרומפט הנקי של 06-06.
-        # אם feature-bleed יחזור (אוזני פיל וכו') — נטפל נקודתית.
-        
-        prompt_parts = [
-            anchor['start'],
-            f"a {child_gender} child",
-            appearance_part,  # "with bright blue eyes, short brown hair, fair skin, rosy cheeks"
-            ", ",
-            prompt,
-        ]
-        if outfit_part:
-            prompt_parts.append(f", wearing {outfit_part}")
-        if char_part:
-            prompt_parts.append(f". {char_part}")
-        prompt_parts.append(f", {clean_composition}")
-        prompt_parts.append(anchor['end'])
-        prompt_parts.append(anchor['hardener'])
-        
-        full_prompt = "".join(prompt_parts)
-        
-        print(f"      🎨 PuLID: style={style_name}, start_step={start_step}, seed={seed}")
-        if appearance:
-            print(f"      ✨ appearance anchor: {appearance}")
-        print(f"      📝 prompt: {full_prompt[:200]}...")
-        
-        # ────────────────────────────────────────────────────────────
-        # 4. קריאה ל-PuLID-Flux ב-Replicate
-        # ────────────────────────────────────────────────────────────
-        import replicate as _replicate
-        
-        input_params = {
-            "main_face_image": reference_url,
-            "prompt": full_prompt,
-            "num_steps": 20,
-            "start_step": start_step,
-            "guidance_scale": 4,
-            "true_cfg": 1,                # 1 = fake CFG (default, מנצח לפי POC)
-            "width": 1024,
-            "height": 1024,
-            "max_sequence_length": 128,
-            "id_weight": 1,
-            "output_format": "webp",
-            "output_quality": 90,
-            "num_outputs": 1,
-        }
-        if seed is not None:
-            input_params["seed"] = seed
-        
-        try:
-            start_time = time.time()
-            output = _replicate.run(
-                "bytedance/flux-pulid:8baa7ef2255075b46f4d91cd238c21d31181b3e6a864463f967960bb0112525b",
-                input=input_params
-            )
-            elapsed = time.time() - start_time
+            threads = []
+            for i, test in enumerate(test_prompts):
+                t = threading.Thread(target=generate_one, args=(i, test))
+                t.start()
+                threads.append(t)
             
-            # output הוא list / iterator / FileOutput
-            if hasattr(output, '__iter__') and not isinstance(output, str):
-                output_list = list(output)
-                result = output_list[0] if output_list else None
-            else:
-                result = output
+            for t in threads:
+                t.join()
             
-            if not result:
-                print(f"      ❌ PuLID returned no image")
-                return None
+            successful = [r for r in results if r and 'image_url' in r]
+            print(f"   📊 Completed: {len(successful)}/{len(test_prompts)} successful")
             
-            # FileOutput → URL string
-            if hasattr(result, 'url'):
-                result = result.url
+            self.send_json_response({
+                'success': True,
+                'seed': fixed_seed,
+                'lora_scale': lora_scale,
+                'trigger_word': trigger_word,
+                'results': [r for r in results if r is not None]
+            })
             
-            print(f"      ✅ PuLID done in {elapsed:.1f}s: {str(result)[:80]}...")
-            return str(result)
-        
         except Exception as e:
-            err_str = str(e)
-            print(f"      ❌ PuLID error: {err_str}")
-            # זיהוי rate limit ל-frontend
-            if '429' in err_str or 'rate' in err_str.lower():
-                raise Exception(f'Rate limit: {err_str}')
-            return None
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({'success': False, 'error': str(e)}, status=500)
     
     def handle_suggest_alternative(self):
         """מציע חלופות לטקסט"""
