@@ -152,6 +152,10 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # 🍌 POC: דף טסט Nano Banana (Google Gemini)
             # Last modified by Claude: 2026-09-17 (Israel time)
             self.serve_file('test-nano-banana.html', 'text/html')
+        elif self.path == '/test-nano-book' or self.path == '/test-nano-book.html':
+            # 📚 POC: ספר מלא A/B - ריאליסטי מול מאויר
+            # Last modified by Claude: 2026-09-17 (Israel time)
+            self.serve_file('test-nano-book.html', 'text/html')
         else:
             # Try default handler
             try:
