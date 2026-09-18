@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>📚 Nano Book POC — דולב בגן החיות</title>
+<style>
+    /* Last modified by Claude: 2026-09-17 (Israel time) */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+        font-family: 'Heebo', -apple-system, sans-serif;
+        background: linear-gradient(135deg, #fff9e6 0%, #ffe8a8 100%);
+        min-height: 100vh;
+        padding: 2rem 1rem;
+        color: #2A2118;
+    }
+    .container {
+        max-width: 1400px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 24px;
+        padding: 2rem;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+    }
+    h1 {
+        text-align: center;
+        color: #D97706;
+        margin-bottom: 0.3rem;
+    }
+    .subtitle {
+        text-align: center;
+        color: #5C4A35;
+        margin-bottom: 2rem;
+        font-size: 0.95rem;
+    }
+    .section {
+        background: #fff9e6;
+        padding: 1.5rem;
+        border-radius: 16px;
+        margin-bottom: 1.5rem;
+    }
+    .section h2 {
+        font-size: 1.1rem;
+        margin-bottom: 1rem;
+        color: #D97706;
+    }
+    .upload-area {
+        border: 3px dashed #F59E0B;
+        border-radius: 16px;
+        padding: 2rem;
+        text-align: center;
+        cursor: pointer;
+        transition: background 0.2s;
+        background: white;
+    }
+    .upload-area:hover { background: #fffbf2; }
+    .upload-area.has-image {
+        padding: 1rem;
+        border-style: solid;
+        border-color: #4CAF50;
+    }
+    #refPreview {
+        max-width: 200px;
+        max-height: 200px;
+        border-radius: 12px;
+        margin: 0 auto;
+        display: block;
+    }
+    input[type="text"] {
+        width: 100%;
+        padding: 1rem;
+        border: 2px solid #E5D3A6;
+        border-radius: 12px;
+        font-family: inherit;
+        font-size: 1rem;
+        text-align: right;
+    }
+    input[type="text"]:focus { outline: none; border-color: #D97706; }
+    label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+        color: #5C4A35;
+        font-size: 0.9rem;
+    }
+    button {
+        background: linear-gradient(135deg, #D97706 0%, #F59E0B 100%);
+        color: white;
+        border: none;
+        padding: 1.2rem 2rem;
+        font-size: 1.05rem;
+        font-weight: 700;
+        border-radius: 12px;
+        cursor: pointer;
+        width: 100%;
+        transition: transform 0.15s, opacity 0.15s;
+        font-family: inherit;
+    }
+    button:hover:not(:disabled) { transform: translateY(-2px); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    
+    .info-box {
+        background: #EFF6FF;
+        border: 1px solid #BFDBFE;
+        border-radius: 12px;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        font-size: 0.9rem;
+        color: #1E40AF;
+        line-height: 1.6;
+    }
+    .info-box strong { color: #1E3A8A; }
+    .story-preview {
+        background: #F0FDF4;
+        border-radius: 12px;
+        padding: 1rem;
+        margin-top: 1rem;
+        font-size: 0.85rem;
+        color: #166534;
+    }
+    .story-preview ol {
+        margin: 0.5rem 1.5rem;
+        padding: 0;
+    }
+    .story-preview li {
+        margin-bottom: 0.3rem;
+    }
+    
+    /* Progress area */
+    .progress-area {
+        margin-top: 2rem;
+        display: none;
+    }
+    .progress-area.active { display: block; }
+    .progress-bar-outer {
+        background: #FEF3C7;
+        height: 8px;
+        border-radius: 999px;
+        overflow: hidden;
+        margin-bottom: 1rem;
+    }
+    .progress-bar-inner {
+        background: linear-gradient(90deg, #D97706, #F59E0B);
+        height: 100%;
+        width: 0%;
+        transition: width 0.3s ease;
+    }
+    .progress-status {
+        text-align: center;
+        color: #92400E;
+        font-weight: 600;
+        margin-bottom: 1rem;
+    }
+    
+    /* Results - 2 column A/B comparison */
+    .results-area {
+        margin-top: 2rem;
+        display: none;
+    }
+    .results-area.active { display: block; }
+    
+    .book-columns {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2rem;
+        margin-top: 1rem;
+    }
+    
+    .book-column {
+        background: white;
+        padding: 1.5rem;
+        border-radius: 16px;
+        border: 2px solid #F59E0B;
+    }
+    .book-column.illustrated {
+        border-color: #8B5CF6;
+    }
+    
+    .book-column h3 {
+        text-align: center;
+        margin-bottom: 1rem;
+        font-size: 1.2rem;
+        color: #D97706;
+    }
+    .book-column.illustrated h3 {
+        color: #7C3AED;
+    }
+    
+    .page-item {
+        margin-bottom: 1.5rem;
+        text-align: center;
+    }
+    .page-item img {
+        max-width: 100%;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .page-caption {
+        font-size: 0.85rem;
+        color: #5C4A35;
+        margin-top: 0.5rem;
+        line-height: 1.4;
+    }
+    .page-number {
+        font-weight: 700;
+        color: #92400E;
+    }
+    
+    .page-loading {
+        background: #FEF3C7;
+        aspect-ratio: 1;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #92400E;
+        font-size: 0.85rem;
+    }
+    .page-error {
+        background: #FEE2E2;
+        aspect-ratio: 1;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #991B1B;
+        padding: 1rem;
+        font-size: 0.8rem;
+        text-align: center;
+    }
+    
+    .spinner {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 2px solid rgba(146, 64, 14, 0.2);
+        border-top-color: #92400E;
+        border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    
+    .cost-summary {
+        margin-top: 1.5rem;
+        padding: 1rem;
+        background: #F0F9FF;
+        border-radius: 12px;
+        text-align: center;
+        color: #075985;
+        font-size: 0.95rem;
+    }
+    .cost-summary strong { color: #0C4A6E; }
+    
+    @media (max-width: 900px) {
+        .book-columns { grid-template-columns: 1fr; }
+    }
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>📚 Nano Book — POC של ספר מלא</h1>
+    <p class="subtitle">בדיקת A/B: ריאליסטי מול מאויר — סיפור "דולב בגן החיות"</p>
+
+    <div class="info-box">
+        <strong>מה זה?</strong> ה-POC הזה יוצר <strong>שני ספרים במקביל</strong> עם אותו סיפור:
+        אחד ריאליסטי (Nano Banana Pro), אחד מאויר (Nano Banana 2). כל ספר בן 8 עמודים.
+        <br><br>
+        <strong>עלות משוערת:</strong> ~$1.35 לשני הספרים ($1.07 ריאליסטי + $0.27 מאויר)<br>
+        <strong>זמן משוער:</strong> 3-5 דקות (יצירה סדרתית של 16 תמונות)
+    </div>
+
+    <!-- STEP 1: Reference image -->
+    <div class="section">
+        <h2>1️⃣ תמונת רפרנס של הילד</h2>
+        <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+            <div id="uploadPlaceholder">
+                <div style="font-size:2.5rem; margin-bottom:0.5rem;">📸</div>
+                <div>לחץ להעלאת תמונה של דולב</div>
+                <div style="font-size:0.8rem; color:#8B7355; margin-top:0.5rem;">
+                    JPG/PNG · פנים ברורות · עיניים פתוחות
+                </div>
+            </div>
+            <img id="refPreview" style="display:none;" alt="reference">
+        </div>
+        <input type="file" id="fileInput" accept="image/*" style="display:none;" onchange="handleFileSelect(event)">
+    </div>
+
+    <!-- STEP 2: Child name -->
+    <div class="section">
+        <h2>2️⃣ שם הילד</h2>
+        <label>איך קוראים לילד? (יופיע בכריכה ובטקסטים)</label>
+        <input type="text" id="childName" value="דולב" placeholder="דולב">
+        
+        <div class="story-preview">
+            <strong>הסיפור: "ההרפתקה של [שם] בגן החיות"</strong>
+            <ol>
+                <li>הגעה לגן החיות</li>
+                <li>קופים משתעשעים בעצים</li>
+                <li>האכלת ג'ירפה גבוהה</li>
+                <li>פיל אפריקאי מתיז מים</li>
+                <li>אריה מלכותי על סלע</li>
+                <li>ליטוף עז בפינת הליטוף</li>
+                <li>גלידה על הספסל</li>
+                <li>יציאה מהגן בשקיעה</li>
+            </ol>
+        </div>
+    </div>
+
+    <!-- STEP 3: Generate button -->
+    <div class="section">
+        <button id="generateBtn" onclick="generateBooks()" disabled>
+            📚 בנה 2 ספרים (16 תמונות · 3-5 דקות)
+        </button>
+    </div>
+
+    <!-- Progress -->
+    <div class="progress-area" id="progressArea">
+        <div class="progress-status" id="progressStatus">מתחיל...</div>
+        <div class="progress-bar-outer">
+            <div class="progress-bar-inner" id="progressBar"></div>
+        </div>
+    </div>
+
+    <!-- Results -->
+    <div class="results-area" id="resultsArea">
+        <h2 style="text-align:center; color:#D97706; margin-bottom:1rem;">📖 הספרים מוכנים</h2>
+        <div class="book-columns">
+            <div class="book-column">
+                <h3>📸 ריאליסטי (Nano Banana Pro)</h3>
+                <div id="realisticPages"></div>
+            </div>
+            <div class="book-column illustrated">
+                <h3>🎨 מאויר (Nano Banana 2)</h3>
+                <div id="illustratedPages"></div>
+            </div>
+        </div>
+        <div class="cost-summary" id="costSummary"></div>
+    </div>
+</div>
+
+<script>
+    // Last modified by Claude: 2026-09-17 (Israel time)
+    let referenceImageB64 = null;
+    
+    // 📖 The 8 pages of the story - shared between realistic and illustrated
+    const STORY_PAGES = [
+        {
+            id: 1,
+            hebrew: "מגיע לגן החיות בהתרגשות",
+            scene: "arriving at a colorful zoo entrance, holding a small map, wearing casual clothes, wide excited smile, looking at the zoo gate with anticipation, bright sunny morning"
+        },
+        {
+            id: 2,
+            hebrew: "צופה בקופים משתעשעים",
+            scene: "standing in front of a monkey enclosure, watching three playful monkeys swinging on tree branches, pointing and laughing, tropical trees in background"
+        },
+        {
+            id: 3,
+            hebrew: "מאכיל ג'ירפה גבוהה",
+            scene: "reaching up on tiptoes to feed a tall giraffe with green leaves, the giraffe's long neck bending down, both looking at each other, savanna background"
+        },
+        {
+            id: 4,
+            hebrew: "פיל אפריקאי מתיז מים",
+            scene: "watching an African elephant with big ears spraying water from its trunk at a watering hole, mist and water droplets in the air, expressing amazement"
+        },
+        {
+            id: 5,
+            hebrew: "אריה מלכותי על סלע",
+            scene: "safely looking through glass at a majestic male lion with golden mane resting on a rock, the child's hand on the glass, respectful curious expression"
+        },
+        {
+            id: 6,
+            hebrew: "מלטף עז בפינת הליטוף",
+            scene: "kneeling down gently petting a small brown-and-white goat in a petting zoo area, gentle smile, wooden fence in background, other kids playing softly out of focus"
+        },
+        {
+            id: 7,
+            hebrew: "מנוחה עם גלידה",
+            scene: "sitting on a wooden park bench eating a chocolate ice cream cone, tired but happy expression, a bit of ice cream on the chin, colorful zoo posters in background"
+        },
+        {
+            id: 8,
+            hebrew: "יוצא מהגן בשקיעה",
+            scene: "waving goodbye at the zoo exit at golden hour sunset, big satisfied smile, warm orange light, silhouette of trees in background"
+        }
+    ];
+    
+    const STYLE_WRAPPERS = {
+        realistic: {
+            prefix: "A photorealistic portrait of the child from the reference photo, ",
+            suffix: ". Natural cinematic lighting, shallow depth of field, professional photography style. Preserve the child's exact facial features, eye color, hair, and skin tone from the reference photo. The child looks age 2-3.",
+            model: "gemini-3-pro-image-preview"
+        },
+        illustrated: {
+            prefix: "A children's book watercolor illustration of the child from the reference photo, ",
+            suffix: ". Soft warm colors, storybook aesthetic, hand-painted watercolor style, gentle lines. Preserve the child's exact facial features, eye color, hair, and skin tone from the reference photo. The child looks age 2-3.",
+            model: "gemini-3.1-flash-image-preview"
+        }
+    };
+
+    function handleFileSelect(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(ev) {
+            referenceImageB64 = ev.target.result;
+            document.getElementById('refPreview').src = referenceImageB64;
+            document.getElementById('refPreview').style.display = 'block';
+            document.getElementById('uploadPlaceholder').style.display = 'none';
+            document.getElementById('uploadArea').classList.add('has-image');
+            updateGenerateBtn();
+        };
+        reader.readAsDataURL(file);
+    }
+    
+    function updateGenerateBtn() {
+        const btn = document.getElementById('generateBtn');
+        btn.disabled = !referenceImageB64;
+    }
+    
+    function initPagePlaceholders() {
+        const realisticEl = document.getElementById('realisticPages');
+        const illustratedEl = document.getElementById('illustratedPages');
+        realisticEl.innerHTML = '';
+        illustratedEl.innerHTML = '';
+        
+        STORY_PAGES.forEach(page => {
+            realisticEl.innerHTML += `
+                <div class="page-item" id="realistic-page-${page.id}">
+                    <div class="page-loading">
+                        <span class="spinner"></span>
+                        <span style="margin-right: 0.5rem;">עמוד ${page.id}...</span>
+                    </div>
+                    <div class="page-caption">
+                        <span class="page-number">עמוד ${page.id}:</span> ${page.hebrew}
+                    </div>
+                </div>
+            `;
+            illustratedEl.innerHTML += `
+                <div class="page-item" id="illustrated-page-${page.id}">
+                    <div class="page-loading">
+                        <span class="spinner"></span>
+                        <span style="margin-right: 0.5rem;">עמוד ${page.id}...</span>
+                    </div>
+                    <div class="page-caption">
+                        <span class="page-number">עמוד ${page.id}:</span> ${page.hebrew}
+                    </div>
+                </div>
+            `;
+        });
+    }
+    
+    function updatePageResult(style, pageId, data) {
+        const el = document.getElementById(`${style}-page-${pageId}`);
+        if (!el) return;
+        
+        const captionEl = el.querySelector('.page-caption');
+        const captionHTML = captionEl.innerHTML;
+        
+        if (data.success) {
+            el.innerHTML = `
+                <img src="${data.image_url}" alt="page ${pageId}">
+                <div class="page-caption">${captionHTML}</div>
+            `;
+        } else {
+            el.innerHTML = `
+                <div class="page-error">
+                    ❌ שגיאה בעמוד ${pageId}<br>
+                    <small style="font-size:0.7rem;">${data.error || 'unknown'}</small>
+                </div>
+                <div class="page-caption">${captionHTML}</div>
+            `;
+        }
+    }
+
+    async function generateBooks() {
+        if (!referenceImageB64) return;
+        
+        const childName = document.getElementById('childName').value.trim() || 'דולב';
+        
+        // UI setup
+        document.getElementById('generateBtn').disabled = true;
+        document.getElementById('generateBtn').textContent = '⏳ יוצר ספרים...';
+        document.getElementById('progressArea').classList.add('active');
+        document.getElementById('resultsArea').classList.add('active');
+        initPagePlaceholders();
+        
+        const totalTasks = STORY_PAGES.length * 2; // 8 pages × 2 styles
+        let completedTasks = 0;
+        let totalCost = 0;
+        let realisticCost = 0;
+        let illustratedCost = 0;
+        let totalTime = 0;
+        
+        function updateProgress(pageId, style) {
+            completedTasks++;
+            const pct = (completedTasks / totalTasks) * 100;
+            document.getElementById('progressBar').style.width = pct + '%';
+            document.getElementById('progressStatus').textContent = 
+                `יוצר... ${completedTasks}/${totalTasks} תמונות · ${Math.round(pct)}%`;
+        }
+        
+        // Build all tasks and execute sequentially (to avoid rate limits)
+        const styles = ['realistic', 'illustrated'];
+        
+        for (const style of styles) {
+            const wrapper = STYLE_WRAPPERS[style];
+            
+            for (const page of STORY_PAGES) {
+                const fullPrompt = wrapper.prefix + page.scene + wrapper.suffix;
+                
+                try {
+                    const response = await fetch('/api/test-nano-banana', {
+                        method: 'POST',
+                        headers: {'Content-Type': 'application/json'},
+                        body: JSON.stringify({
+                            child_image: referenceImageB64,
+                            prompt: fullPrompt,
+                            model: wrapper.model
+                        })
+                    });
+                    
+                    const data = await response.json();
+                    updatePageResult(style, page.id, data);
+                    
+                    if (data.success) {
+                        totalTime += data.elapsed_seconds || 0;
+                        const cost = data.cost_estimate_usd || 0;
+                        totalCost += cost;
+                        if (style === 'realistic') realisticCost += cost;
+                        else illustratedCost += cost;
+                    }
+                } catch (err) {
+                    updatePageResult(style, page.id, {
+                        success: false, 
+                        error: err.message
+                    });
+                }
+                
+                updateProgress(page.id, style);
+            }
+        }
+        
+        // Finalize
+        document.getElementById('progressStatus').textContent = '✅ הושלם!';
+        document.getElementById('costSummary').innerHTML = `
+            <strong>סיכום:</strong> 
+            ${totalTasks} תמונות · 
+            סה"כ ${Math.round(totalTime)} שניות · 
+            עלות כוללת <strong>$${totalCost.toFixed(3)}</strong><br>
+            <small>ריאליסטי: $${realisticCost.toFixed(3)} · מאויר: $${illustratedCost.toFixed(3)}</small>
+        `;
+        
+        document.getElementById('generateBtn').disabled = false;
+        document.getElementById('generateBtn').textContent = '📚 בנה 2 ספרים חדשים';
+    }
+</script>
+</body>
+</html>
