@@ -1821,33 +1821,43 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             data = json.loads(post_data.decode('utf-8'))
             
             child_image_b64 = data.get('child_image')
+            reference_images = data.get('reference_images')  # 🆕 optional list of images
             prompt = data.get('prompt', '').strip()
             # 🎯 Default: Nano Banana 2 - מהיר + עקביות עד 5 דמויות
             model = data.get('model', 'gemini-3.1-flash-image-preview')
             
-            if not child_image_b64:
-                raise Exception('Missing child_image (base64 data URL required)')
+            # Backward compat: if reference_images not provided, use single child_image
+            if not reference_images and child_image_b64:
+                reference_images = [child_image_b64]
+            
+            if not reference_images or len(reference_images) == 0:
+                raise Exception('Missing reference image(s) - provide child_image or reference_images')
             if not prompt:
                 raise Exception('Missing prompt')
             
             print(f"\n🍌 Nano Banana POC starting")
             print(f"   model: {model}")
+            print(f"   reference images: {len(reference_images)}")
             print(f"   prompt: {prompt[:80]}...")
             
-            # 🖼️ פיענוח ה-base64
+            # 🖼️ פיענוח ה-base64 של כל תמונות הרפרנס
             import base64 as _b64
             import cloudinary.uploader
             from io import BytesIO as _BytesIO
             from PIL import Image as PILImage
             
-            # מסיר את ה-prefix "data:image/jpeg;base64,..."
-            if ',' in child_image_b64:
-                child_image_b64 = child_image_b64.split(',', 1)[1]
+            # ⬇️ עיבוד כל תמונות הרפרנס
+            all_img_bytes = []
+            for img_b64 in reference_images:
+                # מסיר את ה-prefix "data:image/jpeg;base64,..."
+                clean_b64 = img_b64.split(',', 1)[1] if ',' in img_b64 else img_b64
+                all_img_bytes.append(_b64.b64decode(clean_b64))
             
-            img_bytes = _b64.b64decode(child_image_b64)
-            print(f"   image size: {len(img_bytes)} bytes")
+            # התמונה הראשית - זו שנעלה ל-Cloudinary לתצוגה מקדימה
+            img_bytes = all_img_bytes[0]
+            print(f"   primary image size: {len(img_bytes)} bytes")
             
-            # שמירה לדיסק זמני להעלאה ל-Cloudinary
+            # שמירה לדיסק זמני להעלאה ל-Cloudinary (רק התמונה הראשית)
             import tempfile
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
                 f.write(img_bytes)
@@ -1867,18 +1877,20 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                 print(f"   ✅ Reference uploaded: {ref_image_url}")
                 
                 # 🍌 קריאה ל-Nano Banana
-                print(f"   🎨 Calling Gemini {model}...")
+                print(f"   🎨 Calling Gemini {model} with {len(all_img_bytes)} reference(s)...")
                 start_time = time.time()
                 
                 client = google_genai.Client(api_key=api_key)
                 
-                # טעינת התמונה כ-PIL Image
-                ref_pil_image = PILImage.open(_BytesIO(img_bytes))
+                # 🆕 טעינת כל תמונות הרפרנס כ-PIL Images
+                ref_pil_images = [PILImage.open(_BytesIO(b)) for b in all_img_bytes]
                 
-                # יצירה עם רפרנס
+                # יצירה עם כל הרפרנסים - Nano Banana תומכת ברבים
+                # ⚠️ החשוב: הפרומפט ראשון, אחר כך התמונות
+                contents = [prompt] + ref_pil_images
                 response = client.models.generate_content(
                     model=model,
-                    contents=[prompt, ref_pil_image],
+                    contents=contents,
                 )
                 
                 elapsed = time.time() - start_time
@@ -1936,6 +1948,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     'success': True,
                     'image_url': result_url,
                     'reference_url': ref_image_url,
+                    'reference_count': len(all_img_bytes),
                     'elapsed_seconds': round(elapsed, 1),
                     'cost_estimate_usd': cost,
                     'model_used': model,
