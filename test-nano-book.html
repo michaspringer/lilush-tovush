@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>📚 Nano Book v2 — בדיקות מתקדמות</title>
+<title>📚 Nano Book v3 — 3 סגנונות, לבוש קבוע</title>
 <style>
-    /* Last modified by Claude: 2026-09-17 (Israel time) */
+    /* Last modified by Claude: 2026-09-19 (Israel time) */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
         font-family: 'Heebo', -apple-system, sans-serif;
@@ -15,7 +15,7 @@
         color: #2A2118;
     }
     .container {
-        max-width: 1400px;
+        max-width: 1100px;
         margin: 0 auto;
         background: white;
         border-radius: 24px;
@@ -53,18 +53,33 @@
         border: 2px solid #E5D3A6; border-radius: 12px;
         font-family: inherit; font-size: 1rem; text-align: right;
     }
+    input[type="text"][dir="ltr"] { text-align: left; }
     input[type="text"]:focus { outline: none; border-color: #D97706; }
+    label {
+        display: block; margin-bottom: 0.5rem; font-weight: 600;
+        color: #5C4A35; font-size: 0.9rem;
+    }
     
-    .style-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.8rem; }
+    /* Style selector - 3 styles */
+    .style-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; }
     .style-card {
-        background: white; padding: 1rem; border-radius: 12px;
+        background: white; padding: 1.2rem 0.8rem; border-radius: 12px;
         border: 2px solid transparent; cursor: pointer;
         transition: all 0.2s; font-size: 0.9rem; text-align: center;
     }
-    .style-card:hover { border-color: #F59E0B; }
+    .style-card:hover { border-color: #F59E0B; transform: translateY(-2px); }
     .style-card.selected { border-color: #D97706; background: #FEF3C7; }
+    .style-card .icon { font-size: 2rem; margin-bottom: 0.5rem; }
     .style-card strong { display: block; margin-bottom: 0.3rem; color: #92400E; font-size: 1rem; }
-    .style-card small { color: #8B7355; font-size: 0.8rem; }
+    .style-card small { color: #8B7355; font-size: 0.75rem; display: block; }
+    
+    /* Outfit detection */
+    .outfit-status {
+        display: flex; align-items: center; gap: 0.5rem;
+        font-size: 0.85rem; color: #5C4A35; margin-bottom: 0.5rem;
+    }
+    .outfit-status.detecting { color: #92400E; }
+    .outfit-status.done { color: #166534; }
     
     button {
         background: linear-gradient(135deg, #D97706 0%, #F59E0B 100%);
@@ -98,14 +113,13 @@
     .results-area { margin-top: 2rem; display: none; }
     .results-area.active { display: block; }
     
-    .book-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; margin-top: 1rem; }
-    .book-column { background: white; padding: 1.5rem; border-radius: 16px; border: 2px solid #F59E0B; }
-    .book-column.illustrated { border-color: #8B5CF6; }
-    .book-column h3 { text-align: center; margin-bottom: 1rem; font-size: 1.2rem; color: #D97706; }
-    .book-column.illustrated h3 { color: #7C3AED; }
+    .book-grid {
+        display: grid; grid-template-columns: repeat(2, 1fr);
+        gap: 1.5rem; margin-top: 1rem;
+    }
     
-    .page-item { margin-bottom: 1.5rem; text-align: center; }
-    .page-item img { max-width: 100%; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+    .page-item { text-align: center; }
+    .page-item img { max-width: 100%; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
     .page-caption { font-size: 0.85rem; color: #5C4A35; margin-top: 0.5rem; line-height: 1.4; }
     .page-number { font-weight: 700; color: #92400E; }
     
@@ -121,7 +135,13 @@
     }
     
     .spinner {
-        display: inline-block; width: 20px; height: 20px;
+        display: inline-block; width: 18px; height: 18px;
+        border: 2px solid rgba(146, 64, 14, 0.2);
+        border-top-color: #92400E; border-radius: 50%;
+        animation: spin 0.8s linear infinite;
+    }
+    .spinner-small {
+        display: inline-block; width: 14px; height: 14px;
         border: 2px solid rgba(146, 64, 14, 0.2);
         border-top-color: #92400E; border-radius: 50%;
         animation: spin 0.8s linear infinite;
@@ -135,33 +155,32 @@
     }
     .cost-summary strong { color: #0C4A6E; }
     
-    @media (max-width: 900px) {
-        .book-columns { grid-template-columns: 1fr; }
-        .refs-grid { grid-template-columns: 1fr; }
-        .style-grid { grid-template-columns: 1fr; }
+    @media (max-width: 700px) {
+        .refs-grid, .style-grid, .book-grid { grid-template-columns: 1fr; }
     }
 </style>
 </head>
 <body>
 <div class="container">
-    <h1>📚 Nano Book v2 — בדיקות מתקדמות</h1>
-    <p class="subtitle">רפרנסים מרובים + בחירת סגנון | סיפור "דולב בגן החיות"</p>
+    <h1>📚 Nano Book v3</h1>
+    <p class="subtitle">3 סגנונות · לבוש קבוע אוטומטית · פרומפטים מדויקים</p>
 
     <div class="info-box">
         <strong>מה חדש?</strong><br>
-        1. <strong>עד 3 תמונות רפרנס</strong> - יותר תמונות = זיהוי מדויק יותר של הילד<br>
-        2. <strong>בחירת סגנון איור</strong> - נסה סגנונות שונים לראות איזה שומר הכי טוב על הפנים<br>
-        3. <strong>השוואה A/B</strong> - הריאליסטי בעמודה אחת, הסגנון הנבחר בעמודה השנייה
+        1. <strong>3 סגנונות לבחירה</strong> - ריאליסטי / פיקסר / איור קלאסי<br>
+        2. <strong>זיהוי לבוש אוטומטי</strong> - Claude Vision מזהה מה הילד לובש ומקבע זאת בכל 8 העמודים<br>
+        3. <strong>פרומפטים מדויקים</strong> - "ג'ירפה אחת" במקום "ג'ירפה גבוהה" (מונע כפילויות)
     </div>
 
+    <!-- STEP 1: Reference images -->
     <div class="section">
-        <h2>1️⃣ תמונות רפרנס של דולב (1-3 תמונות)</h2>
+        <h2>1️⃣ תמונות רפרנס של דולב (1-3)</h2>
         <div class="refs-grid">
             <div class="ref-slot" id="refSlot-0" onclick="triggerFileInput(0)">
                 <div class="ref-slot-placeholder">
                     <div class="ref-slot-num">📸</div>
                     <div>תמונה 1</div>
-                    <small>(חובה)</small>
+                    <small>(חובה - לפי זו יזוהה הלבוש)</small>
                 </div>
                 <input type="file" accept="image/*" style="display:none;" 
                        id="fileInput-0" onchange="handleFileSelect(event, 0)">
@@ -186,43 +205,63 @@
             </div>
         </div>
         <div class="refs-note">
-            💡 טיפ: בחר תמונות עם זוויות שונות, הבעות שונות, ורצוי תאורה בהירה על הפנים
+            💡 טיפ: זוויות שונות, הבעות שונות, תאורה בהירה על הפנים
         </div>
     </div>
 
+    <!-- STEP 2: Outfit (auto-detected, editable) -->
     <div class="section">
-        <h2>2️⃣ סגנון האיור (יופיע בעמודה הימנית)</h2>
+        <h2>2️⃣ לבוש הילד (מזוהה אוטומטית, ניתן לעריכה)</h2>
+        <div class="outfit-status" id="outfitStatus">
+            📷 העלה תמונת רפרנס כדי לזהות לבוש
+        </div>
+        <input type="text" id="outfitInput" dir="ltr" 
+               placeholder="למשל: blue striped shirt and khaki shorts" 
+               disabled>
+        <div style="font-size: 0.8rem; color: #8B7355; margin-top: 0.5rem;">
+            🎯 הלבוש הזה יופיע בכל 8 העמודים - עקביות מלאה
+        </div>
+    </div>
+
+    <!-- STEP 3: Style -->
+    <div class="section">
+        <h2>3️⃣ בחירת סגנון</h2>
         <div class="style-grid">
-            <div class="style-card selected" data-style="watercolor" onclick="selectStyle(this)">
-                <strong>🎨 אקוורל רך</strong>
-                <small>הסגנון הקודם - watercolor</small>
+            <div class="style-card" data-style="realistic" onclick="selectStyle(this)">
+                <div class="icon">📸</div>
+                <strong>ריאליסטי</strong>
+                <small>Nano Banana Pro</small>
+                <small>~$1.07 · 15s/עמוד</small>
             </div>
-            <div class="style-card" data-style="pixar" onclick="selectStyle(this)">
-                <strong>🎬 פיקסר 3D</strong>
-                <small>שומר טוב יותר על הפנים</small>
+            <div class="style-card selected" data-style="pixar" onclick="selectStyle(this)">
+                <div class="icon">🎬</div>
+                <strong>פיקסר 3D</strong>
+                <small>Nano Banana 2</small>
+                <small>~$0.27 · 8s/עמוד</small>
             </div>
             <div class="style-card" data-style="detailed" onclick="selectStyle(this)">
-                <strong>✏️ איור קלאסי מפורט</strong>
-                <small>detailed illustration - חד יותר</small>
-            </div>
-            <div class="style-card" data-style="anime" onclick="selectStyle(this)">
-                <strong>🎭 אנימה עדין</strong>
-                <small>Studio Ghibli style</small>
+                <div class="icon">✏️</div>
+                <strong>איור קלאסי</strong>
+                <small>Nano Banana 2</small>
+                <small>~$0.27 · 8s/עמוד</small>
             </div>
         </div>
     </div>
 
+    <!-- STEP 4: Name -->
     <div class="section">
-        <h2>3️⃣ שם הילד</h2>
+        <h2>4️⃣ שם הילד</h2>
         <input type="text" id="childName" value="דולב" placeholder="דולב">
     </div>
 
+    <!-- STEP 5: Generate -->
     <div class="section">
-        <button id="generateBtn" onclick="generateBooks()" disabled>
-            📚 בנה 2 ספרים (16 תמונות · 3-5 דקות)
+        <button id="generateBtn" onclick="generateBook()" disabled>
+            📚 בנה ספר (8 עמודים · 1-2 דקות)
         </button>
     </div>
 
+    <!-- Progress -->
     <div class="progress-area" id="progressArea">
         <div class="progress-status" id="progressStatus">מתחיל...</div>
         <div class="progress-bar-outer">
@@ -230,44 +269,37 @@
         </div>
     </div>
 
+    <!-- Results -->
     <div class="results-area" id="resultsArea">
-        <h2 style="text-align:center; color:#D97706; margin-bottom:1rem;">📖 הספרים מוכנים</h2>
-        <div class="book-columns">
-            <div class="book-column">
-                <h3>📸 ריאליסטי (Pro)</h3>
-                <div id="realisticPages"></div>
-            </div>
-            <div class="book-column illustrated">
-                <h3 id="illustratedTitle">🎨 מאויר (Nano Banana 2)</h3>
-                <div id="illustratedPages"></div>
-            </div>
-        </div>
+        <h2 style="text-align:center; color:#D97706; margin-bottom:1rem;" id="resultsTitle">📖 הספר מוכן</h2>
+        <div class="book-grid" id="bookGrid"></div>
         <div class="cost-summary" id="costSummary"></div>
     </div>
 </div>
 
 <script>
-    // Last modified by Claude: 2026-09-17 (Israel time)
+    // Last modified by Claude: 2026-09-19 (Israel time)
     const referenceImages = [null, null, null];
-    let selectedStyle = 'watercolor';
+    let selectedStyle = 'pixar';
+    let detectedOutfit = '';
     
     const STORY_PAGES = [
         { id: 1, hebrew: "מגיע לגן החיות בהתרגשות",
-          scene: "arriving at a colorful zoo entrance, holding a small map, wearing casual clothes, wide excited smile, looking at the zoo gate with anticipation, bright sunny morning" },
+          scene: "arriving at a colorful zoo entrance gate, holding a small paper map, wide excited smile, looking at the zoo entrance with anticipation, bright sunny morning" },
         { id: 2, hebrew: "צופה בקופים משתעשעים",
           scene: "standing in front of a monkey enclosure, watching three playful monkeys swinging on tree branches, pointing and laughing, tropical trees in background" },
         { id: 3, hebrew: "מאכיל ג'ירפה גבוהה",
-          scene: "reaching up on tiptoes to feed a tall giraffe with green leaves, the giraffe's long neck bending down, both looking at each other, savanna background" },
+          scene: "reaching up on tiptoes to feed one single tall giraffe with one long neck, holding green leaves in hand, the giraffe's neck bending down toward the child, savanna trees in background" },
         { id: 4, hebrew: "פיל אפריקאי מתיז מים",
-          scene: "watching an African elephant with big ears spraying water from its trunk at a watering hole, mist and water droplets in the air, expressing amazement" },
+          scene: "watching one single African elephant with big ears spraying water from its trunk at a watering hole, mist and water droplets in the air, expressing amazement" },
         { id: 5, hebrew: "אריה מלכותי על סלע",
-          scene: "safely looking through glass at a majestic male lion with golden mane resting on a rock, the child's hand on the glass, respectful curious expression" },
+          scene: "safely looking through a glass window at one majestic male lion with golden mane resting on a rock, the child's hand touching the glass, respectful curious expression" },
         { id: 6, hebrew: "מלטף עז בפינת הליטוף",
-          scene: "kneeling down gently petting a small brown-and-white goat in a petting zoo area, gentle smile, wooden fence in background, other kids playing softly out of focus" },
+          scene: "kneeling down gently petting one small brown-and-white goat in a petting zoo area, gentle smile, wooden fence in background" },
         { id: 7, hebrew: "מנוחה עם גלידה",
-          scene: "sitting on a wooden park bench eating a chocolate ice cream cone, tired but happy expression, a bit of ice cream on the chin, colorful zoo posters in background" },
+          scene: "sitting on a wooden park bench eating a chocolate ice cream cone, tired but happy expression, small bit of ice cream on the chin, colorful zoo posters in background" },
         { id: 8, hebrew: "יוצא מהגן בשקיעה",
-          scene: "waving goodbye at the zoo exit at golden hour sunset, big satisfied smile, warm orange light, silhouette of trees in background" }
+          scene: "waving goodbye at the zoo exit gate at golden hour sunset, big satisfied smile, warm orange light, silhouette of trees in background" }
     ];
     
     const STYLES = {
@@ -276,12 +308,6 @@
             prefix: "A photorealistic portrait of the child from the reference photo(s), ",
             suffix: ". Natural cinematic lighting, shallow depth of field, professional photography style. Preserve the child's exact facial features, eye color, hair, and skin tone. The child looks age 2-3.",
             model: "gemini-3-pro-image-preview"
-        },
-        watercolor: {
-            title: "🎨 אקוורל רך",
-            prefix: "A children's book watercolor illustration of the child from the reference photo(s), ",
-            suffix: ". Soft warm colors, storybook aesthetic, hand-painted watercolor style, gentle lines. Preserve the child's exact facial features, eye color, hair, and skin tone. The child looks age 2-3.",
-            model: "gemini-3.1-flash-image-preview"
         },
         pixar: {
             title: "🎬 פיקסר 3D",
@@ -292,13 +318,7 @@
         detailed: {
             title: "✏️ איור קלאסי מפורט",
             prefix: "A detailed classic children's book illustration of the child from the reference photo(s), ",
-            suffix: ". Rich detailed illustration style, warm storybook colors, precise facial features. Preserve the child's exact facial features, eye color, hair, and skin tone with strong accuracy. The child looks age 2-3.",
-            model: "gemini-3.1-flash-image-preview"
-        },
-        anime: {
-            title: "🎭 אנימה עדין (Ghibli)",
-            prefix: "A Studio Ghibli style anime illustration of the child from the reference photo(s), ",
-            suffix: ". Soft anime style like Studio Ghibli, gentle warm colors, hand-drawn feel, expressive but preserved facial features. Preserve the child's exact facial features, eye color, hair, and skin tone. The child looks age 2-3.",
+            suffix: ". Rich detailed illustration style, warm storybook colors, precise facial features, hand-drawn feel. Preserve the child's exact facial features, eye color, hair, and skin tone. The child looks age 2-3. IMPORTANT: no text or letters in the image.",
             model: "gemini-3.1-flash-image-preview"
         }
     };
@@ -309,12 +329,12 @@
         document.getElementById(`fileInput-${index}`).click();
     }
     
-    function handleFileSelect(e, index) {
+    async function handleFileSelect(e, index) {
         const file = e.target.files[0];
         if (!file) return;
 
         const reader = new FileReader();
-        reader.onload = function(ev) {
+        reader.onload = async function(ev) {
             referenceImages[index] = ev.target.result;
             const slot = document.getElementById(`refSlot-${index}`);
             slot.innerHTML = `
@@ -324,9 +344,57 @@
                        id="fileInput-${index}" onchange="handleFileSelect(event, ${index})">
             `;
             slot.classList.add('has-image');
+            
+            // 👕 If this is the primary image, auto-detect outfit
+            if (index === 0) {
+                await detectOutfit(ev.target.result);
+            }
+            
             updateGenerateBtn();
         };
         reader.readAsDataURL(file);
+    }
+    
+    async function detectOutfit(imageB64) {
+        const statusEl = document.getElementById('outfitStatus');
+        const inputEl = document.getElementById('outfitInput');
+        
+        statusEl.className = 'outfit-status detecting';
+        statusEl.innerHTML = '<span class="spinner-small"></span> Claude Vision מזהה את הלבוש...';
+        inputEl.disabled = true;
+        inputEl.value = '';
+        
+        try {
+            const response = await fetch('/api/analyze-outfit', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({image: imageB64})
+            });
+            
+            const data = await response.json();
+            
+            if (data.success && data.outfit_description) {
+                detectedOutfit = data.outfit_description;
+                inputEl.value = detectedOutfit;
+                inputEl.disabled = false;
+                statusEl.className = 'outfit-status done';
+                statusEl.innerHTML = '✅ לבוש זוהה - ניתן לערוך אם רוצים';
+            } else {
+                // Fallback
+                detectedOutfit = data.outfit_description || 'simple casual clothes';
+                inputEl.value = detectedOutfit;
+                inputEl.disabled = false;
+                statusEl.className = 'outfit-status';
+                statusEl.innerHTML = '⚠️ זיהוי אוטומטי נכשל - ערוך ידנית אם צריך';
+            }
+        } catch (err) {
+            console.error('Outfit detection error:', err);
+            detectedOutfit = 'simple casual clothes';
+            inputEl.value = detectedOutfit;
+            inputEl.disabled = false;
+            statusEl.className = 'outfit-status';
+            statusEl.innerHTML = '⚠️ שגיאה בזיהוי - ערוך ידנית';
+        }
     }
     
     function removeRefImage(index) {
@@ -337,12 +405,23 @@
             <div class="ref-slot-placeholder">
                 <div class="ref-slot-num">📸</div>
                 <div>תמונה ${index + 1}</div>
-                <small>(${isRequired ? 'חובה' : 'אופציונלי'})</small>
+                <small>${isRequired ? '(חובה)' : '(אופציונלי)'}</small>
             </div>
             <input type="file" accept="image/*" style="display:none;" 
                    id="fileInput-${index}" onchange="handleFileSelect(event, ${index})">
         `;
         slot.classList.remove('has-image');
+        
+        if (index === 0) {
+            // Reset outfit
+            document.getElementById('outfitStatus').className = 'outfit-status';
+            document.getElementById('outfitStatus').textContent = '📷 העלה תמונת רפרנס כדי לזהות לבוש';
+            const inputEl = document.getElementById('outfitInput');
+            inputEl.value = '';
+            inputEl.disabled = true;
+            detectedOutfit = '';
+        }
+        
         updateGenerateBtn();
     }
     
@@ -350,7 +429,6 @@
         document.querySelectorAll('.style-card').forEach(c => c.classList.remove('selected'));
         card.classList.add('selected');
         selectedStyle = card.dataset.style;
-        document.getElementById('illustratedTitle').textContent = STYLES[selectedStyle].title;
     }
 
     function updateGenerateBtn() {
@@ -359,14 +437,12 @@
     }
     
     function initPagePlaceholders() {
-        const realisticEl = document.getElementById('realisticPages');
-        const illustratedEl = document.getElementById('illustratedPages');
-        realisticEl.innerHTML = '';
-        illustratedEl.innerHTML = '';
+        const grid = document.getElementById('bookGrid');
+        grid.innerHTML = '';
         
         STORY_PAGES.forEach(page => {
-            const template = (styleKey) => `
-                <div class="page-item" id="${styleKey}-page-${page.id}">
+            grid.innerHTML += `
+                <div class="page-item" id="page-${page.id}">
                     <div class="page-loading">
                         <span class="spinner"></span>
                         <span style="margin-right: 0.5rem;">עמוד ${page.id}...</span>
@@ -376,13 +452,11 @@
                     </div>
                 </div>
             `;
-            realisticEl.innerHTML += template('realistic');
-            illustratedEl.innerHTML += template('illustrated');
         });
     }
     
-    function updatePageResult(styleKey, pageId, data) {
-        const el = document.getElementById(`${styleKey}-page-${pageId}`);
+    function updatePageResult(pageId, data) {
+        const el = document.getElementById(`page-${pageId}`);
         if (!el) return;
         
         const captionEl = el.querySelector('.page-caption');
@@ -396,7 +470,7 @@
         } else {
             el.innerHTML = `
                 <div class="page-error">
-                    ❌ שגיאה בעמוד ${pageId}<br>
+                    ❌ שגיאה<br>
                     <small style="font-size:0.7rem;">${data.error || 'unknown'}</small>
                 </div>
                 <div class="page-caption">${captionHTML}</div>
@@ -404,26 +478,27 @@
         }
     }
 
-    async function generateBooks() {
+    async function generateBook() {
         const refs = referenceImages.filter(img => img !== null);
         if (refs.length === 0) return;
         
         const childName = document.getElementById('childName').value.trim() || 'דולב';
-        const illustStyle = STYLES[selectedStyle];
+        const outfit = document.getElementById('outfitInput').value.trim() || 'simple casual clothes';
+        const style = STYLES[selectedStyle];
         
-        console.log(`Using ${refs.length} reference images, style: ${selectedStyle}`);
+        console.log(`Style: ${selectedStyle}, refs: ${refs.length}, outfit: "${outfit}"`);
         
+        // UI setup
         document.getElementById('generateBtn').disabled = true;
-        document.getElementById('generateBtn').textContent = '⏳ יוצר ספרים...';
+        document.getElementById('generateBtn').textContent = '⏳ יוצר ספר...';
         document.getElementById('progressArea').classList.add('active');
         document.getElementById('resultsArea').classList.add('active');
+        document.getElementById('resultsTitle').textContent = `📖 הספר של ${childName} - ${style.title}`;
         initPagePlaceholders();
         
-        const totalTasks = STORY_PAGES.length * 2;
+        const totalTasks = STORY_PAGES.length;
         let completedTasks = 0;
         let totalCost = 0;
-        let realisticCost = 0;
-        let illustratedCost = 0;
         let totalTime = 0;
         
         function updateProgress() {
@@ -431,63 +506,51 @@
             const pct = (completedTasks / totalTasks) * 100;
             document.getElementById('progressBar').style.width = pct + '%';
             document.getElementById('progressStatus').textContent = 
-                `יוצר... ${completedTasks}/${totalTasks} תמונות · ${Math.round(pct)}%`;
+                `יוצר... ${completedTasks}/${totalTasks} עמודים · ${Math.round(pct)}%`;
         }
         
-        const stylesToRun = [
-            { key: 'realistic', config: STYLES.realistic },
-            { key: 'illustrated', config: illustStyle }
-        ];
-        
-        for (const styleObj of stylesToRun) {
-            for (const page of STORY_PAGES) {
-                const fullPrompt = styleObj.config.prefix + page.scene + styleObj.config.suffix;
+        for (const page of STORY_PAGES) {
+            // 🎯 Build prompt with fixed outfit
+            const outfitClause = `wearing ${outfit}`;
+            const fullPrompt = style.prefix + page.scene + `, ${outfitClause}` + style.suffix;
+            
+            try {
+                const response = await fetch('/api/test-nano-banana', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        child_image: refs[0],
+                        reference_images: refs,
+                        prompt: fullPrompt,
+                        model: style.model
+                    })
+                });
                 
-                try {
-                    const response = await fetch('/api/test-nano-banana', {
-                        method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({
-                            child_image: refs[0],
-                            reference_images: refs,
-                            prompt: fullPrompt,
-                            model: styleObj.config.model
-                        })
-                    });
-                    
-                    const data = await response.json();
-                    updatePageResult(styleObj.key, page.id, data);
-                    
-                    if (data.success) {
-                        totalTime += data.elapsed_seconds || 0;
-                        const cost = data.cost_estimate_usd || 0;
-                        totalCost += cost;
-                        if (styleObj.key === 'realistic') realisticCost += cost;
-                        else illustratedCost += cost;
-                    }
-                } catch (err) {
-                    updatePageResult(styleObj.key, page.id, {
-                        success: false, 
-                        error: err.message
-                    });
+                const data = await response.json();
+                updatePageResult(page.id, data);
+                
+                if (data.success) {
+                    totalTime += data.elapsed_seconds || 0;
+                    totalCost += data.cost_estimate_usd || 0;
                 }
-                
-                updateProgress();
+            } catch (err) {
+                updatePageResult(page.id, {success: false, error: err.message});
             }
+            
+            updateProgress();
         }
         
         document.getElementById('progressStatus').textContent = '✅ הושלם!';
         document.getElementById('costSummary').innerHTML = `
             <strong>סיכום:</strong> 
-            ${totalTasks} תמונות · 
+            ${totalTasks} עמודים · 
             סה"כ ${Math.round(totalTime)} שניות · 
-            עלות כוללת <strong>$${totalCost.toFixed(3)}</strong><br>
-            <small>ריאליסטי: $${realisticCost.toFixed(3)} · ${illustStyle.title}: $${illustratedCost.toFixed(3)}</small><br>
-            <small style="color:#0369A1;">רפרנסים בשימוש: ${refs.length} תמונות</small>
+            עלות <strong>$${totalCost.toFixed(3)}</strong><br>
+            <small>סגנון: ${style.title} · רפרנסים: ${refs.length} · לבוש: "${outfit}"</small>
         `;
         
         document.getElementById('generateBtn').disabled = false;
-        document.getElementById('generateBtn').textContent = '📚 בנה 2 ספרים חדשים';
+        document.getElementById('generateBtn').textContent = '📚 בנה ספר חדש';
     }
 </script>
 </body>
