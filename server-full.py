@@ -206,6 +206,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         elif self.path == '/api/test-nano-banana':  # 🍌 POC: Nano Banana (Google Gemini)
             # Last modified by Claude: 2026-09-17 (Israel time)
             self.handle_test_nano_banana()
+        elif self.path == '/api/analyze-outfit':  # 👕 Claude Vision - זיקוק לבוש מתמונת רפרנס
+            # Last modified by Claude: 2026-09-19 (Israel time)
+            self.handle_analyze_outfit()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -1971,6 +1974,113 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             self.send_json_response({
                 'success': False,
                 'error': str(e)
+            }, status=500)
+    
+    def handle_analyze_outfit(self):
+        """
+        👕 Claude Vision - זיקוק לבוש מתמונת רפרנס
+        
+        Last modified by Claude: 2026-09-19 (Israel time)
+        
+        מקבל: image (base64)
+        מחזיר: outfit_description (תיאור קצר באנגלית של הלבוש)
+        
+        משמש ב-test-nano-book כדי לקבע לבוש עקבי בכל 8 עמודי הספר.
+        """
+        try:
+            if not CLAUDE_API_KEY:
+                raise Exception('CLAUDE_API_KEY not set')
+            
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            image_b64 = data.get('image')
+            if not image_b64:
+                raise Exception('Missing image (base64)')
+            
+            # מסיר את ה-prefix "data:image/jpeg;base64,..."
+            media_type = 'image/jpeg'
+            if ',' in image_b64:
+                # ננסה לחלץ את media_type
+                header = image_b64.split(',', 1)[0]
+                if 'png' in header:
+                    media_type = 'image/png'
+                elif 'webp' in header:
+                    media_type = 'image/webp'
+                image_b64 = image_b64.split(',', 1)[1]
+            
+            print(f"\n👕 Analyzing outfit from reference image ({media_type})...")
+            
+            prompt = """Look at this photo of a child. Describe ONLY what the child is wearing in a short, concrete way that could be used to consistently draw the child in illustrations.
+
+Include:
+- Top garment (shirt/t-shirt/sweater) with color and any pattern (stripes, print)
+- Bottom garment (pants/shorts/dress) with color
+- Any distinctive accessories visible (hat, glasses, jacket)
+
+Format your answer as a single short English phrase, e.g.:
+- "gray t-shirt and blue jeans"
+- "red striped shirt with khaki shorts"
+- "yellow sweater and denim overalls"
+
+If the clothing is unclear or the photo shows only the face, respond with:
+"simple casual clothes"
+
+Return ONLY the clothing phrase, nothing else. No explanations."""
+            
+            claude_request = {
+                "model": "claude-sonnet-4-20250514",
+                "max_tokens": 100,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": media_type,
+                                "data": image_b64
+                            }
+                        },
+                        {"type": "text", "text": prompt}
+                    ]
+                }]
+            }
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'x-api-key': CLAUDE_API_KEY,
+                'anthropic-version': '2023-06-01'
+            }
+            
+            req = urllib.request.Request(
+                CLAUDE_API_URL,
+                data=json.dumps(claude_request).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response_data = json.loads(response.read().decode('utf-8'))
+                outfit_text = response_data['content'][0]['text'].strip()
+                # ניקוי - להסיר גרשיים או נקודה בסוף אם יש
+                outfit_text = outfit_text.strip('"\'.').strip()
+                print(f"   👕 Detected outfit: {outfit_text}")
+                
+                self.send_json_response({
+                    'success': True,
+                    'outfit_description': outfit_text
+                })
+        
+        except Exception as e:
+            print(f"   ❌ Analyze outfit error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': str(e),
+                'outfit_description': 'simple casual clothes'  # fallback
             }, status=500)
     
     def handle_test_style_prompts(self):
