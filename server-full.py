@@ -2,16 +2,11 @@
 # -*- coding: utf-8 -*-
 """
 Children's Book Generator - Full Server
-Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID + Nano Banana
+Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
 
-Last modified by Claude: 2026-09-17 (Israel time)
+Last modified by Claude: 2026-05-25 14:00 (Israel time)
 Changes in this version:
-  - 🍌 POC: /api/test-nano-banana + /test-nano-banana HTML - בדיקת Google Nano Banana
-    (gemini-3.1-flash-image-preview default, גם Pro ו-Lite נתמכים, $0.017-$0.134/תמונה)
-  - 🍌 דורש: google-genai ב-requirements.txt + GEMINI_API_KEY ב-Railway env
-
-Previous changes (2026-05-25):
-  - 🧪 POC: /api/test-pulid + /test-pulid HTML - בדיקת PuLID-Flux לזהות
+  - 🧪 POC: /api/test-pulid + /test-pulid HTML — בדיקת PuLID-Flux לזהות
     (bytedance/flux-pulid, $0.021/תמונה, ~15s)
   - 🎯 TRIGGER REINFORCEMENT: trigger_word מופיע 3× בכל פרומפט (היה 1×)
   - 🎨 STYLE HARDENING: בלוק אנטי-ריאליסטי חוזר עבור classic/soft_illustration
@@ -99,16 +94,6 @@ try:
 except ImportError:
     HAS_REPLICATE = False
     print("⚠️ replicate not installed - LoRA training disabled")
-
-# 🍌 Google GenAI - לבדיקת Nano Banana POC (2026-09-17)
-# Last modified by Claude: 2026-09-17 (Israel time)
-try:
-    from google import genai as google_genai
-    HAS_GEMINI = True
-    print("✅ Google GenAI (Nano Banana) loaded")
-except ImportError:
-    HAS_GEMINI = False
-    print("⚠️  Google GenAI not installed - Nano Banana POC disabled")
 # ========================================
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
@@ -149,13 +134,17 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # 🧪 POC: דף טסט PuLID
             self.serve_file('test-pulid.html', 'text/html')
         elif self.path == '/test-nano-banana' or self.path == '/test-nano-banana.html':
-            # 🍌 POC: דף טסט Nano Banana (Google Gemini)
-            # Last modified by Claude: 2026-09-17 (Israel time)
+            # 🍌 POC: דף טסט Nano Banana - תמונה בודדת
+            # Last modified by Claude: 2026-09-19 18:00 (Israel time)
             self.serve_file('test-nano-banana.html', 'text/html')
         elif self.path == '/test-nano-book' or self.path == '/test-nano-book.html':
-            # 📚 POC: ספר מלא A/B - ריאליסטי מול מאויר
-            # Last modified by Claude: 2026-09-17 (Israel time)
+            # 📚 POC: ספר עם סיפור קבוע של גן חיות (test bed)
+            # Last modified by Claude: 2026-09-19 18:00 (Israel time)
             self.serve_file('test-nano-book.html', 'text/html')
+        elif self.path == '/nano-book' or self.path == '/nano-book.html':
+            # 📚 המערכת החדשה - סיפור דינמי מ-Claude + Nano Banana
+            # Last modified by Claude: 2026-09-19 18:00 (Israel time)
+            self.serve_file('nano-book.html', 'text/html')
         else:
             # Try default handler
             try:
@@ -203,12 +192,15 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.handle_test_style_prompts()
         elif self.path == '/api/test-pulid':  # 🧪 POC: PuLID identity preservation
             self.handle_test_pulid()
-        elif self.path == '/api/test-nano-banana':  # 🍌 POC: Nano Banana (Google Gemini)
-            # Last modified by Claude: 2026-09-17 (Israel time)
+        elif self.path == '/api/test-nano-banana':  # 🍌 POC: Nano Banana single image
+            # Last modified by Claude: 2026-09-19 18:00 (Israel time)
             self.handle_test_nano_banana()
-        elif self.path == '/api/analyze-outfit':  # 👕 Claude Vision - זיקוק לבוש מתמונת רפרנס
-            # Last modified by Claude: 2026-09-19 (Israel time)
+        elif self.path == '/api/analyze-outfit':  # 👕 Claude Vision - זיקוק לבוש
+            # Last modified by Claude: 2026-09-19 18:00 (Israel time)
             self.handle_analyze_outfit()
+        elif self.path == '/api/generate-book-nano':  # 📚 יצירת ספר מלא עם Nano Banana
+            # Last modified by Claude: 2026-09-19 18:00 (Israel time)
+            self.handle_generate_book_nano()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -1799,76 +1791,58 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
     
     def handle_test_nano_banana(self):
         """
-        🍌 POC: בדיקת Google Nano Banana (Gemini Image models).
+        🍌 POC: בדיקת Google Nano Banana - endpoint לתמונה בודדת.
         
-        Last modified by Claude: 2026-09-17 (Israel time)
+        Last modified by Claude: 2026-09-19 18:00 (Israel time)
         
-        מקבל: child_image (base64), prompt, model (optional)
-        מחזיר: image_url, elapsed_seconds, cost_estimate
-        
-        מטרה: השוואה ל-PuLID.
-        יתרונות: עד 5 דמויות עקביות, טקסט מדויק, 4K.
-        
-        Default model: gemini-3.1-flash-image-preview (Nano Banana 2)
+        משמש ע"י test-nano-banana.html ו-test-nano-book.html.
         """
         try:
             if not HAS_GEMINI:
-                raise Exception('google-genai not installed. Add "google-genai" to requirements.txt and redeploy.')
+                raise Exception('google-genai not installed')
             
             api_key = os.environ.get('GEMINI_API_KEY')
             if not api_key:
-                raise Exception('GEMINI_API_KEY not set in environment. Add it in Railway Settings.')
+                raise Exception('GEMINI_API_KEY not set in environment')
             
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
             
             child_image_b64 = data.get('child_image')
-            reference_images = data.get('reference_images')  # 🆕 optional list of images
+            reference_images = data.get('reference_images')
             prompt = data.get('prompt', '').strip()
-            # 🎯 Default: Nano Banana 2 - מהיר + עקביות עד 5 דמויות
             model = data.get('model', 'gemini-3.1-flash-image-preview')
             
-            # Backward compat: if reference_images not provided, use single child_image
             if not reference_images and child_image_b64:
                 reference_images = [child_image_b64]
             
             if not reference_images or len(reference_images) == 0:
-                raise Exception('Missing reference image(s) - provide child_image or reference_images')
+                raise Exception('Missing reference images')
             if not prompt:
                 raise Exception('Missing prompt')
             
             print(f"\n🍌 Nano Banana POC starting")
-            print(f"   model: {model}")
-            print(f"   reference images: {len(reference_images)}")
-            print(f"   prompt: {prompt[:80]}...")
+            print(f"   model: {model} | refs: {len(reference_images)}")
             
-            # 🖼️ פיענוח ה-base64 של כל תמונות הרפרנס
+            # 🖼️ פענוח base64
             import base64 as _b64
             import cloudinary.uploader
             from io import BytesIO as _BytesIO
             from PIL import Image as PILImage
             
-            # ⬇️ עיבוד כל תמונות הרפרנס
             all_img_bytes = []
             for img_b64 in reference_images:
-                # מסיר את ה-prefix "data:image/jpeg;base64,..."
                 clean_b64 = img_b64.split(',', 1)[1] if ',' in img_b64 else img_b64
                 all_img_bytes.append(_b64.b64decode(clean_b64))
             
-            # התמונה הראשית - זו שנעלה ל-Cloudinary לתצוגה מקדימה
-            img_bytes = all_img_bytes[0]
-            print(f"   primary image size: {len(img_bytes)} bytes")
-            
-            # שמירה לדיסק זמני להעלאה ל-Cloudinary (רק התמונה הראשית)
+            # העלאת התמונה הראשית ל-Cloudinary לצפייה
             import tempfile
             with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
-                f.write(img_bytes)
+                f.write(all_img_bytes[0])
                 tmp_path = f.name
             
             try:
-                # 📤 העלאה ל-Cloudinary לצפייה בתצוגה מקדימה
-                print(f"   ☁️  Uploading reference image to Cloudinary...")
                 upload_result = cloudinary.uploader.upload(
                     tmp_path,
                     folder="nano_banana_test",
@@ -1877,29 +1851,19 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     overwrite=True
                 )
                 ref_image_url = upload_result['secure_url']
-                print(f"   ✅ Reference uploaded: {ref_image_url}")
                 
-                # 🍌 קריאה ל-Nano Banana
-                print(f"   🎨 Calling Gemini {model} with {len(all_img_bytes)} reference(s)...")
+                # קריאה ל-Nano Banana
                 start_time = time.time()
-                
                 client = google_genai.Client(api_key=api_key)
-                
-                # 🆕 טעינת כל תמונות הרפרנס כ-PIL Images
                 ref_pil_images = [PILImage.open(_BytesIO(b)) for b in all_img_bytes]
                 
-                # יצירה עם כל הרפרנסים - Nano Banana תומכת ברבים
-                # ⚠️ החשוב: הפרומפט ראשון, אחר כך התמונות
-                contents = [prompt] + ref_pil_images
                 response = client.models.generate_content(
                     model=model,
-                    contents=contents,
+                    contents=[prompt] + ref_pil_images,
                 )
-                
                 elapsed = time.time() - start_time
-                print(f"   ✅ Nano Banana done in {elapsed:.1f}s")
                 
-                # 🖼️ חילוץ התמונה מהתגובה
+                # חילוץ תמונה
                 result_bytes = None
                 text_response = ""
                 for candidate in response.candidates:
@@ -1913,12 +1877,9 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                         break
                 
                 if not result_bytes:
-                    # Debug: מה החזיר המודל?
-                    print(f"   ⚠️  No image in response. Text response:")
-                    print(f"      {text_response[:500]}")
-                    raise Exception(f'Nano Banana returned no image. Text: {text_response[:200]}')
+                    raise Exception(f'No image returned. Text: {text_response[:200]}')
                 
-                # 📤 העלאה של התוצאה ל-Cloudinary
+                # העלאת התוצאה
                 with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f_out:
                     f_out.write(result_bytes)
                     result_tmp_path = f_out.name
@@ -1932,18 +1893,16 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                         overwrite=True
                     )
                     result_url = result_upload['secure_url']
-                    print(f"   🖼️  Result uploaded: {result_url}")
                 finally:
                     import os as _os
                     if _os.path.exists(result_tmp_path):
                         _os.remove(result_tmp_path)
                 
-                # מחיר משוער - לפי המודל
                 cost_map = {
-                    'gemini-3-pro-image-preview': 0.134,       # Nano Banana Pro
-                    'gemini-3.1-flash-image-preview': 0.034,   # Nano Banana 2 (מומלץ)
-                    'gemini-3.1-flash-lite-image': 0.017,      # Nano Banana 2 Lite
-                    'gemini-2.5-flash-image': 0.02,            # Nano Banana Original
+                    'gemini-3-pro-image-preview': 0.134,
+                    'gemini-3.1-flash-image-preview': 0.034,
+                    'gemini-3.1-flash-lite-image': 0.017,
+                    'gemini-2.5-flash-image': 0.02,
                 }
                 cost = cost_map.get(model, 0.05)
                 
@@ -1957,9 +1916,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     'model_used': model,
                     'prompt': prompt
                 })
-                
             finally:
-                # ניקוי הקובץ הזמני
                 try:
                     import os as _os
                     if _os.path.exists(tmp_path):
@@ -1978,14 +1935,9 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
     
     def handle_analyze_outfit(self):
         """
-        👕 Claude Vision - זיקוק לבוש מתמונת רפרנס
+        👕 Claude Vision - זיקוק לבוש מתמונת רפרנס.
         
-        Last modified by Claude: 2026-09-19 (Israel time)
-        
-        מקבל: image (base64)
-        מחזיר: outfit_description (תיאור קצר באנגלית של הלבוש)
-        
-        משמש ב-test-nano-book כדי לקבע לבוש עקבי בכל 8 עמודי הספר.
+        Last modified by Claude: 2026-09-19 18:00 (Israel time)
         """
         try:
             if not CLAUDE_API_KEY:
@@ -1997,12 +1949,10 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             
             image_b64 = data.get('image')
             if not image_b64:
-                raise Exception('Missing image (base64)')
+                raise Exception('Missing image')
             
-            # מסיר את ה-prefix "data:image/jpeg;base64,..."
             media_type = 'image/jpeg'
             if ',' in image_b64:
-                # ננסה לחלץ את media_type
                 header = image_b64.split(',', 1)[0]
                 if 'png' in header:
                     media_type = 'image/png'
@@ -2010,24 +1960,22 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                     media_type = 'image/webp'
                 image_b64 = image_b64.split(',', 1)[1]
             
-            print(f"\n👕 Analyzing outfit from reference image ({media_type})...")
+            print(f"\n👕 Analyzing outfit from reference image...")
             
-            prompt = """Look at this photo of a child. Describe ONLY what the child is wearing in a short, concrete way that could be used to consistently draw the child in illustrations.
+            outfit_prompt = """Look at this photo of a child. Describe ONLY what the child is wearing in a short, concrete way that could be used to consistently draw the child in illustrations.
 
 Include:
-- Top garment (shirt/t-shirt/sweater) with color and any pattern (stripes, print)
+- Top garment (shirt/t-shirt/sweater) with color and any pattern
 - Bottom garment (pants/shorts/dress) with color
 - Any distinctive accessories visible (hat, glasses, jacket)
 
-Format your answer as a single short English phrase, e.g.:
+Format as a single short English phrase, e.g.:
 - "gray t-shirt and blue jeans"
 - "red striped shirt with khaki shorts"
-- "yellow sweater and denim overalls"
 
-If the clothing is unclear or the photo shows only the face, respond with:
-"simple casual clothes"
+If clothing is unclear or only face is visible, respond with: "simple casual clothes"
 
-Return ONLY the clothing phrase, nothing else. No explanations."""
+Return ONLY the clothing phrase, nothing else."""
             
             claude_request = {
                 "model": "claude-sonnet-4-20250514",
@@ -2035,15 +1983,10 @@ Return ONLY the clothing phrase, nothing else. No explanations."""
                 "messages": [{
                     "role": "user",
                     "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": media_type,
-                                "data": image_b64
-                            }
-                        },
-                        {"type": "text", "text": prompt}
+                        {"type": "image", "source": {
+                            "type": "base64", "media_type": media_type, "data": image_b64
+                        }},
+                        {"type": "text", "text": outfit_prompt}
                     ]
                 }]
             }
@@ -2064,9 +2007,8 @@ Return ONLY the clothing phrase, nothing else. No explanations."""
             with urllib.request.urlopen(req, timeout=30) as response:
                 response_data = json.loads(response.read().decode('utf-8'))
                 outfit_text = response_data['content'][0]['text'].strip()
-                # ניקוי - להסיר גרשיים או נקודה בסוף אם יש
                 outfit_text = outfit_text.strip('"\'.').strip()
-                print(f"   👕 Detected outfit: {outfit_text}")
+                print(f"   👕 Detected: {outfit_text}")
                 
                 self.send_json_response({
                     'success': True,
@@ -2075,12 +2017,10 @@ Return ONLY the clothing phrase, nothing else. No explanations."""
         
         except Exception as e:
             print(f"   ❌ Analyze outfit error: {str(e)}")
-            import traceback
-            traceback.print_exc()
             self.send_json_response({
                 'success': False,
                 'error': str(e),
-                'outfit_description': 'simple casual clothes'  # fallback
+                'outfit_description': 'simple casual clothes'
             }, status=500)
     
     def handle_test_style_prompts(self):
@@ -2088,6 +2028,13 @@ Return ONLY the clothing phrase, nothing else. No explanations."""
         🧪 TEMP: endpoint לטסט פרומפטים. רץ 4 קריאות במקביל ומחזיר URLs.
         מטרה: לבדוק LoRA על פרומפטים שונים, לבודד משתנים.
         """
+        # 📚 ============================================================
+        # 🍌 START of Nano Banana Pipeline (added 2026-09-19 18:00 Israel)
+        # ============================================================
+        # NOTE: The three methods below (_nano_style_config, generate_image_with_nano_banana,
+        # handle_generate_book_nano) are actually placed AFTER handle_test_style_prompts
+        # ends. This comment marks the section boundary for future readers.
+        # ============================================================
         try:
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
@@ -2191,6 +2138,367 @@ Return ONLY the clothing phrase, nothing else. No explanations."""
             import traceback
             traceback.print_exc()
             self.send_json_response({'success': False, 'error': str(e)}, status=500)
+    
+    # ============================================================
+    # 🍌 NANO BANANA PIPELINE - הצינור החדש למערכת הראשית
+    # Last modified by Claude: 2026-09-19 18:00 (Israel time)
+    # ============================================================
+    
+    def _nano_style_config(self, style_key):
+        """
+        מחזיר את התצורה של סגנון (prefix, suffix, model).
+        style_key: 'realistic' | 'pixar' | 'detailed'
+        """
+        styles = {
+            'realistic': {
+                'name': 'ריאליסטי',
+                'prefix': "A photorealistic portrait of the child from the reference photo(s) ",
+                'suffix': ". Natural cinematic lighting, shallow depth of field, professional photography style. Preserve the child's exact facial features, eye color, hair, and skin tone.",
+                'model': 'gemini-3-pro-image-preview',
+                'cost': 0.134
+            },
+            'pixar': {
+                'name': 'פיקסר 3D',
+                'prefix': "A Pixar-style 3D animated illustration of the child from the reference photo(s) ",
+                'suffix': ". Cinematic Pixar animation style, vibrant colors, expressive character, detailed 3D rendering. Preserve the child's exact facial features, eye color, hair, and skin tone with high accuracy.",
+                'model': 'gemini-3.1-flash-image-preview',
+                'cost': 0.034
+            },
+            'detailed': {
+                'name': 'איור קלאסי מפורט',
+                'prefix': "A detailed classic children's book illustration of the child from the reference photo(s) ",
+                'suffix': ". Rich detailed illustration style, warm storybook colors, precise facial features, hand-drawn feel. Preserve the child's exact facial features, eye color, hair, and skin tone. IMPORTANT: no text or letters in the image.",
+                'model': 'gemini-3.1-flash-image-preview',
+                'cost': 0.034
+            }
+        }
+        return styles.get(style_key, styles['pixar'])
+    
+    def generate_image_with_nano_banana(self, scene_description, reference_images_bytes, 
+                                          style='pixar', outfit=None, child_age=None,
+                                          character_bible=None, characters_in_scene=None):
+        """
+        🍌 יוצר תמונה עם Nano Banana - פונקציה הליבה של הצינור החדש.
+        
+        Last modified by Claude: 2026-09-19 18:00 (Israel time)
+        
+        Parameters:
+            scene_description: str - תיאור הסצנה באנגלית (מ-Claude)
+            reference_images_bytes: list of bytes - תמונות הרפרנס של הילד
+            style: 'realistic' | 'pixar' | 'detailed'
+            outfit: str - תיאור הלבוש באנגלית (עקביות)
+            child_age: str - גיל הילד (למשל '3-5')
+            character_bible: dict - {name: english_description} - Character Bible
+            characters_in_scene: list - שמות הדמויות שמופיעות בסצנה זו
+        
+        Returns:
+            dict with 'success', 'image_url', 'error', 'model', 'elapsed_seconds'
+        """
+        try:
+            if not HAS_GEMINI:
+                raise Exception('google-genai not installed')
+            
+            api_key = os.environ.get('GEMINI_API_KEY')
+            if not api_key:
+                raise Exception('GEMINI_API_KEY not set')
+            
+            if not reference_images_bytes or len(reference_images_bytes) == 0:
+                raise Exception('No reference images provided')
+            
+            style_cfg = self._nano_style_config(style)
+            
+            # 🎨 בניית הפרומפט המלא
+            # מבנה: [STYLE_PREFIX] + [OUTFIT] + [SCENE] + [CHARACTERS] + [AGE] + [STYLE_SUFFIX]
+            prompt_parts = [style_cfg['prefix']]
+            
+            # לבוש - חשוב במיוחד להעביר אותו קרוב להתחלה, המודל נותן לו יותר משקל
+            if outfit:
+                prompt_parts.append(f"wearing {outfit}, ")
+            
+            # הסצנה
+            prompt_parts.append(scene_description)
+            
+            # דמויות נוספות מ-Character Bible
+            if character_bible and characters_in_scene:
+                char_descs = []
+                for char_name in characters_in_scene:
+                    if char_name in character_bible:
+                        char_descs.append(f"with {character_bible[char_name]}")
+                if char_descs:
+                    prompt_parts.append(", " + ", ".join(char_descs))
+            
+            # גיל
+            if child_age:
+                # ממפה טווח גיל למספר משוער
+                age_map = {'0-2': 2, '3-5': 4, '6-8': 7, '9-12': 10}
+                age_num = age_map.get(child_age, 4)
+                prompt_parts.append(f". The child looks age {age_num}")
+            
+            # מניעת כפילויות
+            prompt_parts.append(". Exactly one child in the scene, no duplicates.")
+            
+            # סיומת הסגנון
+            prompt_parts.append(style_cfg['suffix'])
+            
+            full_prompt = "".join(prompt_parts)
+            
+            print(f"\n🍌 Nano Banana [{style}] generating...")
+            print(f"   scene: {scene_description[:80]}...")
+            print(f"   outfit: {outfit}")
+            print(f"   refs: {len(reference_images_bytes)}")
+            
+            # 🖼️ טעינת התמונות
+            from io import BytesIO as _BytesIO
+            from PIL import Image as PILImage
+            
+            ref_pil_images = [PILImage.open(_BytesIO(b)) for b in reference_images_bytes]
+            
+            # קריאה למודל
+            start_time = time.time()
+            client = google_genai.Client(api_key=api_key)
+            
+            response = client.models.generate_content(
+                model=style_cfg['model'],
+                contents=[full_prompt] + ref_pil_images,
+            )
+            elapsed = time.time() - start_time
+            
+            # 🖼️ חילוץ התמונה
+            result_bytes = None
+            text_response = ""
+            for candidate in response.candidates:
+                for part in candidate.content.parts:
+                    if hasattr(part, 'inline_data') and part.inline_data is not None:
+                        result_bytes = part.inline_data.data
+                        break
+                    elif hasattr(part, 'text') and part.text:
+                        text_response += part.text
+                if result_bytes:
+                    break
+            
+            if not result_bytes:
+                raise Exception(f'No image returned. Text: {text_response[:200]}')
+            
+            # 📤 העלאה ל-Cloudinary
+            import cloudinary.uploader
+            import tempfile
+            
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f_out:
+                f_out.write(result_bytes)
+                tmp_path = f_out.name
+            
+            try:
+                upload_result = cloudinary.uploader.upload(
+                    tmp_path,
+                    folder="nano_banana_books",
+                    public_id=f"page_{int(time.time() * 1000)}",
+                    access_mode="public",
+                    overwrite=True
+                )
+                image_url = upload_result['secure_url']
+                print(f"   ✅ Done in {elapsed:.1f}s → {image_url}")
+                
+                return {
+                    'success': True,
+                    'image_url': image_url,
+                    'model': style_cfg['model'],
+                    'elapsed_seconds': round(elapsed, 1),
+                    'cost': style_cfg['cost'],
+                    'prompt': full_prompt
+                }
+            finally:
+                import os as _os
+                if _os.path.exists(tmp_path):
+                    _os.remove(tmp_path)
+        
+        except Exception as e:
+            print(f"   ❌ Nano Banana error: {str(e)}")
+            return {
+                'success': False,
+                'error': str(e),
+                'model': style_cfg['model'] if 'style_cfg' in locals() else 'unknown',
+                'elapsed_seconds': 0
+            }
+    
+    def handle_generate_book_nano(self):
+        """
+        📚 יצירת ספר מלא עם Nano Banana.
+        
+        Last modified by Claude: 2026-09-19 18:00 (Israel time)
+        
+        זה ה-endpoint המרכזי של המערכת החדשה. הוא:
+        1. מקבל תמונות רפרנס + נתוני ילד + סגנון + לבוש
+        2. קורא ל-Claude ליצור סיפור של 8 עמודים (עם Character Bible)
+        3. מריץ 8 קריאות ל-Nano Banana ברצף
+        4. מחזיר את הספר המלא (טקסטים + URLs של תמונות)
+        
+        Input JSON:
+        {
+            "reference_images": [b64, b64, ...],  // 1-3 תמונות של הילד
+            "childName": "דולב",
+            "childAge": "3-5",
+            "childGender": "boy",
+            "theme": "animals",  // או "family", "space", "magic"
+            "style": "pixar",  // או "realistic", "detailed"
+            "outfit": "gray t-shirt and jeans",
+            "customInput": "אוהב דינוזאורים"  // אופציונלי
+        }
+        
+        Returns:
+        {
+            "success": true,
+            "book_title": "...",
+            "pages": [
+                {"page_num": 1, "text": "...", "image_url": "...", "elapsed_seconds": 8.2},
+                ...
+            ],
+            "total_cost": 0.27,
+            "total_time_seconds": 65
+        }
+        """
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            # 📥 קלט
+            reference_images_b64 = data.get('reference_images', [])
+            if not reference_images_b64 and data.get('child_image'):
+                reference_images_b64 = [data['child_image']]  # backward compat
+            
+            if not reference_images_b64:
+                raise Exception('No reference images provided')
+            
+            child_name = data.get('childName', 'הילד')
+            child_age = data.get('childAge', '3-5')
+            child_gender = data.get('childGender', 'boy')
+            theme = data.get('theme', 'animals')
+            style = data.get('style', 'pixar')
+            outfit = data.get('outfit', '')
+            custom_input = data.get('customInput', '')
+            
+            print(f"\n📚 ============================================")
+            print(f"📚 GENERATING BOOK: {child_name} (age {child_age})")
+            print(f"📚 Theme: {theme} | Style: {style}")
+            print(f"📚 Outfit: {outfit}")
+            print(f"📚 References: {len(reference_images_b64)}")
+            print(f"📚 ============================================")
+            
+            book_start = time.time()
+            
+            # 🖼️ פענוח כל תמונות הרפרנס
+            import base64 as _b64
+            reference_images_bytes = []
+            for img_b64 in reference_images_b64:
+                clean_b64 = img_b64.split(',', 1)[1] if ',' in img_b64 else img_b64
+                reference_images_bytes.append(_b64.b64decode(clean_b64))
+            
+            # 📝 שלב 1: יצירת סיפור עם Claude
+            print(f"\n📝 Step 1: Creating story with Claude...")
+            story_data_input = {
+                'childName': child_name,
+                'childAge': child_age,
+                'childGender': child_gender,
+                'theme': theme,
+                'style': 'funny',  # ברירת מחדל
+                'customInput': custom_input,
+                'use_lora': True,  # מפעיל את הפורמט המשופר עם Character Bible
+                'trigger_word': 'x'  # dummy - צריך רק כדי להפעיל את הפורמט המשופר
+            }
+            
+            try:
+                story = self.create_story_with_claude(story_data_input)
+            except Exception as claude_err:
+                raise Exception(f'Claude story generation failed: {claude_err}')
+            
+            pages = story.get('pages', [])
+            if not pages:
+                raise Exception('Claude returned no pages')
+            
+            # 📖 Character Bible
+            characters = story.get('characters', [])
+            character_bible = {}
+            for char in characters:
+                name = char.get('name', '').strip()
+                desc = char.get('english_description', '').strip()
+                if name and desc:
+                    character_bible[name] = desc
+            
+            print(f"   ✅ Story ready: {len(pages)} pages, {len(character_bible)} characters in bible")
+            
+            # 🍌 שלב 2: יצירת תמונה לכל עמוד עם Nano Banana
+            print(f"\n🍌 Step 2: Generating {len(pages)} images with Nano Banana...")
+            
+            result_pages = []
+            total_cost = 0.0
+            successful = 0
+            
+            for idx, page in enumerate(pages):
+                page_num = idx + 1
+                text_he = page.get('text', '')
+                illustration = page.get('illustration', '')
+                chars_in_scene = page.get('characters_in_scene', [])
+                
+                print(f"\n   📄 Page {page_num}/{len(pages)}: {text_he[:50]}...")
+                
+                img_result = self.generate_image_with_nano_banana(
+                    scene_description=illustration,
+                    reference_images_bytes=reference_images_bytes,
+                    style=style,
+                    outfit=outfit,
+                    child_age=child_age,
+                    character_bible=character_bible,
+                    characters_in_scene=chars_in_scene
+                )
+                
+                page_result = {
+                    'page_num': page_num,
+                    'text': text_he,
+                    'illustration_prompt': illustration,
+                    'success': img_result['success'],
+                    'elapsed_seconds': img_result['elapsed_seconds']
+                }
+                
+                if img_result['success']:
+                    page_result['image_url'] = img_result['image_url']
+                    total_cost += img_result.get('cost', 0)
+                    successful += 1
+                else:
+                    page_result['error'] = img_result.get('error', 'unknown')
+                
+                result_pages.append(page_result)
+            
+            total_time = time.time() - book_start
+            
+            print(f"\n📚 ============================================")
+            print(f"📚 BOOK COMPLETE: {successful}/{len(pages)} pages")
+            print(f"📚 Total time: {total_time:.1f}s | Cost: ${total_cost:.3f}")
+            print(f"📚 ============================================\n")
+            
+            self.send_json_response({
+                'success': True,
+                'book_title': f'ההרפתקה של {child_name}',
+                'pages': result_pages,
+                'characters_bible': character_bible,
+                'style_used': style,
+                'total_pages': len(pages),
+                'successful_pages': successful,
+                'total_cost_usd': round(total_cost, 3),
+                'total_time_seconds': round(total_time, 1)
+            })
+        
+        except Exception as e:
+            print(f"❌ Book generation error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+    
+    # ============================================================
+    # 🍌 END OF NANO BANANA PIPELINE
+    # ============================================================
     
     def handle_suggest_alternative(self):
         """מציע חלופות לטקסט"""
