@@ -2,21 +2,29 @@
 # -*- coding: utf-8 -*-
 """
 Children's Book Generator - Full Server
-Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA
+Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Last modified by Claude: 2026-05-25 14:00 (Israel time)
+Last modified by Claude: 2026-09-25 13:45 (Israel time)
 Changes in this version:
-  - 🧪 POC: /api/test-pulid + /test-pulid HTML — בדיקת PuLID-Flux לזהות
+  - 🐛 CRITICAL FIX: Claude model updated from claude-sonnet-4-20250514 (deprecated 2026-06-15)
+    to claude-sonnet-4-5 (current). This fixes 404 errors on Claude API calls.
+    Applied in 5 places: story generation, image analysis, translation, alternative suggestions, outfit detection.
+  - 📚 NEW: /api/generate-book-nano endpoint - כל הצינור החדש (Claude story + Nano Banana images)
+  - 🍌 NEW: generate_image_with_nano_banana - הפונקציה הליבה של יצירה עם Nano Banana
+  - 🍌 NEW: /nano-book HTML page - החוויה החדשה למשתמש
+  - 👕 NEW: /api/analyze-outfit endpoint - זיהוי לבוש אוטומטי עם Claude Vision
+  - 🎨 NEW: 3 styles supported (realistic / pixar / detailed) - פיקסר ברירת מחדל
+  - ✅ Backward compat: PuLID POC + old LoRA code all intact and unchanged
+
+Previous changes (2026-05-25):
+  - 🧪 POC: /api/test-pulid + /test-pulid HTML - בדיקת PuLID-Flux לזהות
     (bytedance/flux-pulid, $0.021/תמונה, ~15s)
-  - 🎯 TRIGGER REINFORCEMENT: trigger_word מופיע 3× בכל פרומפט (היה 1×)
+  - 🎯 TRIGGER REINFORCEMENT: trigger_word מופיע 3× בכל פרומפט
   - 🎨 STYLE HARDENING: בלוק אנטי-ריאליסטי חוזר עבור classic/soft_illustration
   - 🎨 soft_illustration: חוזק עם "watercolor + hand-drawn + NOT photorealistic"
-  - 🔥 PRE-WARM DECONFLICTION: preview-options ממתין ל-pre-warm במקום להריץ במקביל
+  - 🔥 PRE-WARM DECONFLICTION: preview-options ממתין ל-pre-warm
   - 🔥 ERROR MESSAGES: זיהוי rate-limit + יתרה נמוכה והודעה ידידותית
-  - 🔥 PRE-WARMING: ברגע שאימון מסתיים, השרת יוצר 3 פריוויו ברקע
-  - LoRA training upgrade: steps 1000→1500, lora_rank→32, caption_dropout_rate=0.05
-  - 🔬 trigger word: "_kid" → "_subj"
-  - 🔬 preview options: כל 3 התמונות ב-lora_scale=1.0
+  - LoRA training upgrade: steps 1000→1500, lora_rank→32
 """
 
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -524,7 +532,7 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         prompt = self.build_story_prompt(data)
         
         claude_request = {
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-4-5",
             "max_tokens": 2000,
             "messages": [{"role": "user", "content": prompt}]
         }
@@ -935,7 +943,7 @@ CRITICAL translation rules:
 Return ONLY the English translation, no explanations."""
             
             claude_request = {
-                "model": "claude-sonnet-4-20250514",
+                "model": "claude-sonnet-4-5",
                 "max_tokens": 300,
                 "messages": [{"role": "user", "content": prompt}]
             }
@@ -1018,7 +1026,7 @@ Examples of good descriptions:
 Return ONLY the English description, nothing else."""
             
             claude_request = {
-                "model": "claude-sonnet-4-20250514",
+                "model": "claude-sonnet-4-5",
                 "max_tokens": 100,
                 "messages": [{"role": "user", "content": prompt}]
             }
@@ -1978,7 +1986,7 @@ If clothing is unclear or only face is visible, respond with: "simple casual clo
 Return ONLY the clothing phrase, nothing else."""
             
             claude_request = {
-                "model": "claude-sonnet-4-20250514",
+                "model": "claude-sonnet-4-5",
                 "max_tokens": 100,
                 "messages": [{
                     "role": "user",
@@ -2517,7 +2525,7 @@ Return ONLY the clothing phrase, nothing else."""
 """
             
             claude_request = {
-                "model": "claude-sonnet-4-20250514",
+                "model": "claude-sonnet-4-5",
                 "max_tokens": 500,
                 "messages": [{"role": "user", "content": prompt}]
             }
