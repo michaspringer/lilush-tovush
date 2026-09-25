@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>📚 לילוש טובוש — ספר אישי לילד</title>
 <style>
-    /* Last modified by Claude: 2026-09-25 14:15 (Israel time) */
+    /* Version: v3  |  Last modified: 2026-09-25 20:15 (Israel time)  |  Claude
+       Changes: Text editing, image regeneration, PDF field fix, book cover title */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
         font-family: 'Heebo', -apple-system, sans-serif;
@@ -223,6 +224,93 @@
         transform: translateY(-2px);
     }
     
+    /* ✏️ Page action buttons (edit/regenerate) - v3 */
+    .page-actions {
+        margin-top: 0.8rem;
+        display: flex;
+        gap: 0.5rem;
+        flex-wrap: wrap;
+    }
+    .page-action-btn {
+        background: white;
+        border: 1.5px solid #E5D3A6;
+        color: #92400E;
+        padding: 0.5rem 0.9rem;
+        border-radius: 8px;
+        cursor: pointer;
+        font-family: inherit;
+        font-size: 0.8rem;
+        font-weight: 500;
+        transition: all 0.15s;
+        width: auto;
+        flex: 1;
+        min-width: 140px;
+    }
+    .page-action-btn:hover:not(:disabled) {
+        background: #FEF3C7;
+        border-color: #D97706;
+        transform: translateY(-1px);
+    }
+    .page-action-btn:disabled {
+        opacity: 0.5;
+        cursor: wait;
+    }
+    .page-action-btn.regenerate {
+        color: #7C3AED;
+        border-color: #DDD6FE;
+    }
+    .page-action-btn.regenerate:hover:not(:disabled) {
+        background: #F3EEFF;
+        border-color: #7C3AED;
+    }
+    
+    /* Text editor modal */
+    .edit-textarea {
+        width: 100%;
+        min-height: 100px;
+        padding: 0.75rem;
+        border: 2px solid #D97706;
+        border-radius: 8px;
+        font-family: 'Heebo', -apple-system, sans-serif;
+        font-size: 1rem;
+        line-height: 1.6;
+        resize: vertical;
+        margin-top: 0.5rem;
+        margin-bottom: 0.5rem;
+        text-align: right;
+        direction: rtl;
+    }
+    .edit-actions {
+        display: flex;
+        gap: 0.5rem;
+    }
+    .edit-btn-save {
+        background: linear-gradient(135deg, #16A34A 0%, #22C55E 100%);
+        padding: 0.5rem 1rem;
+        font-size: 0.85rem;
+    }
+    .edit-btn-cancel {
+        background: #64748B;
+        padding: 0.5rem 1rem;
+        font-size: 0.85rem;
+    }
+    
+    /* Overlay while regenerating */
+    .regenerating-overlay {
+        position: absolute;
+        top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(255, 255, 255, 0.85);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #92400E;
+        font-weight: 600;
+        border-radius: 12px;
+    }
+    .book-page-image {
+        position: relative;
+    }
+    
     @media (max-width: 700px) {
         .refs-grid, .style-grid, .field-row, .book-page { grid-template-columns: 1fr; }
     }
@@ -385,8 +473,8 @@
 </div>
 
 <script>
-    // Last modified by Claude: 2026-09-25 14:15 (Israel time)
-    // Round 1: PDF download button added
+    // Version: v3  |  Last modified: 2026-09-25 20:15 (Israel time)  |  Claude
+    // Changes: Text editing, image regeneration, PDF field fix, book cover title
     const referenceImages = [null, null, null];
     let selectedStyle = 'pixar';
     
@@ -601,30 +689,10 @@
         document.getElementById('resultsArea').classList.add('active');
         document.getElementById('resultsTitle').textContent = `📖 ${data.book_title}`;
         
-        const container = document.getElementById('bookPages');
-        container.innerHTML = '';
+        // 💾 שמירת נתוני הספר לצורך עריכה, חידוש והורדה
+        window.currentBookData = data;
         
-        data.pages.forEach((page, idx) => {
-            const isReverse = idx % 2 === 1; // alternating layout
-            
-            let imageHTML;
-            if (page.success && page.image_url) {
-                imageHTML = `<img src="${page.image_url}" alt="עמוד ${page.page_num}">`;
-            } else {
-                imageHTML = `<div class="book-page-loading">❌ תמונה נכשלה<br><small>${page.error || ''}</small></div>`;
-            }
-            
-            container.innerHTML += `
-                <div class="book-page ${isReverse ? 'reverse' : ''}">
-                    <div class="book-page-image">${imageHTML}</div>
-                    <div class="book-page-content">
-                        <div class="book-page-num">עמוד ${page.page_num}</div>
-                        <div class="book-page-text">${page.text}</div>
-                        ${!page.success ? `<div class="book-page-error">⚠️ ${page.error || ''}</div>` : ''}
-                    </div>
-                </div>
-            `;
-        });
+        renderAllPages();
         
         document.getElementById('costSummary').innerHTML = `
             <strong>סיכום:</strong> 
@@ -633,15 +701,174 @@
             עלות <strong>$${data.total_cost_usd}</strong>
         `;
         
-        // 💾 שמירת נתוני הספר לצורך הורדה כ-PDF
-        window.currentBookData = data;
-        
         // 📄 הצגת אזור ההורדה
         const pdfArea = document.getElementById('pdfDownloadArea');
         if (data.successful_pages > 0) {
             pdfArea.style.display = 'block';
         } else {
             pdfArea.style.display = 'none';
+        }
+    }
+    
+    function renderAllPages() {
+        const data = window.currentBookData;
+        if (!data) return;
+        
+        const container = document.getElementById('bookPages');
+        container.innerHTML = '';
+        
+        data.pages.forEach((page, idx) => {
+            const isReverse = idx % 2 === 1;
+            
+            let imageHTML;
+            if (page.success && page.image_url) {
+                imageHTML = `<img src="${page.image_url}" alt="עמוד ${page.page_num}">`;
+            } else {
+                imageHTML = `<div class="book-page-loading">❌ תמונה נכשלה<br><small>${page.error || ''}</small></div>`;
+            }
+            
+            // Escape text for safe HTML display
+            const escapedText = escapeHtml(page.text);
+            
+            container.innerHTML += `
+                <div class="book-page ${isReverse ? 'reverse' : ''}" id="page-container-${idx}">
+                    <div class="book-page-image">${imageHTML}</div>
+                    <div class="book-page-content">
+                        <div class="book-page-num">עמוד ${page.page_num}</div>
+                        <div class="book-page-text" id="page-text-${idx}">${escapedText}</div>
+                        ${!page.success ? `<div class="book-page-error">⚠️ ${page.error || ''}</div>` : ''}
+                        <div class="page-actions">
+                            <button class="page-action-btn" onclick="editPageText(${idx})">
+                                ✏️ ערוך טקסט
+                            </button>
+                            <button class="page-action-btn regenerate" onclick="regeneratePageImage(${idx})">
+                                🔄 צור תמונה מחדש
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+    }
+    
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text || '';
+        return div.innerHTML;
+    }
+    
+    // ✏️ עריכת טקסט של עמוד
+    function editPageText(pageIdx) {
+        const data = window.currentBookData;
+        if (!data || !data.pages[pageIdx]) return;
+        
+        const currentText = data.pages[pageIdx].text || '';
+        const textEl = document.getElementById(`page-text-${pageIdx}`);
+        if (!textEl) return;
+        
+        // החלפת המלל בעורך
+        textEl.innerHTML = `
+            <textarea class="edit-textarea" id="edit-textarea-${pageIdx}">${escapeHtml(currentText)}</textarea>
+            <div class="edit-actions">
+                <button class="edit-btn-save" onclick="saveEditedText(${pageIdx})">💾 שמור</button>
+                <button class="edit-btn-cancel" onclick="cancelEdit(${pageIdx})">✖️ ביטול</button>
+            </div>
+        `;
+        
+        // מיקוד על התיבה
+        document.getElementById(`edit-textarea-${pageIdx}`).focus();
+    }
+    
+    function saveEditedText(pageIdx) {
+        const textarea = document.getElementById(`edit-textarea-${pageIdx}`);
+        if (!textarea) return;
+        
+        const newText = textarea.value.trim();
+        if (!newText) {
+            alert('הטקסט לא יכול להיות ריק');
+            return;
+        }
+        
+        // עדכון הנתונים ורנדור מחדש
+        window.currentBookData.pages[pageIdx].text = newText;
+        renderAllPages();
+    }
+    
+    function cancelEdit(pageIdx) {
+        renderAllPages();
+    }
+    
+    // 🔄 יצירת תמונה בודדת מחדש
+    async function regeneratePageImage(pageIdx) {
+        const data = window.currentBookData;
+        if (!data || !data.pages[pageIdx]) return;
+        
+        const page = data.pages[pageIdx];
+        const container = document.getElementById(`page-container-${pageIdx}`);
+        if (!container) return;
+        
+        // איסוף הנתונים הדרושים
+        const refs = referenceImages.filter(img => img !== null);
+        if (refs.length === 0) {
+            alert('לא נמצאו תמונות רפרנס - נא להתחיל ספר חדש');
+            return;
+        }
+        
+        const outfit = document.getElementById('outfitInput').value.trim() || 'simple casual clothes';
+        const childAge = document.getElementById('childAge').value;
+        
+        // הצגת overlay
+        const imageContainer = container.querySelector('.book-page-image');
+        if (imageContainer) {
+            imageContainer.insertAdjacentHTML('beforeend', `
+                <div class="regenerating-overlay" id="regen-overlay-${pageIdx}">
+                    <span class="spinner"></span>
+                    <span style="margin-right: 0.6rem;">מציירת מחדש...</span>
+                </div>
+            `);
+        }
+        
+        // כיבוי הכפתורים
+        const buttons = container.querySelectorAll('.page-action-btn');
+        buttons.forEach(b => b.disabled = true);
+        
+        try {
+            const response = await fetch('/api/regenerate-page-image', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    reference_images: refs,
+                    scene_description: page.illustration_prompt || page.text,
+                    style: data.style_used || selectedStyle,
+                    outfit: outfit,
+                    child_age: childAge,
+                    character_bible: data.characters_bible || {},
+                    characters_in_scene: page.characters_in_scene || []
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.success && result.image_url) {
+                // עדכון התמונה בנתונים
+                window.currentBookData.pages[pageIdx].image_url = result.image_url;
+                window.currentBookData.pages[pageIdx].success = true;
+                delete window.currentBookData.pages[pageIdx].error;
+                
+                // רנדור מחדש של הדף
+                renderAllPages();
+            } else {
+                alert('שגיאה ביצירת התמונה: ' + (result.error || 'לא ידוע'));
+                const overlay = document.getElementById(`regen-overlay-${pageIdx}`);
+                if (overlay) overlay.remove();
+                buttons.forEach(b => b.disabled = false);
+            }
+        } catch (err) {
+            console.error('Regenerate error:', err);
+            alert('שגיאה: ' + err.message);
+            const overlay = document.getElementById(`regen-overlay-${pageIdx}`);
+            if (overlay) overlay.remove();
+            buttons.forEach(b => b.disabled = false);
         }
     }
     
@@ -659,16 +886,19 @@
         
         try {
             const childName = document.getElementById('childName').value.trim() || 'ילד';
+            const data = window.currentBookData;
             
             // הכנת הנתונים בפורמט של /api/generate-pdf
-            // הפורמט הקיים מקבל: childName, pages [{text, image_url}]
+            // 🔧 v3: לשלוח גם imageUrl וגם image_url (backward compat) + book_title
             const pdfPayload = {
                 childName: childName,
-                pages: window.currentBookData.pages
-                    .filter(p => p.success && p.image_url) // רק עמודים מוצלחים
+                book_title: data.book_title || `הספר של ${childName}`,
+                pages: data.pages
+                    .filter(p => p.success && p.image_url)
                     .map(p => ({
                         text: p.text,
                         image_url: p.image_url,
+                        imageUrl: p.image_url,  // backward compat with old PDF code
                         page_num: p.page_num
                     }))
             };
@@ -683,7 +913,6 @@
                 throw new Error(`שגיאה מהשרת: ${response.status}`);
             }
             
-            // הורדת ה-blob כקובץ
             const blob = await response.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
