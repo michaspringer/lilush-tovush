@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>📚 לילוש טובוש — ספר אישי לילד</title>
 <style>
-    /* Last modified by Claude: 2026-09-19 18:00 (Israel time) */
+    /* Last modified by Claude: 2026-09-25 13:15 (Israel time) */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
         font-family: 'Heebo', -apple-system, sans-serif;
@@ -262,7 +262,7 @@
         <div class="field-row">
             <div class="field">
                 <label>שם הילד</label>
-                <input type="text" id="childName" placeholder="דולב">
+                <input type="text" id="childName" value="דולב" placeholder="דולב">
             </div>
             <div class="field">
                 <label>גיל</label>
@@ -328,6 +328,7 @@
         <button id="generateBtn" onclick="generateBook()" disabled>
             📚 צור את הספר
         </button>
+        <div id="btnHelper" style="text-align: center; margin-top: 0.7rem; font-size: 0.85rem; color: #92400E; min-height: 1.2em;"></div>
     </div>
 
     <!-- Progress -->
@@ -348,7 +349,7 @@
 </div>
 
 <script>
-    // Last modified by Claude: 2026-09-19 18:00 (Israel time)
+    // Last modified by Claude: 2026-09-25 13:15 (Israel time)
     const referenceImages = [null, null, null];
     let selectedStyle = 'pixar';
     
@@ -450,10 +451,26 @@
     
     function updateGenerateBtn() {
         const btn = document.getElementById('generateBtn');
+        const helper = document.getElementById('btnHelper');
         const hasImage = referenceImages[0] !== null;
         const hasName = document.getElementById('childName').value.trim().length > 0;
+        
         btn.disabled = !hasImage || !hasName;
+        
+        // 🔍 הודעה ברורה למשתמש למה הכפתור לא פעיל
+        if (!hasImage && !hasName) {
+            helper.textContent = '👆 חסרה תמונת רפרנס ושם הילד';
+        } else if (!hasImage) {
+            helper.textContent = '👆 חסרה תמונת רפרנס של הילד';
+        } else if (!hasName) {
+            helper.textContent = '👆 חסר שם הילד';
+        } else {
+            helper.textContent = '';
+        }
     }
+    
+    // Initialize button state on page load
+    document.addEventListener('DOMContentLoaded', updateGenerateBtn);
     
     document.getElementById('childName').addEventListener('input', updateGenerateBtn);
     
