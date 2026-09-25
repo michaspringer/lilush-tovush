@@ -104,6 +104,16 @@ except ImportError:
     print("⚠️ replicate not installed - LoRA training disabled")
 # ========================================
 
+# 🍌 Google GenAI - חובה ל-Nano Banana (2026-09-25 13:50 Israel time)
+try:
+    from google import genai as google_genai
+    HAS_GEMINI = True
+    print("✅ Google GenAI (Nano Banana) loaded")
+except ImportError:
+    HAS_GEMINI = False
+    print("⚠️  Google GenAI not installed - Nano Banana disabled")
+# ========================================
+
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
 class CORSRequestHandler(SimpleHTTPRequestHandler):
