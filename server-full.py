@@ -4,26 +4,27 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Last modified by Claude: 2026-09-25 13:45 (Israel time)
-Changes in this version:
-  - 🐛 CRITICAL FIX: Claude model updated from claude-sonnet-4-20250514 (deprecated 2026-06-15)
-    to claude-sonnet-4-5 (current). This fixes 404 errors on Claude API calls.
-    Applied in 5 places: story generation, image analysis, translation, alternative suggestions, outfit detection.
-  - 📚 NEW: /api/generate-book-nano endpoint - כל הצינור החדש (Claude story + Nano Banana images)
-  - 🍌 NEW: generate_image_with_nano_banana - הפונקציה הליבה של יצירה עם Nano Banana
-  - 🍌 NEW: /nano-book HTML page - החוויה החדשה למשתמש
-  - 👕 NEW: /api/analyze-outfit endpoint - זיהוי לבוש אוטומטי עם Claude Vision
-  - 🎨 NEW: 3 styles supported (realistic / pixar / detailed) - פיקסר ברירת מחדל
-  - ✅ Backward compat: PuLID POC + old LoRA code all intact and unchanged
+Version: v3  |  Last modified: 2026-09-25 20:15 (Israel time)  |  Claude
+Changes in v3:
+  - 🐛 PDF FIX: imageUrl → image_url compat (both accepted)
+  - 🐛 PDF FIX: page number - digit separated from Hebrew word so bidi keeps it
+  - 🐛 PDF FIX: cover title uses book_title from request (not hardcoded)
+  - 🐛 PDF FIX: expanded Hebrew punctuation allowed list
+  - 🔄 NEW: /api/regenerate-page-image endpoint - יצירת תמונה בודדת מחדש
+  - ✅ Backward compat: all existing endpoints unchanged
 
-Previous changes (2026-05-25):
-  - 🧪 POC: /api/test-pulid + /test-pulid HTML - בדיקת PuLID-Flux לזהות
-    (bytedance/flux-pulid, $0.021/תמונה, ~15s)
-  - 🎯 TRIGGER REINFORCEMENT: trigger_word מופיע 3× בכל פרומפט
-  - 🎨 STYLE HARDENING: בלוק אנטי-ריאליסטי חוזר עבור classic/soft_illustration
-  - 🎨 soft_illustration: חוזק עם "watercolor + hand-drawn + NOT photorealistic"
-  - 🔥 PRE-WARM DECONFLICTION: preview-options ממתין ל-pre-warm
-  - 🔥 ERROR MESSAGES: זיהוי rate-limit + יתרה נמוכה והודעה ידידותית
+Previous version (v2, 2026-09-25 13:45 Israel):
+  - 🐛 CRITICAL FIX: Claude model updated from claude-sonnet-4-20250514 (deprecated 2026-06-15)
+    to claude-sonnet-4-5 (current)
+  - 📚 NEW: /api/generate-book-nano endpoint - הצינור החדש (Claude story + Nano Banana images)
+  - 🍌 NEW: generate_image_with_nano_banana - הפונקציה הליבה של יצירה עם Nano Banana
+  - 🍌 NEW: /nano-book HTML page
+  - 👕 NEW: /api/analyze-outfit endpoint - זיהוי לבוש אוטומטי עם Claude Vision
+  - 🎨 NEW: 3 styles supported (realistic / pixar / detailed)
+
+Previous version (2026-05-25):
+  - 🧪 POC: /api/test-pulid + /test-pulid HTML
+  - 🎯 TRIGGER REINFORCEMENT, STYLE HARDENING, PRE-WARM DECONFLICTION
   - LoRA training upgrade: steps 1000→1500, lora_rank→32
 """
 
@@ -219,6 +220,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         elif self.path == '/api/generate-book-nano':  # 📚 יצירת ספר מלא עם Nano Banana
             # Last modified by Claude: 2026-09-19 18:00 (Israel time)
             self.handle_generate_book_nano()
+        elif self.path == '/api/regenerate-page-image':  # 🔄 יצירת תמונה בודדת מחדש
+            # Version: v3 | 2026-09-25 20:15 (Israel time)
+            self.handle_regenerate_page_image()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -2514,6 +2518,80 @@ Return ONLY the clothing phrase, nothing else."""
                 'error': str(e)
             }, status=500)
     
+    def handle_regenerate_page_image(self):
+        """
+        🔄 יצירת תמונה בודדת מחדש - כשעמוד לא יצא טוב.
+        
+        Version: v3 | 2026-09-25 20:15 (Israel time)
+        
+        מקבל: reference_images, style, outfit, child_age, scene_description,
+              character_bible (dict), characters_in_scene (list)
+        מחזיר: image_url, elapsed_seconds, cost
+        """
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            reference_images_b64 = data.get('reference_images', [])
+            if not reference_images_b64 and data.get('child_image'):
+                reference_images_b64 = [data['child_image']]
+            
+            if not reference_images_b64:
+                raise Exception('No reference images provided')
+            
+            scene_description = data.get('scene_description', '').strip()
+            if not scene_description:
+                raise Exception('No scene description provided')
+            
+            style = data.get('style', 'pixar')
+            outfit = data.get('outfit', '')
+            child_age = data.get('child_age', '3-5')
+            character_bible = data.get('character_bible', {})
+            characters_in_scene = data.get('characters_in_scene', [])
+            
+            print(f"\n🔄 REGENERATING single page image (style: {style})")
+            
+            # 🖼️ פענוח תמונות הרפרנס
+            import base64 as _b64
+            reference_images_bytes = []
+            for img_b64 in reference_images_b64:
+                clean_b64 = img_b64.split(',', 1)[1] if ',' in img_b64 else img_b64
+                reference_images_bytes.append(_b64.b64decode(clean_b64))
+            
+            # 🍌 יצירה
+            result = self.generate_image_with_nano_banana(
+                scene_description=scene_description,
+                reference_images_bytes=reference_images_bytes,
+                style=style,
+                outfit=outfit,
+                child_age=child_age,
+                character_bible=character_bible,
+                characters_in_scene=characters_in_scene
+            )
+            
+            if result['success']:
+                self.send_json_response({
+                    'success': True,
+                    'image_url': result['image_url'],
+                    'elapsed_seconds': result['elapsed_seconds'],
+                    'cost_estimate_usd': result.get('cost', 0)
+                })
+            else:
+                self.send_json_response({
+                    'success': False,
+                    'error': result.get('error', 'unknown')
+                }, status=500)
+        
+        except Exception as e:
+            print(f"❌ Regenerate page error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+    
     # ============================================================
     # 🍌 END OF NANO BANANA PIPELINE
     # ============================================================
@@ -3434,13 +3512,21 @@ Return ONLY the clothing phrase, nothing else."""
                 # NotoSansHebrew תומך בעברית + לטינית בסיסית + פיסוק נפוץ,
                 # אבל תווים אחרים (סמלים, אמוג'י, פיסוק נדיר) יוצאים ריבועים.
                 # נשמור רק: עברית, לטינית בסיסית, ספרות, רווחים ופיסוק נפוץ.
+                # 🔧 FIX (2026-09-25 20:15): הרחבה של רשימת פיסוק מותר
                 allowed_punct = set(' .,!?;:\'"()[]{}-/\n\t<>=+*%&@#~`^|\\$_')
+                # פיסוק עברי מיוחד שלא תמיד מזוהה
+                allowed_hebrew_punct = {
+                    '\u05BE',  # Hebrew punctuation MAQAF (-)
+                    '\u05C0',  # Hebrew punctuation PASEQ
+                    '\u05C3',  # Hebrew punctuation SOF PASUQ
+                    '\u05C6',  # Hebrew punctuation NUN HAFUKHA
+                }
                 cleaned_chars = []
                 for ch in text:
                     code = ord(ch)
                     is_hebrew = 0x0590 <= code <= 0x05FF
                     is_basic_latin = code < 0x0080
-                    if is_hebrew or is_basic_latin or ch in allowed_punct:
+                    if is_hebrew or is_basic_latin or ch in allowed_punct or ch in allowed_hebrew_punct:
                         cleaned_chars.append(ch)
                     # אחרת - מדלגים על התו (במקום להציג ריבוע)
                 return ''.join(cleaned_chars)
@@ -3504,6 +3590,8 @@ Return ONLY the clothing phrase, nothing else."""
             
             child_name = story_data.get('childName', 'ילד')
             pages = story_data.get('pages', [])
+            # 🔧 FIX (2026-09-25 20:15): allow custom book_title from frontend
+            book_title = story_data.get('book_title') or f"הספר של {child_name}"
             
             print(f"📄 PDF for: {child_name}")
             print(f"   Pages: {len(pages)}")
@@ -3566,7 +3654,7 @@ Return ONLY the clothing phrase, nothing else."""
             c.rect(0, 0, width, height, stroke=0, fill=1)
             c.setFillColorRGB(0.16, 0.13, 0.09)  # dark
             c.setFont(hebrew_font, 36)
-            title = fix_hebrew(f"הספר של {child_name}")
+            title = fix_hebrew(book_title)  # 🔧 FIX: use book_title instead of hardcoded
             title_width = c.stringWidth(title, hebrew_font, 36)
             c.drawString((width - title_width) / 2, height - 200, title)
             
@@ -3580,14 +3668,18 @@ Return ONLY the clothing phrase, nothing else."""
             for i, page in enumerate(pages):
                 print(f"   🖼️ Adding page {i+1}/{len(pages)}...")
                 
-                # Page number
+                # Page number - fix bidi issue with digit
                 c.setFillColorRGB(0.36, 0.29, 0.21)
                 c.setFont(hebrew_font, 10)
-                page_num = fix_hebrew(f"עמוד {i + 1}")
-                c.drawString(width - 100, 30, page_num)
+                # 🔧 FIX (2026-09-25 20:15): draw number and text separately
+                # so bidi doesn't eat the digit
+                page_num_text = fix_hebrew("עמוד")
+                page_num_digit = str(i + 1)
+                c.drawString(width - 100, 30, f"{page_num_digit} {page_num_text}")
                 
                 # ===== IMAGE =====
-                image_url = page.get('imageUrl')
+                # 🔧 FIX (2026-09-25 20:15): support both imageUrl (old) and image_url (new)
+                image_url = page.get('imageUrl') or page.get('image_url')
                 if image_url:
                     img_reader = load_image_for_pdf(image_url)
                     if img_reader:
