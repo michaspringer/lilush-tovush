@@ -4,8 +4,14 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Version: v5.1  |  Last modified: 2026-09-26 19:20 (Israel time)  |  Claude
-Changes in v5.1 (hotfix on top of v5):
+Version: v5.2  |  Last modified: 2026-09-26 21:35 (Israel time)  |  Claude
+Changes in v5.2 (perf hotfix):
+  - 🚀 PARALLEL: 3 style previews now generate in parallel (ThreadPoolExecutor)
+    Before: ~50s sequential (pixar 20s + realistic 17s + detailed 9s)
+    After: ~20s parallel (max of 3) - 60% faster
+    This prevents browser timeout on /api/generate-style-preview
+
+Changes in v5.1:
   - 🐛 FIX: JSON parse errors from Claude - added robust parsing with auto-fix + debug logs
   - 🐛 FIX: simplified writing style instructions (removed punctuation that confused JSON output)
   - 🐛 FIX: added explicit JSON formatting rules to Claude prompt (avoid curly quotes, dangling commas)
@@ -2796,20 +2802,26 @@ Return ONLY the clothing phrase, nothing else."""
             print(f"   ✅ Story ready: {len(pages)} pages, {len(character_bible)} characters")
             
             # 🎨 שלב 2: יצירת עמוד 1 ב-3 סגנונות
-            # נעשה sequentially כי concurrent יכול לגרום rate limits
+            # 🚀 v5.2 (2026-09-26): פארלליזציה של 3 הסגנונות במקום ברצף
+            # לפני: 50 שניות (sequential), אחרי: ~20 שניות (parallel)
+            # זה קריטי כדי להימנע מ-browser timeout על הבקשה
             first_page = pages[0]
             illustration = first_page.get('illustration', '')
             chars_in_scene = first_page.get('characters_in_scene', [])
             
-            print(f"\n🎨 Step 2: Generating page 1 in 3 visual styles...")
+            print(f"\n🎨 Step 2: Generating page 1 in 3 visual styles (parallel)...")
             print(f"   Scene: {illustration[:80]}...")
             
             style_previews = {}
             total_cost = 0.0
             
-            for visual_style in ['pixar', 'realistic', 'detailed']:
-                print(f"\n   🎨 Generating {visual_style} version...")
-                img_result = self.generate_image_with_nano_banana(
+            # 🚀 v5.2: הרצת 3 הסגנונות במקביל עם ThreadPoolExecutor
+            import concurrent.futures
+            
+            def generate_one_style(visual_style):
+                """פונקציית עזר - יוצרת תמונה בסגנון אחד."""
+                print(f"   🎨 [{visual_style}] starting...")
+                result = self.generate_image_with_nano_banana(
                     scene_description=illustration,
                     reference_images_bytes=reference_images_bytes,
                     style=visual_style,
@@ -2818,19 +2830,30 @@ Return ONLY the clothing phrase, nothing else."""
                     character_bible=character_bible,
                     characters_in_scene=chars_in_scene
                 )
-                
-                if img_result['success']:
-                    style_previews[visual_style] = {
-                        'image_url': img_result['image_url'],
-                        'elapsed_seconds': img_result['elapsed_seconds'],
-                        'cost': img_result.get('cost', 0)
-                    }
-                    total_cost += img_result.get('cost', 0)
-                else:
-                    style_previews[visual_style] = {
-                        'success': False,
-                        'error': img_result.get('error', 'unknown')
-                    }
+                return (visual_style, result)
+            
+            # מריצים 3 סגנונות במקביל (max_workers=3)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                futures = [executor.submit(generate_one_style, s) for s in ['pixar', 'realistic', 'detailed']]
+                for future in concurrent.futures.as_completed(futures):
+                    try:
+                        visual_style, img_result = future.result()
+                        if img_result['success']:
+                            style_previews[visual_style] = {
+                                'image_url': img_result['image_url'],
+                                'elapsed_seconds': img_result['elapsed_seconds'],
+                                'cost': img_result.get('cost', 0)
+                            }
+                            total_cost += img_result.get('cost', 0)
+                            print(f"   ✅ [{visual_style}] done in {img_result['elapsed_seconds']}s")
+                        else:
+                            style_previews[visual_style] = {
+                                'success': False,
+                                'error': img_result.get('error', 'unknown')
+                            }
+                            print(f"   ❌ [{visual_style}] failed: {img_result.get('error', 'unknown')}")
+                    except Exception as parallel_err:
+                        print(f"   ❌ Style generation exception: {parallel_err}")
             
             total_time = time.time() - preview_start
             
