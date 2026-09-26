@@ -4,7 +4,12 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Version: v5  |  Last modified: 2026-09-26 18:35 (Israel time)  |  Claude
+Version: v5.1  |  Last modified: 2026-09-26 19:20 (Israel time)  |  Claude
+Changes in v5.1 (hotfix on top of v5):
+  - 🐛 FIX: JSON parse errors from Claude - added robust parsing with auto-fix + debug logs
+  - 🐛 FIX: simplified writing style instructions (removed punctuation that confused JSON output)
+  - 🐛 FIX: added explicit JSON formatting rules to Claude prompt (avoid curly quotes, dangling commas)
+
 Changes in v5:
   - 🎨 NEW: 4 writing styles (funny/educational/adventure/bedtime) with distinct tone instructions
   - 🎨 NEW: /api/generate-style-preview endpoint - creates story + page 1 in 3 visual styles
@@ -571,8 +576,43 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             response_data = json.loads(response.read().decode('utf-8'))
             content = response_data['content'][0]['text']
             clean_content = content.replace('```json', '').replace('```', '').strip()
-            story_data = json.loads(clean_content)
-            return story_data
+            
+            # 🛡️ v5 (2026-09-26): parsing עמיד עם fix-up אוטומטי
+            try:
+                story_data = json.loads(clean_content)
+                return story_data
+            except json.JSONDecodeError as first_err:
+                # דיבאג - להדפיס לוגים ולנסות לתקן
+                print(f"\n⚠️ JSON parse failed on first attempt: {first_err}")
+                print(f"   Content length: {len(clean_content)} chars")
+                print(f"   Error near char {first_err.pos if hasattr(first_err, 'pos') else '?'}")
+                
+                # ניסיון תיקון אוטומטי - שגיאות נפוצות של Claude
+                fixed_content = clean_content
+                
+                # 1. החלפת curly quotes ל-straight quotes
+                fixed_content = fixed_content.replace('\u201C', '"').replace('\u201D', '"')  # " "
+                fixed_content = fixed_content.replace('\u2018', "'").replace('\u2019', "'")  # ' '
+                
+                # 2. הסרת פסיקים כפולים ופסיקים לפני סוגריים סוגרים
+                import re as _re
+                fixed_content = _re.sub(r',\s*,', ',', fixed_content)
+                fixed_content = _re.sub(r',\s*}', '}', fixed_content)
+                fixed_content = _re.sub(r',\s*]', ']', fixed_content)
+                
+                # ניסיון שני
+                try:
+                    story_data = json.loads(fixed_content)
+                    print(f"   ✅ Recovered with auto-fix!")
+                    return story_data
+                except json.JSONDecodeError as second_err:
+                    print(f"   ❌ Auto-fix didn't help: {second_err}")
+                    print(f"   Raw content preview (first 500 chars):")
+                    print(f"   {clean_content[:500]}")
+                    print(f"   Raw content around error (chars {max(0, first_err.pos-100)}-{first_err.pos+100}):")
+                    print(f"   {clean_content[max(0, first_err.pos-100):first_err.pos+100]}")
+                    # נזרוק שגיאה מפורטת יותר
+                    raise Exception(f"Claude returned invalid JSON at position {first_err.pos}: {first_err.msg}")
     
     def add_images_to_story(self, story_data, child_photo=None, lora_url=None, trigger_word=None, lora_version=None, chosen_seed=None, chosen_lora_scale=1.0, chosen_style='classic_illustration', child_gender='boy'):
         """מוסיף תמונות לסיפור - עם LoRA אם יש, אחרת FLUX + face swap.
@@ -1471,11 +1511,12 @@ Return ONLY the English description, nothing else."""
         }
         
         # 🎨 v5 (2026-09-26): הנחיות טון ספציפיות לכל סגנון כתיבה
+        # ⚠️ חשוב: לא לכלול סימני פיסוק מיוחדים או מירכאות שיכולים לבלבל את Claude ב-JSON output
         style_instructions = {
-            'funny': 'הסיפור צריך להיות מלא הומור, מצבים משעשעים ומצחיקים, ומילים כיפיות. השתמש בקולות מצחיקים (בום! פלוף! הופ!), מצבים אבסורדיים, ודיאלוגים משעשעים. הקורא צריך לצחוק לפחות פעמיים בכל עמוד.',
-            'educational': 'הסיפור צריך ללמד ערך מוסרי ברור - למשל: שיתוף, אומץ, נדיבות, חברות, סבלנות, אכפתיות. הערך צריך להיות שזור בעלילה בצורה טבעית (לא מטיף!) - הילד לומד דרך החוויה. בעמוד האחרון הערך צריך להיות ברור.',
-            'adventure': 'הסיפור צריך להיות מלא הרפתקה מרגשת - אתגרים, מקומות חדשים לגלות, פתרון בעיות, גילויים מפתיעים. הקצב מהיר, יש חשש והקלה, מסע של גבורה עם סוף מנצח.',
-            'bedtime': 'הסיפור צריך להיות עדין ומרגיע - מתאים כסיפור לפני שינה. הטון רך, המצבים חמים ובטוחים, הסוף מרגיע (הגיבור נרדם, מחובק, בטוח). בלי הפתעות דרמטיות או שיא מרגש - סוף עדין.'
+            'funny': 'הסיפור צריך להיות מלא הומור, מצבים משעשעים, ומילים כיפיות. הקורא צריך לחייך ולצחוק כמה פעמים.',
+            'educational': 'הסיפור צריך ללמד ערך מוסרי ברור - למשל שיתוף, אומץ, נדיבות, חברות, סבלנות או אכפתיות. הערך צריך להיות שזור בעלילה בצורה טבעית, לא מטיף - הילד לומד דרך החוויה.',
+            'adventure': 'הסיפור צריך להיות מלא הרפתקה מרגשת - אתגרים, מקומות חדשים לגלות, פתרון בעיות, וגילויים מפתיעים. הקצב מהיר עם סוף מנצח.',
+            'bedtime': 'הסיפור צריך להיות עדין ומרגיע - מתאים כסיפור לפני שינה. הטון רך, המצבים חמים ובטוחים, והסוף מרגיע. בלי הפתעות דרמטיות.'
         }
         
         # Full book - 8 pages for all ages (testing longer books)
@@ -1666,6 +1707,16 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
 
 חשוב: אם characters ריק - הילד לבד בכל הסיפור (פשוט יותר ובטוח יותר).
 זכור: כל מה שבטקסט - חייב להיות גם בתיאור התמונה!
+
+⚠️⚠️⚠️ חוקי JSON קריטיים - חובה לעקוב אחריהם! ⚠️⚠️⚠️
+1. השתמש רק במירכאות רגילות " (0x22) - לא " ולא " (curly quotes)
+2. לדיאלוגים בעברית - השתמש בגרשיים בעברית '' או ' לא ב-" (המירכאות של המחרוזת)
+   ✅ נכון: "text": "אמר דולב: 'שלום!'"
+   ❌ אסור: "text": "אמר דולב: "שלום!""
+3. אין newlines בתוך מחרוזות! רק \\n מפורש
+4. השתמש בגרש בודד ' לתחילת ולסוף ציטוט, לא במירכאות כפולות
+5. הסיפור צריך להיות ב-JSON תקין 100% - שים לב לפסיקים, סוגריים
+6. אל תשים פסיק אחרי הפריט האחרון ב-array או object
 """
         else:
             # גרסה רגילה: תיאור מפורט (לFLUX רגיל)
