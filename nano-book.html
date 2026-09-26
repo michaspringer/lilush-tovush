@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>📚 לילוש טובוש — ספר אישי לילד</title>
 <style>
-    /* Version: v3  |  Last modified: 2026-09-25 20:15 (Israel time)  |  Claude
-       Changes: Text editing, image regeneration, PDF field fix, book cover title */
+    /* Version: v5  |  Last modified: 2026-09-26 18:35 (Israel time)  |  Claude
+       Changes: Writing style dropdown, visual style preview screen (3 pixar/realistic/detailed choices) */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
         font-family: 'Heebo', -apple-system, sans-serif;
@@ -311,6 +311,104 @@
         position: relative;
     }
     
+    /* 🎨 v5: Style preview screen (3 visual styles to choose) */
+    .style-preview-area {
+        margin-top: 2rem;
+        display: none;
+    }
+    .style-preview-area.active {
+        display: block;
+    }
+    .style-preview-header {
+        text-align: center;
+        margin-bottom: 1.5rem;
+    }
+    .style-preview-header h2 {
+        color: #D97706;
+        margin-bottom: 0.5rem;
+    }
+    .style-preview-header p {
+        color: #5C4A35;
+        font-size: 0.95rem;
+    }
+    .style-preview-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1rem;
+    }
+    .style-preview-card {
+        background: white;
+        border-radius: 16px;
+        padding: 1rem;
+        border: 3px solid #E5D3A6;
+        cursor: pointer;
+        transition: all 0.2s;
+        text-align: center;
+    }
+    .style-preview-card:hover {
+        border-color: #D97706;
+        transform: translateY(-4px);
+        box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+    }
+    .style-preview-card.selected {
+        border-color: #D97706;
+        background: #FEF3C7;
+        box-shadow: 0 8px 20px rgba(217, 119, 6, 0.2);
+    }
+    .style-preview-card img {
+        width: 100%;
+        aspect-ratio: 1;
+        object-fit: cover;
+        border-radius: 12px;
+        margin-bottom: 0.8rem;
+    }
+    .style-preview-card .style-icon {
+        font-size: 1.8rem;
+        margin-bottom: 0.3rem;
+    }
+    .style-preview-card strong {
+        display: block;
+        color: #92400E;
+        font-size: 1.05rem;
+        margin-bottom: 0.3rem;
+    }
+    .style-preview-card small {
+        color: #5C4A35;
+        font-size: 0.8rem;
+    }
+    .style-preview-loading {
+        width: 100%;
+        aspect-ratio: 1;
+        background: #FEF3C7;
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #92400E;
+        font-size: 0.85rem;
+        margin-bottom: 0.8rem;
+    }
+    .style-preview-actions {
+        margin-top: 1.5rem;
+        display: flex;
+        gap: 1rem;
+    }
+    .style-preview-actions button {
+        flex: 1;
+    }
+    .btn-secondary {
+        background: white;
+        color: #92400E;
+        border: 2px solid #E5D3A6;
+    }
+    .btn-secondary:hover:not(:disabled) {
+        background: #FEF3C7;
+    }
+    
+    @media (max-width: 700px) {
+        .style-preview-grid { grid-template-columns: 1fr; }
+    }
+    
     @media (max-width: 700px) {
         .refs-grid, .style-grid, .field-row, .book-page { grid-template-columns: 1fr; }
     }
@@ -408,40 +506,26 @@
             </div>
         </div>
         <div class="field">
+            <label>🎨 סגנון הכתיבה</label>
+            <select id="writingStyle">
+                <option value="funny" selected>😄 מצחיק ושמח</option>
+                <option value="educational">📚 חינוכי עם ערך מוסרי</option>
+                <option value="adventure">✨ הרפתקאות מרגשות</option>
+                <option value="bedtime">🌙 רגוע לפני שינה</option>
+            </select>
+        </div>
+        <div class="field">
             <label>פרטים נוספים (אופציונלי) - מה הילד אוהב, ערך שחשוב לכם וכו'</label>
             <input type="text" id="customInput" placeholder="למשל: אוהב דינוזאורים, יש לו כלב בשם רקס">
         </div>
     </div>
 
-    <!-- STEP 4: Style -->
-    <div class="section">
-        <h2>4️⃣ בחירת סגנון איור</h2>
-        <div class="style-grid">
-            <div class="style-card" data-style="realistic" onclick="selectStyle(this)">
-                <div class="icon">📸</div>
-                <strong>ריאליסטי</strong>
-                <small>איכות תמונה</small>
-                <small>~$1 · 2 דק'</small>
-            </div>
-            <div class="style-card selected" data-style="pixar" onclick="selectStyle(this)">
-                <div class="icon">🎬</div>
-                <strong>פיקסר 3D</strong>
-                <small>קסום ומודרני</small>
-                <small>~$0.27 · 1 דק'</small>
-            </div>
-            <div class="style-card" data-style="detailed" onclick="selectStyle(this)">
-                <div class="icon">✏️</div>
-                <strong>איור קלאסי</strong>
-                <small>ספר סיפור מסורתי</small>
-                <small>~$0.27 · 1 דק'</small>
-            </div>
-        </div>
-    </div>
+    <!-- STEP 4 removed: visual style is now chosen AFTER preview -->
 
-    <!-- STEP 5: Generate -->
+    <!-- STEP 5: Generate preview button -->
     <div class="section">
-        <button id="generateBtn" onclick="generateBook()" disabled>
-            📚 צור את הספר
+        <button id="generateBtn" onclick="generatePreview()" disabled>
+            🎨 בואו נראה תצוגה מקדימה
         </button>
         <div id="btnHelper" style="text-align: center; margin-top: 0.7rem; font-size: 0.85rem; color: #92400E; min-height: 1.2em;"></div>
     </div>
@@ -452,6 +536,23 @@
         <div class="progress-detail" id="progressDetail"></div>
         <div class="progress-bar-outer">
             <div class="progress-bar-inner" id="progressBar"></div>
+        </div>
+    </div>
+
+    <!-- 🎨 v5: Style Preview Screen -->
+    <div class="style-preview-area" id="stylePreviewArea">
+        <div class="style-preview-header">
+            <h2>🎨 בחרו את הסגנון הויזואלי</h2>
+            <p>ראו איך העמוד הראשון של הספר ייראה ב-3 סגנונות. אחרי הבחירה - נבנה את כל הספר באותו סגנון.</p>
+        </div>
+        <div class="style-preview-grid" id="stylePreviewGrid">
+            <!-- 3 style cards will be added here dynamically -->
+        </div>
+        <div class="style-preview-actions">
+            <button class="btn-secondary" onclick="cancelPreview()">↩️ חזרה לטופס</button>
+            <button id="continueBtn" onclick="continueWithSelectedStyle()" disabled>
+                📚 המשך עם הסגנון הזה
+            </button>
         </div>
     </div>
 
@@ -473,10 +574,14 @@
 </div>
 
 <script>
-    // Version: v3  |  Last modified: 2026-09-25 20:15 (Israel time)  |  Claude
-    // Changes: Text editing, image regeneration, PDF field fix, book cover title
+    // Version: v5  |  Last modified: 2026-09-26 18:35 (Israel time)  |  Claude
+    // Changes: Writing style, style preview screen, continue mode
     const referenceImages = [null, null, null];
-    let selectedStyle = 'pixar';
+    let selectedStyle = 'pixar';  // אתחול, אבל נקבע אחרי preview
+    
+    // 🎨 v5: State של preview
+    let currentPreviewData = null;  // {story, style_previews, ...}
+    let selectedPreviewStyle = null;  // 'realistic' | 'pixar' | 'detailed'
     
     function triggerFileInput(index) {
         const slot = document.getElementById(`refSlot-${index}`);
@@ -599,7 +704,7 @@
     
     document.getElementById('childName').addEventListener('input', updateGenerateBtn);
     
-    async function generateBook() {
+    async function generatePreview() {
         const refs = referenceImages.filter(img => img !== null);
         if (refs.length === 0) return;
         
@@ -609,37 +714,182 @@
         const childAge = document.getElementById('childAge').value;
         const childGender = document.getElementById('childGender').value;
         const theme = document.getElementById('theme').value;
+        const writingStyle = document.getElementById('writingStyle').value;
         const customInput = document.getElementById('customInput').value.trim();
         const outfit = document.getElementById('outfitInput').value.trim() || 'simple casual clothes';
         
         // UI
         document.getElementById('generateBtn').disabled = true;
-        document.getElementById('generateBtn').textContent = '⏳ יוצר ספר...';
+        document.getElementById('generateBtn').textContent = '⏳ יוצר תצוגה מקדימה...';
         document.getElementById('progressArea').classList.add('active');
         document.getElementById('resultsArea').classList.remove('active');
-        document.getElementById('bookPages').innerHTML = '';
-        document.getElementById('costSummary').innerHTML = '';
-        document.getElementById('pdfDownloadArea').style.display = 'none';  // ⏸️ הסתרה בזמן יצירה
+        document.getElementById('stylePreviewArea').classList.remove('active');
+        document.getElementById('pdfDownloadArea').style.display = 'none';
         window.currentBookData = null;
+        currentPreviewData = null;
+        selectedPreviewStyle = null;
         
-        // Fake progress animation while waiting for backend
-        // (הזרימה הסינכרונית - נחזור למצב אסינכרוני בהמשך)
+        // Fake progress
         let fakeProgress = 0;
         const fakeInterval = setInterval(() => {
             fakeProgress = Math.min(fakeProgress + 2, 95);
             document.getElementById('progressBar').style.width = fakeProgress + '%';
             
-            if (fakeProgress < 15) {
+            if (fakeProgress < 25) {
                 document.getElementById('progressStatus').textContent = '📝 Claude כותב את הסיפור...';
-                document.getElementById('progressDetail').textContent = 'סיפור מותאם אישית בעברית';
+                document.getElementById('progressDetail').textContent = `סגנון: ${getWritingStyleLabel(writingStyle)}`;
             } else if (fakeProgress < 90) {
-                const currentPage = Math.floor((fakeProgress - 15) / 10) + 1;
-                document.getElementById('progressStatus').textContent = `🎨 יוצר עמוד ${currentPage}/8...`;
-                document.getElementById('progressDetail').textContent = 'Nano Banana מציירת';
+                const style = fakeProgress < 50 ? 'פיקסר' : fakeProgress < 75 ? 'ריאליסטי' : 'איור קלאסי';
+                document.getElementById('progressStatus').textContent = `🎨 יוצר תצוגה מקדימה - ${style}...`;
+                document.getElementById('progressDetail').textContent = 'Nano Banana מציירת את עמוד 1';
             } else {
                 document.getElementById('progressStatus').textContent = '🎁 מסיים...';
-                document.getElementById('progressDetail').textContent = 'רגע ואנחנו שם';
+                document.getElementById('progressDetail').textContent = '';
             }
+        }, 1500);
+        
+        try {
+            const response = await fetch('/api/generate-style-preview', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    reference_images: refs,
+                    childName: childName,
+                    childAge: childAge,
+                    childGender: childGender,
+                    theme: theme,
+                    outfit: outfit,
+                    customInput: customInput,
+                    writing_style: writingStyle
+                })
+            });
+            
+            clearInterval(fakeInterval);
+            document.getElementById('progressBar').style.width = '100%';
+            
+            const data = await response.json();
+            
+            if (!data.success) {
+                throw new Error(data.error || 'unknown error');
+            }
+            
+            // 💾 שמירת נתוני התצוגה
+            currentPreviewData = data;
+            
+            // הסתרת progress, הצגת style preview
+            setTimeout(() => {
+                document.getElementById('progressArea').classList.remove('active');
+                showStylePreview(data);
+            }, 500);
+            
+        } catch (err) {
+            clearInterval(fakeInterval);
+            document.getElementById('progressStatus').textContent = '❌ שגיאה';
+            document.getElementById('progressDetail').textContent = err.message;
+            document.getElementById('progressBar').style.width = '0%';
+            alert('שגיאה ביצירת התצוגה: ' + err.message);
+        }
+        
+        document.getElementById('generateBtn').disabled = false;
+        document.getElementById('generateBtn').textContent = '🎨 בואו נראה תצוגה מקדימה';
+        updateGenerateBtn();
+    }
+    
+    function getWritingStyleLabel(style) {
+        const labels = {
+            'funny': '😄 מצחיק ושמח',
+            'educational': '📚 חינוכי',
+            'adventure': '✨ הרפתקאות',
+            'bedtime': '🌙 רגוע'
+        };
+        return labels[style] || style;
+    }
+    
+    function showStylePreview(data) {
+        const grid = document.getElementById('stylePreviewGrid');
+        grid.innerHTML = '';
+        
+        const styleInfo = {
+            'pixar': { icon: '🎬', name: 'פיקסר 3D', desc: 'קסום ומודרני' },
+            'realistic': { icon: '📸', name: 'ריאליסטי', desc: 'איכות תמונה' },
+            'detailed': { icon: '✏️', name: 'איור קלאסי', desc: 'ספר סיפור מסורתי' }
+        };
+        
+        // סדר: פיקסר, ריאליסטי, איור
+        ['pixar', 'realistic', 'detailed'].forEach(styleKey => {
+            const preview = data.style_previews[styleKey];
+            const info = styleInfo[styleKey];
+            
+            let imageHTML;
+            if (preview && preview.image_url) {
+                imageHTML = `<img src="${preview.image_url}" alt="${info.name}">`;
+            } else {
+                imageHTML = `<div class="style-preview-loading">❌ נכשל</div>`;
+            }
+            
+            grid.innerHTML += `
+                <div class="style-preview-card" data-style="${styleKey}" onclick="selectPreviewStyle('${styleKey}')">
+                    ${imageHTML}
+                    <div class="style-icon">${info.icon}</div>
+                    <strong>${info.name}</strong>
+                    <small>${info.desc}</small>
+                </div>
+            `;
+        });
+        
+        document.getElementById('stylePreviewArea').classList.add('active');
+        
+        // אוטו-בחירה של פיקסר (הכי פופולרי)
+        selectPreviewStyle('pixar');
+        
+        // גלילה למסך הבחירה
+        document.getElementById('stylePreviewArea').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    
+    function selectPreviewStyle(styleKey) {
+        selectedPreviewStyle = styleKey;
+        document.querySelectorAll('.style-preview-card').forEach(card => {
+            card.classList.toggle('selected', card.dataset.style === styleKey);
+        });
+        document.getElementById('continueBtn').disabled = false;
+    }
+    
+    function cancelPreview() {
+        document.getElementById('stylePreviewArea').classList.remove('active');
+        currentPreviewData = null;
+        selectedPreviewStyle = null;
+        document.getElementById('generateBtn').scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    
+    async function continueWithSelectedStyle() {
+        if (!currentPreviewData || !selectedPreviewStyle) return;
+        
+        const refs = referenceImages.filter(img => img !== null);
+        const childName = document.getElementById('childName').value.trim();
+        const childAge = document.getElementById('childAge').value;
+        const childGender = document.getElementById('childGender').value;
+        const theme = document.getElementById('theme').value;
+        const writingStyle = document.getElementById('writingStyle').value;
+        const customInput = document.getElementById('customInput').value.trim();
+        const outfit = document.getElementById('outfitInput').value.trim() || 'simple casual clothes';
+        
+        const firstPageUrl = currentPreviewData.style_previews[selectedPreviewStyle].image_url;
+        selectedStyle = selectedPreviewStyle;
+        
+        // UI
+        document.getElementById('continueBtn').disabled = true;
+        document.getElementById('continueBtn').textContent = '⏳ יוצר ספר...';
+        document.getElementById('stylePreviewArea').classList.remove('active');
+        document.getElementById('progressArea').classList.add('active');
+        document.getElementById('resultsArea').classList.remove('active');
+        
+        let fakeProgress = 0;
+        const fakeInterval = setInterval(() => {
+            fakeProgress = Math.min(fakeProgress + 2, 95);
+            document.getElementById('progressBar').style.width = fakeProgress + '%';
+            const currentPage = Math.min(Math.floor((fakeProgress / 90) * 7) + 2, 8);
+            document.getElementById('progressStatus').textContent = `🎨 יוצר עמוד ${currentPage}/8...`;
+            document.getElementById('progressDetail').textContent = `סגנון: ${selectedStyle === 'pixar' ? 'פיקסר' : selectedStyle === 'realistic' ? 'ריאליסטי' : 'איור קלאסי'}`;
         }, 1500);
         
         try {
@@ -654,7 +904,11 @@
                     theme: theme,
                     style: selectedStyle,
                     outfit: outfit,
-                    customInput: customInput
+                    customInput: customInput,
+                    writing_style: writingStyle,
+                    // 🎨 v5: Continue mode
+                    prewritten_story: currentPreviewData.story,
+                    first_page_url: firstPageUrl
                 })
             });
             
@@ -664,25 +918,24 @@
             document.getElementById('progressDetail').textContent = '';
             
             const data = await response.json();
-            
             if (!data.success) {
                 throw new Error(data.error || 'unknown error');
             }
             
-            // Render book
+            // 💾 שמירה של style_used לצורך regeneration
+            data.style_used = selectedStyle;
+            
             renderBook(data);
             
         } catch (err) {
             clearInterval(fakeInterval);
             document.getElementById('progressStatus').textContent = '❌ שגיאה';
             document.getElementById('progressDetail').textContent = err.message;
-            document.getElementById('progressBar').style.width = '0%';
             alert('שגיאה ביצירת הספר: ' + err.message);
         }
         
-        document.getElementById('generateBtn').disabled = false;
-        document.getElementById('generateBtn').textContent = '📚 צור ספר חדש';
-        updateGenerateBtn();
+        document.getElementById('continueBtn').disabled = false;
+        document.getElementById('continueBtn').textContent = '📚 המשך עם הסגנון הזה';
     }
     
     function renderBook(data) {
