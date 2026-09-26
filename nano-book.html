@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>📚 לילוש טובוש — ספר אישי לילד</title>
 <style>
-    /* Version: v5  |  Last modified: 2026-09-26 18:35 (Israel time)  |  Claude
-       Changes: Writing style dropdown, visual style preview screen (3 pixar/realistic/detailed choices) */
+    /* Version: v5.2  |  Last modified: 2026-09-26 21:35 (Israel time)  |  Claude
+       Changes: extended fetch timeout for style preview (parallel gen on server) */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
         font-family: 'Heebo', -apple-system, sans-serif;
@@ -574,8 +574,8 @@
 </div>
 
 <script>
-    // Version: v5  |  Last modified: 2026-09-26 18:35 (Israel time)  |  Claude
-    // Changes: Writing style, style preview screen, continue mode
+    // Version: v5.2  |  Last modified: 2026-09-26 21:35 (Israel time)  |  Claude
+    // Changes: AbortController with 3-minute timeout, better error messages
     const referenceImages = [null, null, null];
     let selectedStyle = 'pixar';  // אתחול, אבל נקבע אחרי preview
     
@@ -749,6 +749,10 @@
         }, 1500);
         
         try {
+            // 🕐 v5.2: timeout מפורש של 3 דקות (הפריווי לוקח ~50 שניות ב-parallel)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 180000);  // 3 min
+            
             const response = await fetch('/api/generate-style-preview', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -761,8 +765,10 @@
                     outfit: outfit,
                     customInput: customInput,
                     writing_style: writingStyle
-                })
+                }),
+                signal: controller.signal
             });
+            clearTimeout(timeoutId);
             
             clearInterval(fakeInterval);
             document.getElementById('progressBar').style.width = '100%';
@@ -785,9 +791,18 @@
         } catch (err) {
             clearInterval(fakeInterval);
             document.getElementById('progressStatus').textContent = '❌ שגיאה';
-            document.getElementById('progressDetail').textContent = err.message;
+            
+            // הודעה ידידותית יותר
+            let userMsg = err.message;
+            if (err.name === 'AbortError') {
+                userMsg = 'הבקשה לקחה יותר מדי זמן. השרת אולי עדיין עובד - נסה שוב בעוד דקה.';
+            } else if (err.message === 'Failed to fetch') {
+                userMsg = 'הבקשה נפסקה. יכול להיות שהשרת עדיין עובד - נסה שוב בעוד דקה.';
+            }
+            
+            document.getElementById('progressDetail').textContent = userMsg;
             document.getElementById('progressBar').style.width = '0%';
-            alert('שגיאה ביצירת התצוגה: ' + err.message);
+            alert('שגיאה ביצירת התצוגה: ' + userMsg);
         }
         
         document.getElementById('generateBtn').disabled = false;
@@ -893,6 +908,10 @@
         }, 1500);
         
         try {
+            // 🕐 v5.2: timeout של 3 דקות (7 עמודים sequential = ~60-70 שניות)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 180000);
+            
             const response = await fetch('/api/generate-book-nano', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
@@ -909,8 +928,10 @@
                     // 🎨 v5: Continue mode
                     prewritten_story: currentPreviewData.story,
                     first_page_url: firstPageUrl
-                })
+                }),
+                signal: controller.signal
             });
+            clearTimeout(timeoutId);
             
             clearInterval(fakeInterval);
             document.getElementById('progressBar').style.width = '100%';
