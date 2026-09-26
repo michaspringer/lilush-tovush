@@ -4,30 +4,28 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Version: v4  |  Last modified: 2026-09-25 20:45 (Israel time)  |  Claude
-Changes in v4:
-  - 🐛 PDF FONT FIX: replaced NotoSansHebrew (Hebrew-only font!) with Rubik (full support)
-    Root cause: NotoSansHebrew has NO glyphs for . , ! ? " ' 0-9 or Latin letters,
-    so all punctuation and page numbers were silently dropped from PDF output.
-    Rubik is a Google Fonts family with full Hebrew + Latin + punctuation + digit support.
+Version: v5  |  Last modified: 2026-09-26 18:35 (Israel time)  |  Claude
+Changes in v5:
+  - 🎨 NEW: 4 writing styles (funny/educational/adventure/bedtime) with distinct tone instructions
+  - 🎨 NEW: /api/generate-style-preview endpoint - creates story + page 1 in 3 visual styles
+  - 🎨 NEW: handle_generate_book_nano supports prewritten_story + first_page_url
+    (continue mode - re-use story and preview image chosen by parent)
+  - ✨ Cost optimization: skipping page 1 generation when reusing preview saves ~$0.03
+
+Previous version (v4, 2026-09-25 20:45 Israel):
+  - 🐛 PDF FONT FIX: replaced NotoSansHebrew (Hebrew-only!) with Rubik (full support)
 
 Previous version (v3, 2026-09-25 20:15 Israel):
-  - 🐛 PDF FIX: imageUrl → image_url compat (both accepted)
-  - 🐛 PDF FIX: page number - digit separated from Hebrew word so bidi keeps it
-  - 🐛 PDF FIX: cover title uses book_title from request (not hardcoded)
-  - 🔄 NEW: /api/regenerate-page-image endpoint - יצירת תמונה בודדת מחדש
+  - 🐛 PDF FIX: imageUrl → image_url compat + page number bidi + cover title
+  - 🔄 NEW: /api/regenerate-page-image endpoint
 
 Previous version (v2, 2026-09-25 13:45 Israel):
-  - 🐛 CRITICAL FIX: Claude model updated from claude-sonnet-4-20250514 (deprecated 2026-06-15)
-    to claude-sonnet-4-5 (current)
-  - 📚 NEW: /api/generate-book-nano endpoint
-  - 🍌 NEW: generate_image_with_nano_banana + /nano-book HTML page
-  - 👕 NEW: /api/analyze-outfit endpoint (Claude Vision)
-  - 🎨 NEW: 3 styles supported (realistic / pixar / detailed)
+  - 🐛 Claude model updated to claude-sonnet-4-5
+  - 📚 NEW: /api/generate-book-nano + generate_image_with_nano_banana + /nano-book HTML
+  - 👕 NEW: /api/analyze-outfit + 3 visual styles
 
 Previous version (2026-05-25):
   - 🧪 POC: /api/test-pulid + /test-pulid HTML
-  - 🎯 TRIGGER REINFORCEMENT, STYLE HARDENING, PRE-WARM DECONFLICTION
 """
 
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -225,6 +223,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         elif self.path == '/api/regenerate-page-image':  # 🔄 יצירת תמונה בודדת מחדש
             # Version: v3 | 2026-09-25 20:15 (Israel time)
             self.handle_regenerate_page_image()
+        elif self.path == '/api/generate-style-preview':  # 🎨 יצירת סיפור + עמוד 1 ב-3 סגנונות
+            # Version: v5 | 2026-09-26 (Israel time)
+            self.handle_generate_style_preview()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -1464,7 +1465,17 @@ Return ONLY the English description, nothing else."""
         
         style_names = {
             'funny': 'מצחיק',
-            'educational': 'חינוכי'
+            'educational': 'חינוכי',
+            'adventure': 'הרפתקאות',
+            'bedtime': 'רגוע לפני שינה'
+        }
+        
+        # 🎨 v5 (2026-09-26): הנחיות טון ספציפיות לכל סגנון כתיבה
+        style_instructions = {
+            'funny': 'הסיפור צריך להיות מלא הומור, מצבים משעשעים ומצחיקים, ומילים כיפיות. השתמש בקולות מצחיקים (בום! פלוף! הופ!), מצבים אבסורדיים, ודיאלוגים משעשעים. הקורא צריך לצחוק לפחות פעמיים בכל עמוד.',
+            'educational': 'הסיפור צריך ללמד ערך מוסרי ברור - למשל: שיתוף, אומץ, נדיבות, חברות, סבלנות, אכפתיות. הערך צריך להיות שזור בעלילה בצורה טבעית (לא מטיף!) - הילד לומד דרך החוויה. בעמוד האחרון הערך צריך להיות ברור.',
+            'adventure': 'הסיפור צריך להיות מלא הרפתקה מרגשת - אתגרים, מקומות חדשים לגלות, פתרון בעיות, גילויים מפתיעים. הקצב מהיר, יש חשש והקלה, מסע של גבורה עם סוף מנצח.',
+            'bedtime': 'הסיפור צריך להיות עדין ומרגיע - מתאים כסיפור לפני שינה. הטון רך, המצבים חמים ובטוחים, הסוף מרגיע (הגיבור נרדם, מחובק, בטוח). בלי הפתעות דרמטיות או שיא מרגש - סוף עדין.'
         }
         
         # Full book - 8 pages for all ages (testing longer books)
@@ -1478,6 +1489,7 @@ Return ONLY the English description, nothing else."""
         pages = pages_by_age.get(data.get('childAge', '3-5'), '1')
         theme = theme_names.get(data.get('theme', ''), 'הרפתקאות')
         style = style_names.get(data.get('style', ''), 'מצחיק')
+        style_instruction = style_instructions.get(data.get('style', ''), style_instructions['funny'])
         
         # 🎯 NEW: בדיקה אם משתמשים ב-LoRA - אם כן, נשנה את הוראות התמונות
         use_lora = bool(data.get('use_lora') and data.get('trigger_word'))
@@ -1490,6 +1502,9 @@ Return ONLY the English description, nothing else."""
 נושא: {theme}
 סגנון: {style}
 אורך: {pages} עמודים
+
+🎨 הוראות סגנון כתיבה:
+{style_instruction}
 """
         
         if data.get('customInput'):
@@ -2400,6 +2415,11 @@ Return ONLY the clothing phrase, nothing else."""
             style = data.get('style', 'pixar')
             outfit = data.get('outfit', '')
             custom_input = data.get('customInput', '')
+            # 🎨 v5 (2026-09-26): סגנון הכתיבה (מצחיק/חינוכי/הרפתקאות/רגוע)
+            writing_style = data.get('writing_style', 'funny')
+            # 🎨 v5: continue mode - קבלת סיפור מוכן ותמונה ראשונה מוכנה (חוסך זמן+עלות)
+            prewritten_story = data.get('prewritten_story')  # dict with pages+characters
+            first_page_url = data.get('first_page_url')  # URL של עמוד 1 שכבר נוצר בtצוגה מקדימה
             
             print(f"\n📚 ============================================")
             print(f"📚 GENERATING BOOK: {child_name} (age {child_age})")
@@ -2417,23 +2437,28 @@ Return ONLY the clothing phrase, nothing else."""
                 clean_b64 = img_b64.split(',', 1)[1] if ',' in img_b64 else img_b64
                 reference_images_bytes.append(_b64.b64decode(clean_b64))
             
-            # 📝 שלב 1: יצירת סיפור עם Claude
-            print(f"\n📝 Step 1: Creating story with Claude...")
-            story_data_input = {
-                'childName': child_name,
-                'childAge': child_age,
-                'childGender': child_gender,
-                'theme': theme,
-                'style': 'funny',  # ברירת מחדל
-                'customInput': custom_input,
-                'use_lora': True,  # מפעיל את הפורמט המשופר עם Character Bible
-                'trigger_word': 'x'  # dummy - צריך רק כדי להפעיל את הפורמט המשופר
-            }
-            
-            try:
-                story = self.create_story_with_claude(story_data_input)
-            except Exception as claude_err:
-                raise Exception(f'Claude story generation failed: {claude_err}')
+            # 📝 שלב 1: יצירת סיפור עם Claude (או שימוש בסיפור מוכן)
+            if prewritten_story:
+                print(f"\n📝 Step 1: Using prewritten story (continue mode)...")
+                story = prewritten_story
+            else:
+                print(f"\n📝 Step 1: Creating story with Claude...")
+                print(f"   Writing style: {writing_style}")
+                story_data_input = {
+                    'childName': child_name,
+                    'childAge': child_age,
+                    'childGender': child_gender,
+                    'theme': theme,
+                    'style': writing_style,  # 🎨 v5: sends writing style
+                    'customInput': custom_input,
+                    'use_lora': True,
+                    'trigger_word': 'x'
+                }
+                
+                try:
+                    story = self.create_story_with_claude(story_data_input)
+                except Exception as claude_err:
+                    raise Exception(f'Claude story generation failed: {claude_err}')
             
             pages = story.get('pages', [])
             if not pages:
@@ -2465,6 +2490,22 @@ Return ONLY the clothing phrase, nothing else."""
                 
                 print(f"\n   📄 Page {page_num}/{len(pages)}: {text_he[:50]}...")
                 
+                # 🎨 v5: אם יש first_page_url וזה עמוד 1 - השתמש בו במקום ליצור מחדש
+                if page_num == 1 and first_page_url:
+                    print(f"   ♻️  Reusing preview image for page 1: {first_page_url}")
+                    page_result = {
+                        'page_num': page_num,
+                        'text': text_he,
+                        'illustration_prompt': illustration,
+                        'success': True,
+                        'elapsed_seconds': 0,
+                        'image_url': first_page_url,
+                        'characters_in_scene': chars_in_scene  # v5: for regeneration
+                    }
+                    successful += 1
+                    result_pages.append(page_result)
+                    continue
+                
                 img_result = self.generate_image_with_nano_banana(
                     scene_description=illustration,
                     reference_images_bytes=reference_images_bytes,
@@ -2480,7 +2521,8 @@ Return ONLY the clothing phrase, nothing else."""
                     'text': text_he,
                     'illustration_prompt': illustration,
                     'success': img_result['success'],
-                    'elapsed_seconds': img_result['elapsed_seconds']
+                    'elapsed_seconds': img_result['elapsed_seconds'],
+                    'characters_in_scene': chars_in_scene  # v5: for regeneration
                 }
                 
                 if img_result['success']:
@@ -2587,6 +2629,179 @@ Return ONLY the clothing phrase, nothing else."""
         
         except Exception as e:
             print(f"❌ Regenerate page error: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            self.send_json_response({
+                'success': False,
+                'error': str(e)
+            }, status=500)
+    
+    def handle_generate_style_preview(self):
+        """
+        🎨 יצירת תצוגה מקדימה של 3 סגנונות ויזואליים.
+        
+        Version: v5 | 2026-09-26 (Israel time)
+        
+        זרימה:
+        1. Claude יוצר סיפור מלא (על בסיס writing_style)
+        2. Nano Banana יוצר את עמוד 1 ב-3 סגנונות ויזואליים במקביל (realistic/pixar/detailed)
+        3. מחזיר: הסיפור המלא + 3 URLs של עמוד 1
+        4. ההורה בוחר סגנון → הפרונט קורא ל-generate-book-nano עם:
+           - prewritten_story = הסיפור
+           - first_page_url = URL של הסגנון הנבחר
+           - style = הסגנון הנבחר
+        
+        Input JSON:
+        {
+            "reference_images": [b64, ...],
+            "childName": "דולב",
+            "childAge": "3-5",
+            "childGender": "boy",
+            "theme": "animals",
+            "outfit": "gray t-shirt",
+            "customInput": "...",
+            "writing_style": "funny"  // 🎨 v5: מצחיק/חינוכי/הרפתקאות/רגוע
+        }
+        
+        Returns:
+        {
+            "success": true,
+            "story": {...},  // סיפור מלא של 8 עמודים
+            "style_previews": {
+                "realistic": {"image_url": "...", "elapsed_seconds": ..., "cost": ...},
+                "pixar": {"image_url": "...", "elapsed_seconds": ..., "cost": ...},
+                "detailed": {"image_url": "...", "elapsed_seconds": ..., "cost": ...}
+            },
+            "total_cost_usd": 0.20,
+            "total_time_seconds": 45
+        }
+        """
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            # 📥 קלט
+            reference_images_b64 = data.get('reference_images', [])
+            if not reference_images_b64 and data.get('child_image'):
+                reference_images_b64 = [data['child_image']]
+            
+            if not reference_images_b64:
+                raise Exception('No reference images provided')
+            
+            child_name = data.get('childName', 'הילד')
+            child_age = data.get('childAge', '3-5')
+            child_gender = data.get('childGender', 'boy')
+            theme = data.get('theme', 'animals')
+            outfit = data.get('outfit', '')
+            custom_input = data.get('customInput', '')
+            writing_style = data.get('writing_style', 'funny')
+            
+            print(f"\n🎨 ============================================")
+            print(f"🎨 STYLE PREVIEW: {child_name} (age {child_age})")
+            print(f"🎨 Theme: {theme} | Writing style: {writing_style}")
+            print(f"🎨 ============================================")
+            
+            preview_start = time.time()
+            
+            # 🖼️ פענוח תמונות הרפרנס
+            import base64 as _b64
+            reference_images_bytes = []
+            for img_b64 in reference_images_b64:
+                clean_b64 = img_b64.split(',', 1)[1] if ',' in img_b64 else img_b64
+                reference_images_bytes.append(_b64.b64decode(clean_b64))
+            
+            # 📝 שלב 1: יצירת סיפור עם Claude
+            print(f"\n📝 Step 1: Creating story with Claude ({writing_style})...")
+            story_data_input = {
+                'childName': child_name,
+                'childAge': child_age,
+                'childGender': child_gender,
+                'theme': theme,
+                'style': writing_style,
+                'customInput': custom_input,
+                'use_lora': True,
+                'trigger_word': 'x'
+            }
+            
+            try:
+                story = self.create_story_with_claude(story_data_input)
+            except Exception as claude_err:
+                raise Exception(f'Claude story generation failed: {claude_err}')
+            
+            pages = story.get('pages', [])
+            if not pages:
+                raise Exception('Claude returned no pages')
+            
+            # 📖 Character Bible
+            characters = story.get('characters', [])
+            character_bible = {}
+            for char in characters:
+                name = char.get('name', '').strip()
+                desc = char.get('english_description', '').strip()
+                if name and desc:
+                    character_bible[name] = desc
+            
+            print(f"   ✅ Story ready: {len(pages)} pages, {len(character_bible)} characters")
+            
+            # 🎨 שלב 2: יצירת עמוד 1 ב-3 סגנונות
+            # נעשה sequentially כי concurrent יכול לגרום rate limits
+            first_page = pages[0]
+            illustration = first_page.get('illustration', '')
+            chars_in_scene = first_page.get('characters_in_scene', [])
+            
+            print(f"\n🎨 Step 2: Generating page 1 in 3 visual styles...")
+            print(f"   Scene: {illustration[:80]}...")
+            
+            style_previews = {}
+            total_cost = 0.0
+            
+            for visual_style in ['pixar', 'realistic', 'detailed']:
+                print(f"\n   🎨 Generating {visual_style} version...")
+                img_result = self.generate_image_with_nano_banana(
+                    scene_description=illustration,
+                    reference_images_bytes=reference_images_bytes,
+                    style=visual_style,
+                    outfit=outfit,
+                    child_age=child_age,
+                    character_bible=character_bible,
+                    characters_in_scene=chars_in_scene
+                )
+                
+                if img_result['success']:
+                    style_previews[visual_style] = {
+                        'image_url': img_result['image_url'],
+                        'elapsed_seconds': img_result['elapsed_seconds'],
+                        'cost': img_result.get('cost', 0)
+                    }
+                    total_cost += img_result.get('cost', 0)
+                else:
+                    style_previews[visual_style] = {
+                        'success': False,
+                        'error': img_result.get('error', 'unknown')
+                    }
+            
+            total_time = time.time() - preview_start
+            
+            print(f"\n🎨 ============================================")
+            print(f"🎨 PREVIEW COMPLETE: {len(style_previews)} styles")
+            print(f"🎨 Total time: {total_time:.1f}s | Cost: ${total_cost:.3f}")
+            print(f"🎨 ============================================\n")
+            
+            self.send_json_response({
+                'success': True,
+                'story': story,  # 🎯 החזרת הסיפור המלא - הפרונט ישלח בחזרה ב-continue
+                'style_previews': style_previews,
+                'characters_bible': character_bible,
+                'first_page_scene': illustration,
+                'first_page_characters': chars_in_scene,
+                'first_page_text': first_page.get('text', ''),
+                'total_cost_usd': round(total_cost, 3),
+                'total_time_seconds': round(total_time, 1)
+            })
+        
+        except Exception as e:
+            print(f"❌ Style preview error: {str(e)}")
             import traceback
             traceback.print_exc()
             self.send_json_response({
