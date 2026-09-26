@@ -4,28 +4,30 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Version: v3  |  Last modified: 2026-09-25 20:15 (Israel time)  |  Claude
-Changes in v3:
+Version: v4  |  Last modified: 2026-09-25 20:45 (Israel time)  |  Claude
+Changes in v4:
+  - 🐛 PDF FONT FIX: replaced NotoSansHebrew (Hebrew-only font!) with Rubik (full support)
+    Root cause: NotoSansHebrew has NO glyphs for . , ! ? " ' 0-9 or Latin letters,
+    so all punctuation and page numbers were silently dropped from PDF output.
+    Rubik is a Google Fonts family with full Hebrew + Latin + punctuation + digit support.
+
+Previous version (v3, 2026-09-25 20:15 Israel):
   - 🐛 PDF FIX: imageUrl → image_url compat (both accepted)
   - 🐛 PDF FIX: page number - digit separated from Hebrew word so bidi keeps it
   - 🐛 PDF FIX: cover title uses book_title from request (not hardcoded)
-  - 🐛 PDF FIX: expanded Hebrew punctuation allowed list
   - 🔄 NEW: /api/regenerate-page-image endpoint - יצירת תמונה בודדת מחדש
-  - ✅ Backward compat: all existing endpoints unchanged
 
 Previous version (v2, 2026-09-25 13:45 Israel):
   - 🐛 CRITICAL FIX: Claude model updated from claude-sonnet-4-20250514 (deprecated 2026-06-15)
     to claude-sonnet-4-5 (current)
-  - 📚 NEW: /api/generate-book-nano endpoint - הצינור החדש (Claude story + Nano Banana images)
-  - 🍌 NEW: generate_image_with_nano_banana - הפונקציה הליבה של יצירה עם Nano Banana
-  - 🍌 NEW: /nano-book HTML page
-  - 👕 NEW: /api/analyze-outfit endpoint - זיהוי לבוש אוטומטי עם Claude Vision
+  - 📚 NEW: /api/generate-book-nano endpoint
+  - 🍌 NEW: generate_image_with_nano_banana + /nano-book HTML page
+  - 👕 NEW: /api/analyze-outfit endpoint (Claude Vision)
   - 🎨 NEW: 3 styles supported (realistic / pixar / detailed)
 
 Previous version (2026-05-25):
   - 🧪 POC: /api/test-pulid + /test-pulid HTML
   - 🎯 TRIGGER REINFORCEMENT, STYLE HARDENING, PRE-WARM DECONFLICTION
-  - LoRA training upgrade: steps 1000→1500, lora_rank→32
 """
 
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -3601,14 +3603,15 @@ Return ONLY the clothing phrase, nothing else."""
             c = canvas.Canvas(buffer, pagesize=A4)
             width, height = A4
             
-            # 🇮🇱 NEW: הורדה אוטומטית של פונט עברי אמיתי מ-Google Fonts
-            # זה מבטיח שעברית תיראה תקין ב-PDF, ולא ג'יבריש
-            HEBREW_FONT_PATH = '/tmp/NotoSansHebrew-Regular.ttf'
+            # 🇮🇱 v4 FIX (2026-09-25 20:45): החלפת פונט מ-NotoSansHebrew (עברית בלבד) ל-Rubik (עברית + לטינית + פיסוק + ספרות)
+            # הפונט הישן NotoSansHebrew לא כלל glyphs לפיסוק (.,!?"') וספרות (0-9),
+            # לכן הם נעלמו מה-PDF. Rubik הוא פונט Google מודרני שכולל את הכל.
+            HEBREW_FONT_PATH = '/tmp/Rubik-Regular.ttf'
             
             if not os.path.exists(HEBREW_FONT_PATH):
                 try:
-                    print(f"   🌐 Downloading Hebrew font from Google Fonts...")
-                    font_url = "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSansHebrew/NotoSansHebrew-Regular.ttf"
+                    print(f"   🌐 Downloading Rubik font (full Hebrew + Latin + punctuation)...")
+                    font_url = "https://github.com/google/fonts/raw/main/ofl/rubik/Rubik%5Bwght%5D.ttf"
                     
                     ctx = ssl.create_default_context()
                     ctx.check_hostname = False
@@ -3623,15 +3626,15 @@ Return ONLY the clothing phrase, nothing else."""
                     
                     with open(HEBREW_FONT_PATH, 'wb') as f:
                         f.write(font_data)
-                    print(f"   ✅ Hebrew font downloaded: {len(font_data)} bytes")
+                    print(f"   ✅ Rubik font downloaded: {len(font_data)} bytes")
                 except Exception as font_err:
-                    print(f"   ⚠️ Failed to download Hebrew font: {font_err}")
+                    print(f"   ⚠️ Failed to download Rubik font: {font_err}")
             
-            # Register Hebrew font - first try the downloaded one, then system fonts
+            # Register Hebrew font - first try the downloaded Rubik, then system fonts as fallback
             hebrew_font = 'Helvetica'
             font_paths = [
-                HEBREW_FONT_PATH,  # 🥇 First try our downloaded font
-                '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+                HEBREW_FONT_PATH,  # 🥇 First try our downloaded Rubik font (full support)
+                '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',  # DejaVu also has Hebrew + Latin
                 '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
                 '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
                 '/usr/share/fonts/truetype/freefont/FreeSans.ttf',
