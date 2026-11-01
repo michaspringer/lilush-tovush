@@ -4,7 +4,15 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Version: v5.2  |  Last modified: 2026-09-26 21:35 (Israel time)  |  Claude
+Version: v5.3  |  Last modified: 2026-09-26 22:00 (Israel time)  |  Claude
+Changes in v5.3:
+  - 🌐 NEW: Hebrew text edits now flow into image regeneration
+    When parent edits page text and clicks "regenerate image", the Hebrew text
+    is translated to English scene via Claude, then Nano Banana uses the new scene.
+    Before: only the original scene was used, so text edits didn't affect the image.
+  - 🌐 NEW: translate_hebrew_to_scene_description() helper method
+  - 🌐 API: /api/regenerate-page-image now accepts hebrew_text and returns updated_scene_description
+
 Changes in v5.2 (perf hotfix):
   - 🚀 PARALLEL: 3 style previews now generate in parallel (ThreadPoolExecutor)
     Before: ~50s sequential (pixar 20s + realistic 17s + detailed 9s)
@@ -2619,6 +2627,83 @@ Return ONLY the clothing phrase, nothing else."""
                 'error': str(e)
             }, status=500)
     
+    def translate_hebrew_to_scene_description(self, hebrew_text, previous_scene=None, character_bible=None):
+        """
+        🌐 v5.3 (2026-09-26): תרגום טקסט עברי לתיאור סצנה באנגלית ל-Nano Banana.
+        
+        משמש כשההורה עורך טקסט של עמוד וקורא ל-regenerate.
+        מקבל את הטקסט העברי החדש + תיאור הסצנה הישן (לbase-line סטייל) +
+        Character Bible (כדי לדעת מי הדמויות).
+        
+        מחזיר תיאור סצנה קצר באנגלית שמתאים לפרומפט של Nano Banana.
+        """
+        try:
+            if not CLAUDE_API_KEY:
+                # אם אין Claude, נחזיר את התיאור הישן (fallback)
+                return previous_scene or hebrew_text
+            
+            # בונים תיאור של הדמויות למקרה שקיימות
+            bible_desc = ""
+            if character_bible:
+                bible_lines = [f"- {name}: {desc}" for name, desc in character_bible.items()]
+                bible_desc = "\nCharacter Bible (use these exact descriptions if the character appears):\n" + "\n".join(bible_lines)
+            
+            prev_desc = f"\nPrevious scene description (for style reference): {previous_scene}" if previous_scene else ""
+            
+            prompt = f"""Translate this Hebrew children's book text to an English scene description for image generation.
+
+Hebrew text: {hebrew_text}
+{prev_desc}
+{bible_desc}
+
+Rules:
+1. Focus on VISUAL elements only (who's in the scene, what they're doing, expressions, setting)
+2. Keep it short (1-2 sentences)
+3. Start with "with" or the action - do NOT describe the child (image gen already has reference photo)
+4. If character bible has a character mentioned in text, describe their action but keep their exact appearance from bible
+5. Include: what everyone is doing, expressions, and background/setting
+6. Do NOT include: child's clothing, child's face details, or generic phrases like "playing happily"
+
+Return ONLY the English scene description, no preamble or explanation.
+
+Example good responses:
+- "with a small brown-and-white monkey holding a green lunchbox in its paws, surprised expression, zoo pathway with cages in background"
+- "reaching up to feed one single tall giraffe with one long neck, holding green leaves, savanna sunset background"
+"""
+            
+            claude_request = {
+                "model": "claude-sonnet-4-5",
+                "max_tokens": 300,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'x-api-key': CLAUDE_API_KEY,
+                'anthropic-version': '2023-06-01'
+            }
+            
+            req = urllib.request.Request(
+                CLAUDE_API_URL,
+                data=json.dumps(claude_request).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response_data = json.loads(response.read().decode('utf-8'))
+                new_scene = response_data['content'][0]['text'].strip()
+                # מנקה מירכאות סביב אם יש
+                new_scene = new_scene.strip('"\'').strip()
+                print(f"   🌐 Translated Hebrew → English scene:")
+                print(f"      Hebrew: {hebrew_text[:80]}...")
+                print(f"      English: {new_scene[:100]}...")
+                return new_scene
+        
+        except Exception as e:
+            print(f"   ⚠️ Translation failed, using previous scene: {e}")
+            return previous_scene or hebrew_text
+    
     def handle_regenerate_page_image(self):
         """
         🔄 יצירת תמונה בודדת מחדש - כשעמוד לא יצא טוב.
@@ -2651,6 +2736,19 @@ Return ONLY the clothing phrase, nothing else."""
             character_bible = data.get('character_bible', {})
             characters_in_scene = data.get('characters_in_scene', [])
             
+            # 🌐 v5.3: אם ההורה שלח טקסט עברי חדש, נתרגם אותו לתיאור סצנה חדש
+            hebrew_text = data.get('hebrew_text', '').strip()
+            if hebrew_text:
+                print(f"\n🌐 Hebrew text provided - translating for updated scene...")
+                new_scene = self.translate_hebrew_to_scene_description(
+                    hebrew_text=hebrew_text,
+                    previous_scene=scene_description,
+                    character_bible=character_bible
+                )
+                if new_scene and new_scene != scene_description:
+                    scene_description = new_scene
+                    print(f"   ✅ Using updated scene from Hebrew text")
+            
             print(f"\n🔄 REGENERATING single page image (style: {style})")
             
             # 🖼️ פענוח תמונות הרפרנס
@@ -2676,7 +2774,8 @@ Return ONLY the clothing phrase, nothing else."""
                     'success': True,
                     'image_url': result['image_url'],
                     'elapsed_seconds': result['elapsed_seconds'],
-                    'cost_estimate_usd': result.get('cost', 0)
+                    'cost_estimate_usd': result.get('cost', 0),
+                    'updated_scene_description': scene_description  # 🌐 v5.3: מחזיר את התיאור המעודכן
                 })
             else:
                 self.send_json_response({
