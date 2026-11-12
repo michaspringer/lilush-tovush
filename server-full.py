@@ -4,7 +4,14 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Version: v5.3  |  Last modified: 2026-09-26 22:00 (Israel time)  |  Claude
+Version: v5.4  |  Last modified: 2026-11-12 20:02 (Israel time)  |  Claude
+Changes in v5.4:
+  - 🎨 FIX: 'detailed' (classic illustration) style now produces REAL 2D watercolor art
+    instead of another Pixar 3D render. Added explicit anti-3D prompts, artist references
+    (Beatrix Potter, Eric Carle, Oliver Jeffers), and anti-CGI constraints. This fixes
+    the bug where classic-illustration and pixar-3D previews looked nearly identical.
+  - 🚀 WORKFLOW: Claude now has direct push access to this repo.
+
 Changes in v5.3:
   - 🌐 NEW: Hebrew text edits now flow into image regeneration
     When parent edits page text and clicks "regenerate image", the Hebrew text
@@ -2270,8 +2277,8 @@ Return ONLY the clothing phrase, nothing else."""
             },
             'detailed': {
                 'name': 'איור קלאסי מפורט',
-                'prefix': "A detailed classic children's book illustration of the child from the reference photo(s) ",
-                'suffix': ". Rich detailed illustration style, warm storybook colors, precise facial features, hand-drawn feel. Preserve the child's exact facial features, eye color, hair, and skin tone. IMPORTANT: no text or letters in the image.",
+                'prefix': "A 2D hand-drawn watercolor children's book illustration of the child from the reference photo(s). CRITICAL: this must be a flat 2D illustration, ABSOLUTELY NOT 3D, NOT Pixar, NOT CGI, NOT digital 3D rendering. ",
+                'suffix': ". Style: traditional watercolor painting on textured paper, visible pencil outlines and brush strokes, soft pastel washes, flat storybook art in the classic style of Beatrix Potter, Eric Carle, or Oliver Jeffers. Hand-painted feel, imperfect edges, warm muted tones. Preserve the child's exact facial features, eye color, hair, and skin tone. STRICT REQUIREMENTS: no 3D rendering, no CGI, no Pixar style, no glossy surfaces, no computer-generated look, no text or letters in the image. Think printed storybook from the 1990s, not Pixar movie still.",
                 'model': 'gemini-3.1-flash-image-preview',
                 'cost': 0.034
             }
