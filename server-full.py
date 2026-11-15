@@ -4,7 +4,13 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Version: v5.4  |  Last modified: 2026-11-12 20:02 (Israel time)  |  Claude
+Version: v5.5  |  Last modified: 2026-11-15 22:40 (Israel time)  |  Claude
+Changes in v5.5:
+  - 🐛 CRITICAL FIX: Google promoted Nano Banana models out of preview. The old names
+    (gemini-3.1-flash-image-preview, gemini-3-pro-image-preview) now return 404.
+    Updated all 6 references to the stable names (gemini-3.1-flash-image, gemini-3-pro-image).
+    This fixes "all 3 style previews failed" error.
+
 Changes in v5.4:
   - 🎨 FIX: 'detailed' (classic illustration) style now produces REAL 2D watercolor art
     instead of another Pixar 3D render. Added explicit anti-3D prompts, artist references
@@ -1923,7 +1929,7 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
             child_image_b64 = data.get('child_image')
             reference_images = data.get('reference_images')
             prompt = data.get('prompt', '').strip()
-            model = data.get('model', 'gemini-3.1-flash-image-preview')
+            model = data.get('model', 'gemini-3.1-flash-image')
             
             if not reference_images and child_image_b64:
                 reference_images = [child_image_b64]
@@ -2010,8 +2016,8 @@ fluffy fur body, not wearing clothes". אחרת המודל עלול לצייר �
                         _os.remove(result_tmp_path)
                 
                 cost_map = {
-                    'gemini-3-pro-image-preview': 0.134,
-                    'gemini-3.1-flash-image-preview': 0.034,
+                    'gemini-3-pro-image': 0.134,
+                    'gemini-3.1-flash-image': 0.034,
                     'gemini-3.1-flash-lite-image': 0.017,
                     'gemini-2.5-flash-image': 0.02,
                 }
@@ -2265,21 +2271,21 @@ Return ONLY the clothing phrase, nothing else."""
                 'name': 'ריאליסטי',
                 'prefix': "A photorealistic portrait of the child from the reference photo(s) ",
                 'suffix': ". Natural cinematic lighting, shallow depth of field, professional photography style. Preserve the child's exact facial features, eye color, hair, and skin tone.",
-                'model': 'gemini-3-pro-image-preview',
+                'model': 'gemini-3-pro-image',
                 'cost': 0.134
             },
             'pixar': {
                 'name': 'פיקסר 3D',
                 'prefix': "A Pixar-style 3D animated illustration of the child from the reference photo(s) ",
                 'suffix': ". Cinematic Pixar animation style, vibrant colors, expressive character, detailed 3D rendering. Preserve the child's exact facial features, eye color, hair, and skin tone with high accuracy.",
-                'model': 'gemini-3.1-flash-image-preview',
+                'model': 'gemini-3.1-flash-image',
                 'cost': 0.034
             },
             'detailed': {
                 'name': 'איור קלאסי מפורט',
                 'prefix': "A 2D hand-drawn watercolor children's book illustration of the child from the reference photo(s). CRITICAL: this must be a flat 2D illustration, ABSOLUTELY NOT 3D, NOT Pixar, NOT CGI, NOT digital 3D rendering. ",
                 'suffix': ". Style: traditional watercolor painting on textured paper, visible pencil outlines and brush strokes, soft pastel washes, flat storybook art in the classic style of Beatrix Potter, Eric Carle, or Oliver Jeffers. Hand-painted feel, imperfect edges, warm muted tones. Preserve the child's exact facial features, eye color, hair, and skin tone. STRICT REQUIREMENTS: no 3D rendering, no CGI, no Pixar style, no glossy surfaces, no computer-generated look, no text or letters in the image. Think printed storybook from the 1990s, not Pixar movie still.",
-                'model': 'gemini-3.1-flash-image-preview',
+                'model': 'gemini-3.1-flash-image',
                 'cost': 0.034
             }
         }
