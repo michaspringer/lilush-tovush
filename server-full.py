@@ -4,7 +4,16 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Version: v5.5  |  Last modified: 2026-11-15 22:40 (Israel time)  |  Claude
+Version: v5.6  |  Last modified: 2026-11-15 23:00 (Israel time)  |  Claude
+Changes in v5.6:
+  - 🎨 NEW: Cover page in PDF now shows a HERO image (first page's illustration)
+    with title and tagline below it. Falls back to text-only cover if no image.
+  - 💡 NEW: /api/regenerate-page-image accepts 'visual_improvement' (Hebrew tweak)
+    that gets translated to English and APPENDED to scene description, without
+    touching the story text. Enables requests like "add a hat to Dolev" that
+    only affect the image, not the story.
+  - 💡 NEW: translate_visual_improvement() helper method.
+
 Changes in v5.5:
   - 🐛 CRITICAL FIX: Google promoted Nano Banana models out of preview. The old names
     (gemini-3.1-flash-image-preview, gemini-3-pro-image-preview) now return 404.
@@ -2640,6 +2649,74 @@ Return ONLY the clothing phrase, nothing else."""
                 'error': str(e)
             }, status=500)
     
+    def translate_visual_improvement(self, hebrew_improvement, character_bible=None):
+        """
+        💡 v5.6 (2026-11-15): Translate a short Hebrew visual tweak to English for Nano Banana.
+        
+        Used when the parent wants to improve the image without changing the story text
+        (e.g. "תוסיף כובע לדולב" -> "the child is wearing a red baseball cap").
+        
+        Returns a short English phrase to be APPENDED to the existing scene description.
+        """
+        try:
+            if not CLAUDE_API_KEY:
+                return hebrew_improvement
+            
+            bible_desc = ""
+            if character_bible:
+                bible_lines = [f"- {name}: {desc}" for name, desc in character_bible.items()]
+                bible_desc = "\nCharacter Bible:\n" + "\n".join(bible_lines)
+            
+            prompt = f"""Translate this short Hebrew visual instruction to a concise English phrase for AI image generation.
+
+Hebrew instruction: {hebrew_improvement}
+{bible_desc}
+
+Rules:
+1. This is a VISUAL TWEAK to add to an existing scene, not a replacement.
+2. Return a short English phrase (one sentence, under 20 words) that can be APPENDED to a scene description.
+3. Start with a concrete visual element (e.g., "the child is wearing...", "add a...", "the lighting is...").
+4. Keep the child's appearance preserved - don't describe face/hair/skin.
+5. If instruction is about a character in the bible, use the exact bible description.
+
+Return ONLY the English phrase, no preamble.
+
+Examples:
+- Hebrew: "תוסיף כובע לדולב" -> "The child is wearing a red baseball cap"
+- Hebrew: "שנה את הצבע של הכדור לכחול" -> "The ball is bright blue instead"
+- Hebrew: "תוסיף רקע של שקיעה" -> "Golden sunset sky in the background"
+"""
+            
+            claude_request = {
+                "model": "claude-sonnet-4-5",
+                "max_tokens": 150,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'x-api-key': CLAUDE_API_KEY,
+                'anthropic-version': '2023-06-01'
+            }
+            
+            req = urllib.request.Request(
+                CLAUDE_API_URL,
+                data=json.dumps(claude_request).encode('utf-8'),
+                headers=headers,
+                method='POST'
+            )
+            
+            with urllib.request.urlopen(req, timeout=30) as response:
+                response_data = json.loads(response.read().decode('utf-8'))
+                improvement_en = response_data['content'][0]['text'].strip()
+                improvement_en = improvement_en.strip('"\'').strip()
+                print(f"   💡 Translated improvement: {improvement_en[:100]}")
+                return improvement_en
+        
+        except Exception as e:
+            print(f"   ⚠️ Visual improvement translation failed: {e}")
+            return hebrew_improvement
+    
     def translate_hebrew_to_scene_description(self, hebrew_text, previous_scene=None, character_bible=None):
         """
         🌐 v5.3 (2026-09-26): תרגום טקסט עברי לתיאור סצנה באנגלית ל-Nano Banana.
@@ -2761,6 +2838,20 @@ Example good responses:
                 if new_scene and new_scene != scene_description:
                     scene_description = new_scene
                     print(f"   ✅ Using updated scene from Hebrew text")
+            
+            # 🎨 v5.6 (2026-11-15): visual-only improvement - adds visual tweak
+            # (e.g. "תוסיף כובע לדולב") WITHOUT changing the story text.
+            # The Hebrew improvement is translated to English and APPENDED to scene.
+            visual_improvement = data.get('visual_improvement', '').strip()
+            if visual_improvement:
+                print(f"\n💡 Visual improvement provided: {visual_improvement[:80]}...")
+                improvement_en = self.translate_visual_improvement(
+                    hebrew_improvement=visual_improvement,
+                    character_bible=character_bible
+                )
+                if improvement_en:
+                    scene_description = scene_description + ". " + improvement_en
+                    print(f"   ✅ Appended visual improvement: {improvement_en[:80]}...")
             
             print(f"\n🔄 REGENERATING single page image (style: {style})")
             
@@ -4054,18 +4145,67 @@ Example good responses:
                     continue
             
             # ====== Cover Page ======
+            # 🎨 v5.6 (2026-11-15): cover now shows a HERO image (first page's illustration)
+            # followed by the title and tagline. Falls back to text-only if image unavailable.
             c.setFillColorRGB(0.99, 0.96, 0.89)  # cream
             c.rect(0, 0, width, height, stroke=0, fill=1)
-            c.setFillColorRGB(0.16, 0.13, 0.09)  # dark
-            c.setFont(hebrew_font, 36)
-            title = fix_hebrew(book_title)  # 🔧 FIX: use book_title instead of hardcoded
-            title_width = c.stringWidth(title, hebrew_font, 36)
-            c.drawString((width - title_width) / 2, height - 200, title)
             
-            c.setFont(hebrew_font, 16)
-            subtitle = fix_hebrew("מבית לילוש טובוש")
-            sub_width = c.stringWidth(subtitle, hebrew_font, 16)
-            c.drawString((width - sub_width) / 2, height - 240, subtitle)
+            # Try to load the hero image — use dedicated cover_image_url if provided,
+            # otherwise fall back to the first page's image
+            hero_url = story_data.get('cover_image_url')
+            if not hero_url and pages:
+                hero_url = pages[0].get('imageUrl') or pages[0].get('image_url')
+            
+            hero_reader = load_image_for_pdf(hero_url) if hero_url else None
+            
+            if hero_reader:
+                # Layout: hero image top 55%, title below, subtitle below title
+                hero_margin = 50
+                hero_width = width - (hero_margin * 2)
+                hero_height = height * 0.55
+                hero_x = hero_margin
+                hero_y = height - hero_height - 70  # 70pt from top
+                
+                try:
+                    c.drawImage(
+                        hero_reader,
+                        hero_x, hero_y,
+                        width=hero_width,
+                        height=hero_height,
+                        preserveAspectRatio=True,
+                        anchor='c'
+                    )
+                    print(f"   ✅ Cover hero image added")
+                except Exception as img_err:
+                    print(f"   ⚠️ Cover image draw failed: {img_err}")
+                
+                # Title below image
+                c.setFillColorRGB(0.16, 0.13, 0.09)  # dark
+                c.setFont(hebrew_font, 36)
+                title = fix_hebrew(book_title)
+                title_width = c.stringWidth(title, hebrew_font, 36)
+                title_y = hero_y - 60  # 60pt below image
+                c.drawString((width - title_width) / 2, title_y, title)
+                
+                # Subtitle below title
+                c.setFont(hebrew_font, 16)
+                subtitle = fix_hebrew("מבית לילוש טובוש")
+                sub_width = c.stringWidth(subtitle, hebrew_font, 16)
+                c.drawString((width - sub_width) / 2, title_y - 40, subtitle)
+            else:
+                # Fallback: text-only cover (same as before)
+                print(f"   ⚠️ No hero image available, using text-only cover")
+                c.setFillColorRGB(0.16, 0.13, 0.09)  # dark
+                c.setFont(hebrew_font, 36)
+                title = fix_hebrew(book_title)
+                title_width = c.stringWidth(title, hebrew_font, 36)
+                c.drawString((width - title_width) / 2, height - 200, title)
+                
+                c.setFont(hebrew_font, 16)
+                subtitle = fix_hebrew("מבית לילוש טובוש")
+                sub_width = c.stringWidth(subtitle, hebrew_font, 16)
+                c.drawString((width - sub_width) / 2, height - 240, subtitle)
+            
             c.showPage()
             
             # ====== Story Pages ======

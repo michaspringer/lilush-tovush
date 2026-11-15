@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>📚 לילוש טובוש — ספר אישי לילד</title>
 <style>
-    /* Version: v5.2  |  Last modified: 2026-09-26 21:35 (Israel time)  |  Claude
-       Changes: extended fetch timeout for style preview (parallel gen on server) */
+    /* Version: v5.6  |  Last modified: 2026-11-15 23:00 (Israel time)  |  Claude
+       Changes in v5.6: Added "💡 שפר תמונה" button + area for visual-only improvements
+       (change image without changing story text). Hebrew input, translated server-side. */
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
         font-family: 'Heebo', -apple-system, sans-serif;
@@ -262,6 +263,48 @@
     .page-action-btn.regenerate:hover:not(:disabled) {
         background: #F3EEFF;
         border-color: #7C3AED;
+    }
+    
+    /* 💡 v5.6: Visual improvement button + area */
+    .page-action-btn.improve {
+        color: #0369A1;
+        border-color: #BAE6FD;
+    }
+    .page-action-btn.improve:hover:not(:disabled) {
+        background: #E0F2FE;
+        border-color: #0369A1;
+    }
+    .improvement-area {
+        margin-top: 1rem;
+        padding: 1rem;
+        background: #F0F9FF;
+        border: 2px solid #BAE6FD;
+        border-radius: 12px;
+    }
+    .improvement-area label {
+        display: block;
+        font-size: 0.9rem;
+        color: #075985;
+        margin-bottom: 0.5rem;
+        font-weight: 600;
+    }
+    .improvement-textarea {
+        width: 100%;
+        min-height: 60px;
+        padding: 0.75rem;
+        border: 1.5px solid #BAE6FD;
+        border-radius: 8px;
+        font-family: 'Heebo', -apple-system, sans-serif;
+        font-size: 0.95rem;
+        line-height: 1.5;
+        resize: vertical;
+        margin-bottom: 0.5rem;
+        text-align: right;
+        direction: rtl;
+    }
+    .improvement-textarea:focus {
+        outline: none;
+        border-color: #0369A1;
     }
     
     /* Text editor modal */
@@ -1018,6 +1061,22 @@
                             <button class="page-action-btn regenerate" onclick="regeneratePageImage(${idx})">
                                 🔄 צור תמונה מחדש
                             </button>
+                            <button class="page-action-btn improve" onclick="showImprovementPrompt(${idx})">
+                                💡 שפר תמונה
+                            </button>
+                        </div>
+                        <div class="improvement-area" id="improvement-area-${idx}" style="display:none;">
+                            <label>תאר שינוי ויזואלי (הסיפור לא ישתנה):</label>
+                            <textarea class="improvement-textarea" id="improvement-input-${idx}" 
+                                placeholder="למשל: תוסיף כובע לדולב, או שנה את הרקע לשקיעה"></textarea>
+                            <div class="edit-actions">
+                                <button class="edit-btn-save" onclick="submitImprovement(${idx})">
+                                    💡 צור תמונה משופרת
+                                </button>
+                                <button class="edit-btn-cancel" onclick="cancelImprovement(${idx})">
+                                    ✖️ ביטול
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1073,7 +1132,8 @@
     }
     
     // 🔄 יצירת תמונה בודדת מחדש
-    async function regeneratePageImage(pageIdx) {
+    // v5.6: accepts optional visualImprovement (Hebrew) to tweak image without changing story
+    async function regeneratePageImage(pageIdx, visualImprovement) {
         const data = window.currentBookData;
         if (!data || !data.pages[pageIdx]) return;
         
@@ -1117,7 +1177,8 @@
                     outfit: outfit,
                     child_age: childAge,
                     character_bible: data.characters_bible || {},
-                    characters_in_scene: page.characters_in_scene || []
+                    characters_in_scene: page.characters_in_scene || [],
+                    visual_improvement: visualImprovement || ''  // 💡 v5.6
                 })
             });
             
@@ -1144,6 +1205,36 @@
             if (overlay) overlay.remove();
             buttons.forEach(b => b.disabled = false);
         }
+    }
+    
+    // 💡 v5.6: show the improvement prompt textarea
+    function showImprovementPrompt(pageIdx) {
+        const area = document.getElementById(`improvement-area-${pageIdx}`);
+        const input = document.getElementById(`improvement-input-${pageIdx}`);
+        if (!area || !input) return;
+        area.style.display = 'block';
+        input.value = '';
+        input.focus();
+    }
+    
+    function cancelImprovement(pageIdx) {
+        const area = document.getElementById(`improvement-area-${pageIdx}`);
+        if (area) area.style.display = 'none';
+    }
+    
+    async function submitImprovement(pageIdx) {
+        const input = document.getElementById(`improvement-input-${pageIdx}`);
+        if (!input) return;
+        
+        const improvement = input.value.trim();
+        if (!improvement) {
+            alert('אנא תאר מה אתה רוצה לשפר');
+            return;
+        }
+        
+        // Hide the input area and trigger regeneration with the improvement
+        cancelImprovement(pageIdx);
+        await regeneratePageImage(pageIdx, improvement);
     }
     
     // 📄 הורדת הספר כ-PDF
