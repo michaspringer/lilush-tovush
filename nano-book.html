@@ -5,7 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>📚 לילוש טובוש — ספר אישי לילד</title>
 <style>
-    /* Version: v5.6  |  Last modified: 2026-11-15 23:00 (Israel time)  |  Claude
+    /* Version: v5.7  |  Last modified: 2026-11-16 22:35 (Israel time)  |  Claude
+       Changes in v5.7: Switched generatePreview() and continueWithSelectedStyle() from
+       a 60-120s sync fetch to start-+-poll against the new /api/start-* + /api/job-status
+       endpoints. The HTTP call that kicked off the work used to time out under Chrome
+       Mobile, Cloudflare and Railway proxies ("Failed to fetch") - polling keeps each
+       call under 2s. Also: real server-reported progress instead of the fake ticker.
        Changes in v5.6: Added "💡 שפר תמונה" button + area for visual-only improvements
        (change image without changing story text). Hebrew input, translated server-side. */
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -747,20 +752,80 @@
     
     document.getElementById('childName').addEventListener('input', updateGenerateBtn);
     
+    /**
+     * 🔄 v5.7 (2026-11-16): reusable "start job + poll" helper for the two
+     * long-running endpoints. Keeps each HTTP call short so mobile browsers
+     * and Cloudflare / Railway proxies never time it out.
+     *
+     * startUrl: POST endpoint that returns {success, job_id}
+     * startBody: JSON body to POST
+     * onProgress: (pct:int, label:str) called on each poll update
+     * Returns: a Promise that resolves with the completed job's result dict,
+     *          or rejects with an Error.
+     */
+    async function startJobAndPoll(startUrl, startBody, onProgress) {
+        // 1) kick off the job (short call, well under any timeout)
+        const startResp = await fetch(startUrl, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(startBody)
+        });
+        const startJson = await startResp.json();
+        if (!startJson.success || !startJson.job_id) {
+            throw new Error(startJson.error || 'failed to start job');
+        }
+        const jobId = startJson.job_id;
+
+        // 2) poll status every 3s. 5 min hard cap on total wait.
+        const pollIntervalMs = 3000;
+        const maxWaitMs = 5 * 60 * 1000;
+        const startedAt = Date.now();
+        let consecutiveNetErrors = 0;
+
+        while (Date.now() - startedAt < maxWaitMs) {
+            await new Promise(r => setTimeout(r, pollIntervalMs));
+            try {
+                const r = await fetch('/api/job-status/' + encodeURIComponent(jobId));
+                if (r.status === 404) {
+                    throw new Error('job disappeared (server restarted?)');
+                }
+                const sj = await r.json();
+                consecutiveNetErrors = 0;
+                if (onProgress && typeof sj.progress_pct === 'number') {
+                    onProgress(sj.progress_pct, sj.progress_label || '');
+                }
+                if (sj.status === 'done') {
+                    return sj.result;
+                }
+                if (sj.status === 'failed') {
+                    throw new Error(sj.error || 'server reported failure');
+                }
+                // still running - loop
+            } catch (netErr) {
+                consecutiveNetErrors += 1;
+                // Tolerate up to 4 consecutive poll failures (12s of network trouble)
+                if (consecutiveNetErrors >= 4) {
+                    throw new Error('lost connection to server during polling');
+                }
+            }
+        }
+        throw new Error('timed out after 5 minutes - the server may still be working');
+    }
+
     async function generatePreview() {
         const refs = referenceImages.filter(img => img !== null);
         if (refs.length === 0) return;
-        
+
         const childName = document.getElementById('childName').value.trim();
         if (!childName) return;
-        
+
         const childAge = document.getElementById('childAge').value;
         const childGender = document.getElementById('childGender').value;
         const theme = document.getElementById('theme').value;
         const writingStyle = document.getElementById('writingStyle').value;
         const customInput = document.getElementById('customInput').value.trim();
         const outfit = document.getElementById('outfitInput').value.trim() || 'simple casual clothes';
-        
+
         // UI
         document.getElementById('generateBtn').disabled = true;
         document.getElementById('generateBtn').textContent = '⏳ יוצר תצוגה מקדימה...';
@@ -771,35 +836,14 @@
         window.currentBookData = null;
         currentPreviewData = null;
         selectedPreviewStyle = null;
-        
-        // Fake progress
-        let fakeProgress = 0;
-        const fakeInterval = setInterval(() => {
-            fakeProgress = Math.min(fakeProgress + 2, 95);
-            document.getElementById('progressBar').style.width = fakeProgress + '%';
-            
-            if (fakeProgress < 25) {
-                document.getElementById('progressStatus').textContent = '📝 Claude כותב את הסיפור...';
-                document.getElementById('progressDetail').textContent = `סגנון: ${getWritingStyleLabel(writingStyle)}`;
-            } else if (fakeProgress < 90) {
-                const style = fakeProgress < 50 ? 'פיקסר' : fakeProgress < 75 ? 'ריאליסטי' : 'איור קלאסי';
-                document.getElementById('progressStatus').textContent = `🎨 יוצר תצוגה מקדימה - ${style}...`;
-                document.getElementById('progressDetail').textContent = 'Nano Banana מציירת את עמוד 1';
-            } else {
-                document.getElementById('progressStatus').textContent = '🎁 מסיים...';
-                document.getElementById('progressDetail').textContent = '';
-            }
-        }, 1500);
-        
+        document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('progressStatus').textContent = '🚀 מתחיל...';
+        document.getElementById('progressDetail').textContent = `סגנון: ${getWritingStyleLabel(writingStyle)}`;
+
         try {
-            // 🕐 v5.2: timeout מפורש של 3 דקות (הפריווי לוקח ~50 שניות ב-parallel)
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 180000);  // 3 min
-            
-            const response = await fetch('/api/generate-style-preview', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
+            const data = await startJobAndPoll(
+                '/api/start-style-preview',
+                {
                     reference_images: refs,
                     childName: childName,
                     childAge: childAge,
@@ -808,46 +852,33 @@
                     outfit: outfit,
                     customInput: customInput,
                     writing_style: writingStyle
-                }),
-                signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-            
-            clearInterval(fakeInterval);
+                },
+                (pct, label) => {
+                    document.getElementById('progressBar').style.width = pct + '%';
+                    if (label) {
+                        document.getElementById('progressStatus').textContent = label;
+                    }
+                }
+            );
+
             document.getElementById('progressBar').style.width = '100%';
-            
-            const data = await response.json();
-            
-            if (!data.success) {
-                throw new Error(data.error || 'unknown error');
+            if (!data || !data.success) {
+                throw new Error((data && data.error) || 'unknown error');
             }
-            
-            // 💾 שמירת נתוני התצוגה
+
             currentPreviewData = data;
-            
-            // הסתרת progress, הצגת style preview
             setTimeout(() => {
                 document.getElementById('progressArea').classList.remove('active');
                 showStylePreview(data);
-            }, 500);
-            
+            }, 400);
+
         } catch (err) {
-            clearInterval(fakeInterval);
             document.getElementById('progressStatus').textContent = '❌ שגיאה';
-            
-            // הודעה ידידותית יותר
-            let userMsg = err.message;
-            if (err.name === 'AbortError') {
-                userMsg = 'הבקשה לקחה יותר מדי זמן. השרת אולי עדיין עובד - נסה שוב בעוד דקה.';
-            } else if (err.message === 'Failed to fetch') {
-                userMsg = 'הבקשה נפסקה. יכול להיות שהשרת עדיין עובד - נסה שוב בעוד דקה.';
-            }
-            
-            document.getElementById('progressDetail').textContent = userMsg;
+            document.getElementById('progressDetail').textContent = err.message;
             document.getElementById('progressBar').style.width = '0%';
-            alert('שגיאה ביצירת התצוגה: ' + userMsg);
+            alert('שגיאה ביצירת התצוגה: ' + err.message);
         }
-        
+
         document.getElementById('generateBtn').disabled = false;
         document.getElementById('generateBtn').textContent = '🎨 בואו נראה תצוגה מקדימה';
         updateGenerateBtn();
@@ -921,7 +952,7 @@
     
     async function continueWithSelectedStyle() {
         if (!currentPreviewData || !selectedPreviewStyle) return;
-        
+
         const refs = referenceImages.filter(img => img !== null);
         const childName = document.getElementById('childName').value.trim();
         const childAge = document.getElementById('childAge').value;
@@ -930,35 +961,25 @@
         const writingStyle = document.getElementById('writingStyle').value;
         const customInput = document.getElementById('customInput').value.trim();
         const outfit = document.getElementById('outfitInput').value.trim() || 'simple casual clothes';
-        
+
         const firstPageUrl = currentPreviewData.style_previews[selectedPreviewStyle].image_url;
         selectedStyle = selectedPreviewStyle;
-        
+        const styleHe = selectedStyle === 'pixar' ? 'פיקסר' : selectedStyle === 'realistic' ? 'ריאליסטי' : 'איור קלאסי';
+
         // UI
         document.getElementById('continueBtn').disabled = true;
         document.getElementById('continueBtn').textContent = '⏳ יוצר ספר...';
         document.getElementById('stylePreviewArea').classList.remove('active');
         document.getElementById('progressArea').classList.add('active');
         document.getElementById('resultsArea').classList.remove('active');
-        
-        let fakeProgress = 0;
-        const fakeInterval = setInterval(() => {
-            fakeProgress = Math.min(fakeProgress + 2, 95);
-            document.getElementById('progressBar').style.width = fakeProgress + '%';
-            const currentPage = Math.min(Math.floor((fakeProgress / 90) * 7) + 2, 8);
-            document.getElementById('progressStatus').textContent = `🎨 יוצר עמוד ${currentPage}/8...`;
-            document.getElementById('progressDetail').textContent = `סגנון: ${selectedStyle === 'pixar' ? 'פיקסר' : selectedStyle === 'realistic' ? 'ריאליסטי' : 'איור קלאסי'}`;
-        }, 1500);
-        
+        document.getElementById('progressBar').style.width = '0%';
+        document.getElementById('progressStatus').textContent = '🚀 מתחיל...';
+        document.getElementById('progressDetail').textContent = `סגנון: ${styleHe}`;
+
         try {
-            // 🕐 v5.2: timeout של 3 דקות (7 עמודים sequential = ~60-70 שניות)
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 180000);
-            
-            const response = await fetch('/api/generate-book-nano', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
+            const data = await startJobAndPoll(
+                '/api/start-book-generation',
+                {
                     reference_images: refs,
                     childName: childName,
                     childAge: childAge,
@@ -968,36 +989,35 @@
                     outfit: outfit,
                     customInput: customInput,
                     writing_style: writingStyle,
-                    // 🎨 v5: Continue mode
                     prewritten_story: currentPreviewData.story,
                     first_page_url: firstPageUrl
-                }),
-                signal: controller.signal
-            });
-            clearTimeout(timeoutId);
-            
-            clearInterval(fakeInterval);
+                },
+                (pct, label) => {
+                    document.getElementById('progressBar').style.width = pct + '%';
+                    if (label) {
+                        document.getElementById('progressStatus').textContent = label;
+                    }
+                    document.getElementById('progressDetail').textContent = `סגנון: ${styleHe}`;
+                }
+            );
+
             document.getElementById('progressBar').style.width = '100%';
             document.getElementById('progressStatus').textContent = '✅ הושלם!';
             document.getElementById('progressDetail').textContent = '';
-            
-            const data = await response.json();
-            if (!data.success) {
-                throw new Error(data.error || 'unknown error');
+
+            if (!data || !data.success) {
+                throw new Error((data && data.error) || 'unknown error');
             }
-            
-            // 💾 שמירה של style_used לצורך regeneration
+
             data.style_used = selectedStyle;
-            
             renderBook(data);
-            
+
         } catch (err) {
-            clearInterval(fakeInterval);
             document.getElementById('progressStatus').textContent = '❌ שגיאה';
             document.getElementById('progressDetail').textContent = err.message;
             alert('שגיאה ביצירת הספר: ' + err.message);
         }
-        
+
         document.getElementById('continueBtn').disabled = false;
         document.getElementById('continueBtn').textContent = '📚 המשך עם הסגנון הזה';
     }

@@ -4,7 +4,22 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Version: v5.6  |  Last modified: 2026-11-15 23:00 (Israel time)  |  Claude
+Version: v5.7  |  Last modified: 2026-11-16 22:35 (Israel time)  |  Claude
+Changes in v5.7:
+  - 📱 CRITICAL: async job system so mobile browsers stop losing the connection
+    after ~60s. The sync endpoints (/api/generate-book-nano and
+    /api/generate-style-preview) kept the HTTP request open for the full work,
+    which Cloudflare / Railway / Chrome Mobile would cut as "Failed to fetch".
+  - NEW endpoints:
+      POST /api/start-book-generation  -> returns {job_id} immediately
+      POST /api/start-style-preview    -> returns {job_id} immediately
+      GET  /api/job-status/<id>        -> returns status + progress_pct + result
+  - Internal: job registry under /tmp/lilush_jobs/, lazy cleanup of jobs > 2h.
+  - Internal: extracted the work out of the two big handlers into
+    _run_book_generation() and _run_style_preview() so both the sync wrappers
+    AND the new async threads call the same code (no behavior drift).
+  - Legacy sync endpoints kept working, so no frontend forced to migrate today.
+
 Changes in v5.6:
   - 🎨 NEW: Cover page in PDF now shows a HERO image (first page's illustration)
     with title and tagline below it. Falls back to text-only cover if no image.
@@ -158,6 +173,114 @@ except ImportError:
 
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
+# ============================================================
+# v5.7 (2026-11-16): Async job registry for mobile-friendly flow.
+# ------------------------------------------------------------
+# The legacy sync endpoints /api/generate-book-nano and
+# /api/generate-style-preview take 50-120s. Mobile browsers
+# (plus Cloudflare / Railway proxies) cut the connection at
+# ~60s, which the frontend sees as a generic 'Failed to fetch'.
+# The async pattern below fixes that: the client POSTs to
+# /api/start-* and gets a job_id back in ~100ms; the server
+# runs the work in a background thread that updates a JSON
+# file under /tmp/lilush_jobs/; the client polls
+# /api/job-status/<id> every ~3s until status=done or failed.
+# Every HTTP call stays well under any proxy timeout.
+# ============================================================
+import threading as _threading
+import uuid as _uuid
+
+_JOBS_DIR = '/tmp/lilush_jobs'
+_jobs_lock = _threading.Lock()
+
+
+def _ensure_jobs_dir():
+    os.makedirs(_JOBS_DIR, exist_ok=True)
+
+
+def _job_path(job_id):
+    # Hex-only id, hard-capped at 32 chars - blocks path traversal.
+    safe_id = re.sub(r'[^0-9a-fA-F]', '', str(job_id))[:32]
+    if not safe_id:
+        return None
+    return os.path.join(_JOBS_DIR, safe_id + '.json')
+
+
+def create_job(job_type):
+    # Create a new job record and return its id.
+    _ensure_jobs_dir()
+    job_id = _uuid.uuid4().hex[:16]
+    job = {
+        'job_id': job_id,
+        'job_type': job_type,
+        'status': 'pending',
+        'progress_pct': 0,
+        'progress_label': 'Mathil...',  # 'Starting...' (he, placeholder - UI sets real label)
+        'created_at': time.time(),
+        'updated_at': time.time(),
+        'result': None,
+        'error': None,
+    }
+    _write_job(job_id, job)
+    # Lazy opportunistic cleanup of jobs older than 2 hours.
+    _cleanup_old_jobs(max_age_seconds=7200)
+    return job_id
+
+
+def _write_job(job_id, job):
+    path = _job_path(job_id)
+    if not path:
+        return
+    with _jobs_lock:
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(job, f, ensure_ascii=False)
+        except Exception as e:
+            print('WARN: could not write job ' + str(job_id) + ': ' + str(e))
+
+
+def read_job(job_id):
+    # Return the job dict, or None if the file is missing / corrupt.
+    path = _job_path(job_id)
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print('WARN: could not read job ' + str(job_id) + ': ' + str(e))
+        return None
+
+
+def update_job(job_id, **updates):
+    # Merge updates into an existing job.
+    job = read_job(job_id)
+    if not job:
+        return
+    job.update(updates)
+    job['updated_at'] = time.time()
+    _write_job(job_id, job)
+
+
+def _cleanup_old_jobs(max_age_seconds=7200):
+    # Delete job files older than max_age_seconds.
+    try:
+        if not os.path.isdir(_JOBS_DIR):
+            return
+        now = time.time()
+        for fname in os.listdir(_JOBS_DIR):
+            if not fname.endswith('.json'):
+                continue
+            path = os.path.join(_JOBS_DIR, fname)
+            try:
+                if now - os.path.getmtime(path) > max_age_seconds:
+                    os.remove(path)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 class CORSRequestHandler(SimpleHTTPRequestHandler):
     
     def end_headers(self):
@@ -177,6 +300,10 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         elif self.path.startswith('/api/lora-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_lora_status(training_id)
+        elif self.path.startswith('/api/job-status/'):
+            # 🔄 v5.7 (2026-11-16): poll endpoint for async jobs
+            job_id = self.path.split('/')[-1]
+            self.handle_job_status(job_id)
         elif self.path == '/' or self.path == '/landing.html':
             # 🏠 דף הנחיתה - מה שמבקר חדש רואה ראשון
             self.serve_file('landing.html', 'text/html')
@@ -258,15 +385,19 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
         elif self.path == '/api/analyze-outfit':  # 👕 Claude Vision - זיקוק לבוש
             # Last modified by Claude: 2026-09-19 18:00 (Israel time)
             self.handle_analyze_outfit()
-        elif self.path == '/api/generate-book-nano':  # 📚 יצירת ספר מלא עם Nano Banana
-            # Last modified by Claude: 2026-09-19 18:00 (Israel time)
+        elif self.path == '/api/generate-book-nano':  # 📚 (sync, legacy)
+            # Last modified by Claude: 2026-11-16 (v5.7: thin wrapper over _run_book_generation)
             self.handle_generate_book_nano()
         elif self.path == '/api/regenerate-page-image':  # 🔄 יצירת תמונה בודדת מחדש
             # Version: v3 | 2026-09-25 20:15 (Israel time)
             self.handle_regenerate_page_image()
-        elif self.path == '/api/generate-style-preview':  # 🎨 יצירת סיפור + עמוד 1 ב-3 סגנונות
-            # Version: v5 | 2026-09-26 (Israel time)
+        elif self.path == '/api/generate-style-preview':  # 🎨 (sync, legacy)
+            # Last modified by Claude: 2026-11-16 (v5.7: thin wrapper over _run_style_preview)
             self.handle_generate_style_preview()
+        elif self.path == '/api/start-book-generation':  # 🔄 v5.7 async book generation
+            self.handle_start_book_generation()
+        elif self.path == '/api/start-style-preview':  # 🔄 v5.7 async style preview
+            self.handle_start_style_preview()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -2448,206 +2579,208 @@ Return ONLY the clothing phrase, nothing else."""
     
     def handle_generate_book_nano(self):
         """
-        📚 יצירת ספר מלא עם Nano Banana.
-        
-        Last modified by Claude: 2026-09-19 18:00 (Israel time)
-        
-        זה ה-endpoint המרכזי של המערכת החדשה. הוא:
-        1. מקבל תמונות רפרנס + נתוני ילד + סגנון + לבוש
-        2. קורא ל-Claude ליצור סיפור של 8 עמודים (עם Character Bible)
-        3. מריץ 8 קריאות ל-Nano Banana ברצף
-        4. מחזיר את הספר המלא (טקסטים + URLs של תמונות)
-        
-        Input JSON:
-        {
-            "reference_images": [b64, b64, ...],  // 1-3 תמונות של הילד
-            "childName": "דולב",
-            "childAge": "3-5",
-            "childGender": "boy",
-            "theme": "animals",  // או "family", "space", "magic"
-            "style": "pixar",  // או "realistic", "detailed"
-            "outfit": "gray t-shirt and jeans",
-            "customInput": "אוהב דינוזאורים"  // אופציונלי
-        }
-        
-        Returns:
-        {
-            "success": true,
-            "book_title": "...",
-            "pages": [
-                {"page_num": 1, "text": "...", "image_url": "...", "elapsed_seconds": 8.2},
-                ...
-            ],
-            "total_cost": 0.27,
-            "total_time_seconds": 65
-        }
+        📚 (sync, legacy) יצירת ספר מלא עם Nano Banana.
+        Last modified by Claude: 2026-11-16 (v5.7: delegates to _run_book_generation)
+
+        Behaves identically to the pre-v5.7 handler, so the existing desktop flow
+        keeps working. For mobile, prefer POST /api/start-book-generation and
+        poll /api/job-status/<job_id> — the two call the same worker underneath.
         """
         try:
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
-            
-            # 📥 קלט
-            reference_images_b64 = data.get('reference_images', [])
-            if not reference_images_b64 and data.get('child_image'):
-                reference_images_b64 = [data['child_image']]  # backward compat
-            
-            if not reference_images_b64:
-                raise Exception('No reference images provided')
-            
-            child_name = data.get('childName', 'הילד')
-            child_age = data.get('childAge', '3-5')
-            child_gender = data.get('childGender', 'boy')
-            theme = data.get('theme', 'animals')
-            style = data.get('style', 'pixar')
-            outfit = data.get('outfit', '')
-            custom_input = data.get('customInput', '')
-            # 🎨 v5 (2026-09-26): סגנון הכתיבה (מצחיק/חינוכי/הרפתקאות/רגוע)
-            writing_style = data.get('writing_style', 'funny')
-            # 🎨 v5: continue mode - קבלת סיפור מוכן ותמונה ראשונה מוכנה (חוסך זמן+עלות)
-            prewritten_story = data.get('prewritten_story')  # dict with pages+characters
-            first_page_url = data.get('first_page_url')  # URL של עמוד 1 שכבר נוצר בtצוגה מקדימה
-            
-            print(f"\n📚 ============================================")
-            print(f"📚 GENERATING BOOK: {child_name} (age {child_age})")
-            print(f"📚 Theme: {theme} | Style: {style}")
-            print(f"📚 Outfit: {outfit}")
-            print(f"📚 References: {len(reference_images_b64)}")
-            print(f"📚 ============================================")
-            
-            book_start = time.time()
-            
-            # 🖼️ פענוח כל תמונות הרפרנס
-            import base64 as _b64
-            reference_images_bytes = []
-            for img_b64 in reference_images_b64:
-                clean_b64 = img_b64.split(',', 1)[1] if ',' in img_b64 else img_b64
-                reference_images_bytes.append(_b64.b64decode(clean_b64))
-            
-            # 📝 שלב 1: יצירת סיפור עם Claude (או שימוש בסיפור מוכן)
-            if prewritten_story:
-                print(f"\n📝 Step 1: Using prewritten story (continue mode)...")
-                story = prewritten_story
-            else:
-                print(f"\n📝 Step 1: Creating story with Claude...")
-                print(f"   Writing style: {writing_style}")
-                story_data_input = {
-                    'childName': child_name,
-                    'childAge': child_age,
-                    'childGender': child_gender,
-                    'theme': theme,
-                    'style': writing_style,  # 🎨 v5: sends writing style
-                    'customInput': custom_input,
-                    'use_lora': True,
-                    'trigger_word': 'x'
-                }
-                
-                try:
-                    story = self.create_story_with_claude(story_data_input)
-                except Exception as claude_err:
-                    raise Exception(f'Claude story generation failed: {claude_err}')
-            
-            pages = story.get('pages', [])
-            if not pages:
-                raise Exception('Claude returned no pages')
-            
-            # 📖 Character Bible
-            characters = story.get('characters', [])
-            character_bible = {}
-            for char in characters:
-                name = char.get('name', '').strip()
-                desc = char.get('english_description', '').strip()
-                if name and desc:
-                    character_bible[name] = desc
-            
-            print(f"   ✅ Story ready: {len(pages)} pages, {len(character_bible)} characters in bible")
-            
-            # 🍌 שלב 2: יצירת תמונה לכל עמוד עם Nano Banana
-            print(f"\n🍌 Step 2: Generating {len(pages)} images with Nano Banana...")
-            
-            result_pages = []
-            total_cost = 0.0
-            successful = 0
-            
-            for idx, page in enumerate(pages):
-                page_num = idx + 1
-                text_he = page.get('text', '')
-                illustration = page.get('illustration', '')
-                chars_in_scene = page.get('characters_in_scene', [])
-                
-                print(f"\n   📄 Page {page_num}/{len(pages)}: {text_he[:50]}...")
-                
-                # 🎨 v5: אם יש first_page_url וזה עמוד 1 - השתמש בו במקום ליצור מחדש
-                if page_num == 1 and first_page_url:
-                    print(f"   ♻️  Reusing preview image for page 1: {first_page_url}")
-                    page_result = {
-                        'page_num': page_num,
-                        'text': text_he,
-                        'illustration_prompt': illustration,
-                        'success': True,
-                        'elapsed_seconds': 0,
-                        'image_url': first_page_url,
-                        'characters_in_scene': chars_in_scene  # v5: for regeneration
-                    }
-                    successful += 1
-                    result_pages.append(page_result)
-                    continue
-                
-                img_result = self.generate_image_with_nano_banana(
-                    scene_description=illustration,
-                    reference_images_bytes=reference_images_bytes,
-                    style=style,
-                    outfit=outfit,
-                    child_age=child_age,
-                    character_bible=character_bible,
-                    characters_in_scene=chars_in_scene
-                )
-                
-                page_result = {
-                    'page_num': page_num,
-                    'text': text_he,
-                    'illustration_prompt': illustration,
-                    'success': img_result['success'],
-                    'elapsed_seconds': img_result['elapsed_seconds'],
-                    'characters_in_scene': chars_in_scene  # v5: for regeneration
-                }
-                
-                if img_result['success']:
-                    page_result['image_url'] = img_result['image_url']
-                    total_cost += img_result.get('cost', 0)
-                    successful += 1
-                else:
-                    page_result['error'] = img_result.get('error', 'unknown')
-                
-                result_pages.append(page_result)
-            
-            total_time = time.time() - book_start
-            
-            print(f"\n📚 ============================================")
-            print(f"📚 BOOK COMPLETE: {successful}/{len(pages)} pages")
-            print(f"📚 Total time: {total_time:.1f}s | Cost: ${total_cost:.3f}")
-            print(f"📚 ============================================\n")
-            
-            self.send_json_response({
-                'success': True,
-                'book_title': f'ההרפתקה של {child_name}',
-                'pages': result_pages,
-                'characters_bible': character_bible,
-                'style_used': style,
-                'total_pages': len(pages),
-                'successful_pages': successful,
-                'total_cost_usd': round(total_cost, 3),
-                'total_time_seconds': round(total_time, 1)
-            })
-        
+            result = self._run_book_generation(data)
+            self.send_json_response(result)
         except Exception as e:
-            print(f"❌ Book generation error: {str(e)}")
+            print(f"❌ Book generation (sync) error: {str(e)}")
             import traceback
             traceback.print_exc()
             self.send_json_response({
                 'success': False,
                 'error': str(e)
             }, status=500)
+
+    def _run_book_generation(self, data, on_progress=None):
+        """
+        📚 v5.7 (2026-11-16): Pure-work implementation extracted from
+        handle_generate_book_nano, callable from both the sync HTTP handler
+        and an async background thread.
+
+        Args:
+            data: parsed JSON input (same shape as the sync endpoint expected)
+            on_progress: optional callable (pct:int, label:str) called at
+                milestones so an async job thread can publish progress.
+
+        Returns: result dict with success=True on happy path.
+        Raises: Exception on fatal error (caller decides how to report it).
+        """
+        def _report(pct, label):
+            if on_progress:
+                try:
+                    on_progress(pct, label)
+                except Exception:
+                    pass
+
+        # 📥 קלט
+        reference_images_b64 = data.get('reference_images', [])
+        if not reference_images_b64 and data.get('child_image'):
+            reference_images_b64 = [data['child_image']]  # backward compat
+
+        if not reference_images_b64:
+            raise Exception('No reference images provided')
+
+        child_name = data.get('childName', 'הילד')
+        child_age = data.get('childAge', '3-5')
+        child_gender = data.get('childGender', 'boy')
+        theme = data.get('theme', 'animals')
+        style = data.get('style', 'pixar')
+        outfit = data.get('outfit', '')
+        custom_input = data.get('customInput', '')
+        writing_style = data.get('writing_style', 'funny')
+        prewritten_story = data.get('prewritten_story')
+        first_page_url = data.get('first_page_url')
+
+        print(f"\n📚 ============================================")
+        print(f"📚 GENERATING BOOK: {child_name} (age {child_age})")
+        print(f"📚 Theme: {theme} | Style: {style}")
+        print(f"📚 Outfit: {outfit}")
+        print(f"📚 References: {len(reference_images_b64)}")
+        print(f"📚 ============================================")
+
+        book_start = time.time()
+
+        # 🖼️ פענוח תמונות הרפרנס
+        import base64 as _b64
+        reference_images_bytes = []
+        for img_b64 in reference_images_b64:
+            clean_b64 = img_b64.split(',', 1)[1] if ',' in img_b64 else img_b64
+            reference_images_bytes.append(_b64.b64decode(clean_b64))
+
+        # 📝 שלב 1: סיפור מ-Claude (או שימוש בקיים)
+        if prewritten_story:
+            _report(10, "📝 משתמש בסיפור הקיים...")
+            print(f"\n📝 Step 1: Using prewritten story (continue mode)...")
+            story = prewritten_story
+        else:
+            _report(5, "📝 Claude כותב את הסיפור...")
+            print(f"\n📝 Step 1: Creating story with Claude...")
+            print(f"   Writing style: {writing_style}")
+            story_data_input = {
+                'childName': child_name,
+                'childAge': child_age,
+                'childGender': child_gender,
+                'theme': theme,
+                'style': writing_style,
+                'customInput': custom_input,
+                'use_lora': True,
+                'trigger_word': 'x'
+            }
+            try:
+                story = self.create_story_with_claude(story_data_input)
+            except Exception as claude_err:
+                raise Exception(f'Claude story generation failed: {claude_err}')
+
+        pages = story.get('pages', [])
+        if not pages:
+            raise Exception('Claude returned no pages')
+
+        # 📖 Character Bible
+        characters = story.get('characters', [])
+        character_bible = {}
+        for char in characters:
+            name = char.get('name', '').strip()
+            desc = char.get('english_description', '').strip()
+            if name and desc:
+                character_bible[name] = desc
+
+        total_pages = len(pages)
+        print(f"   ✅ Story ready: {total_pages} pages, {len(character_bible)} characters in bible")
+        _report(20, f"✅ הסיפור מוכן · {total_pages} עמודים")
+
+        # 🍌 שלב 2: יצירת תמונות לכל עמוד ברצף
+        print(f"\n🍌 Step 2: Generating {total_pages} images with Nano Banana...")
+
+        result_pages = []
+        total_cost = 0.0
+        successful = 0
+
+        for idx, page in enumerate(pages):
+            page_num = idx + 1
+            text_he = page.get('text', '')
+            illustration = page.get('illustration', '')
+            chars_in_scene = page.get('characters_in_scene', [])
+
+            # Progress: 20% to 95% spread across all pages
+            pct = 20 + int((idx / total_pages) * 75)
+            _report(pct, f"🎨 מצייר עמוד {page_num}/{total_pages}...")
+
+            print(f"\n   📄 Page {page_num}/{total_pages}: {text_he[:50]}...")
+
+            # 🎨 v5: אם יש first_page_url וזה עמוד 1 - השתמש בו
+            if page_num == 1 and first_page_url:
+                print(f"   ♻️  Reusing preview image for page 1: {first_page_url}")
+                page_result = {
+                    'page_num': page_num,
+                    'text': text_he,
+                    'illustration_prompt': illustration,
+                    'success': True,
+                    'elapsed_seconds': 0,
+                    'image_url': first_page_url,
+                    'characters_in_scene': chars_in_scene
+                }
+                successful += 1
+                result_pages.append(page_result)
+                continue
+
+            img_result = self.generate_image_with_nano_banana(
+                scene_description=illustration,
+                reference_images_bytes=reference_images_bytes,
+                style=style,
+                outfit=outfit,
+                child_age=child_age,
+                character_bible=character_bible,
+                characters_in_scene=chars_in_scene
+            )
+
+            page_result = {
+                'page_num': page_num,
+                'text': text_he,
+                'illustration_prompt': illustration,
+                'success': img_result['success'],
+                'elapsed_seconds': img_result['elapsed_seconds'],
+                'characters_in_scene': chars_in_scene
+            }
+
+            if img_result['success']:
+                page_result['image_url'] = img_result['image_url']
+                total_cost += img_result.get('cost', 0)
+                successful += 1
+            else:
+                page_result['error'] = img_result.get('error', 'unknown')
+
+            result_pages.append(page_result)
+
+        total_time = time.time() - book_start
+
+        print(f"\n📚 ============================================")
+        print(f"📚 BOOK COMPLETE: {successful}/{total_pages} pages")
+        print(f"📚 Total time: {total_time:.1f}s | Cost: ${total_cost:.3f}")
+        print(f"📚 ============================================\n")
+
+        _report(100, "✅ הספר מוכן!")
+
+        return {
+            'success': True,
+            'book_title': f'ההרפתקה של {child_name}',
+            'pages': result_pages,
+            'characters_bible': character_bible,
+            'style_used': style,
+            'total_pages': total_pages,
+            'successful_pages': successful,
+            'total_cost_usd': round(total_cost, 3),
+            'total_time_seconds': round(total_time, 1)
+        }
     
     def translate_visual_improvement(self, hebrew_improvement, character_bible=None):
         """
@@ -2898,198 +3031,294 @@ Example good responses:
     
     def handle_generate_style_preview(self):
         """
-        🎨 יצירת תצוגה מקדימה של 3 סגנונות ויזואליים.
-        
-        Version: v5 | 2026-09-26 (Israel time)
-        
-        זרימה:
-        1. Claude יוצר סיפור מלא (על בסיס writing_style)
-        2. Nano Banana יוצר את עמוד 1 ב-3 סגנונות ויזואליים במקביל (realistic/pixar/detailed)
-        3. מחזיר: הסיפור המלא + 3 URLs של עמוד 1
-        4. ההורה בוחר סגנון → הפרונט קורא ל-generate-book-nano עם:
-           - prewritten_story = הסיפור
-           - first_page_url = URL של הסגנון הנבחר
-           - style = הסגנון הנבחר
-        
-        Input JSON:
-        {
-            "reference_images": [b64, ...],
-            "childName": "דולב",
-            "childAge": "3-5",
-            "childGender": "boy",
-            "theme": "animals",
-            "outfit": "gray t-shirt",
-            "customInput": "...",
-            "writing_style": "funny"  // 🎨 v5: מצחיק/חינוכי/הרפתקאות/רגוע
-        }
-        
-        Returns:
-        {
-            "success": true,
-            "story": {...},  // סיפור מלא של 8 עמודים
-            "style_previews": {
-                "realistic": {"image_url": "...", "elapsed_seconds": ..., "cost": ...},
-                "pixar": {"image_url": "...", "elapsed_seconds": ..., "cost": ...},
-                "detailed": {"image_url": "...", "elapsed_seconds": ..., "cost": ...}
-            },
-            "total_cost_usd": 0.20,
-            "total_time_seconds": 45
-        }
+        🎨 (sync, legacy) 3-style preview.
+        Last modified by Claude: 2026-11-16 (v5.7: delegates to _run_style_preview)
+
+        Behaves identically to the pre-v5.7 handler. Mobile should prefer
+        POST /api/start-style-preview and poll /api/job-status/<job_id>.
         """
         try:
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
-            
-            # 📥 קלט
-            reference_images_b64 = data.get('reference_images', [])
-            if not reference_images_b64 and data.get('child_image'):
-                reference_images_b64 = [data['child_image']]
-            
-            if not reference_images_b64:
-                raise Exception('No reference images provided')
-            
-            child_name = data.get('childName', 'הילד')
-            child_age = data.get('childAge', '3-5')
-            child_gender = data.get('childGender', 'boy')
-            theme = data.get('theme', 'animals')
-            outfit = data.get('outfit', '')
-            custom_input = data.get('customInput', '')
-            writing_style = data.get('writing_style', 'funny')
-            
-            print(f"\n🎨 ============================================")
-            print(f"🎨 STYLE PREVIEW: {child_name} (age {child_age})")
-            print(f"🎨 Theme: {theme} | Writing style: {writing_style}")
-            print(f"🎨 ============================================")
-            
-            preview_start = time.time()
-            
-            # 🖼️ פענוח תמונות הרפרנס
-            import base64 as _b64
-            reference_images_bytes = []
-            for img_b64 in reference_images_b64:
-                clean_b64 = img_b64.split(',', 1)[1] if ',' in img_b64 else img_b64
-                reference_images_bytes.append(_b64.b64decode(clean_b64))
-            
-            # 📝 שלב 1: יצירת סיפור עם Claude
-            print(f"\n📝 Step 1: Creating story with Claude ({writing_style})...")
-            story_data_input = {
-                'childName': child_name,
-                'childAge': child_age,
-                'childGender': child_gender,
-                'theme': theme,
-                'style': writing_style,
-                'customInput': custom_input,
-                'use_lora': True,
-                'trigger_word': 'x'
-            }
-            
-            try:
-                story = self.create_story_with_claude(story_data_input)
-            except Exception as claude_err:
-                raise Exception(f'Claude story generation failed: {claude_err}')
-            
-            pages = story.get('pages', [])
-            if not pages:
-                raise Exception('Claude returned no pages')
-            
-            # 📖 Character Bible
-            characters = story.get('characters', [])
-            character_bible = {}
-            for char in characters:
-                name = char.get('name', '').strip()
-                desc = char.get('english_description', '').strip()
-                if name and desc:
-                    character_bible[name] = desc
-            
-            print(f"   ✅ Story ready: {len(pages)} pages, {len(character_bible)} characters")
-            
-            # 🎨 שלב 2: יצירת עמוד 1 ב-3 סגנונות
-            # 🚀 v5.2 (2026-09-26): פארלליזציה של 3 הסגנונות במקום ברצף
-            # לפני: 50 שניות (sequential), אחרי: ~20 שניות (parallel)
-            # זה קריטי כדי להימנע מ-browser timeout על הבקשה
-            first_page = pages[0]
-            illustration = first_page.get('illustration', '')
-            chars_in_scene = first_page.get('characters_in_scene', [])
-            
-            print(f"\n🎨 Step 2: Generating page 1 in 3 visual styles (parallel)...")
-            print(f"   Scene: {illustration[:80]}...")
-            
-            style_previews = {}
-            total_cost = 0.0
-            
-            # 🚀 v5.2: הרצת 3 הסגנונות במקביל עם ThreadPoolExecutor
-            import concurrent.futures
-            
-            def generate_one_style(visual_style):
-                """פונקציית עזר - יוצרת תמונה בסגנון אחד."""
-                print(f"   🎨 [{visual_style}] starting...")
-                result = self.generate_image_with_nano_banana(
-                    scene_description=illustration,
-                    reference_images_bytes=reference_images_bytes,
-                    style=visual_style,
-                    outfit=outfit,
-                    child_age=child_age,
-                    character_bible=character_bible,
-                    characters_in_scene=chars_in_scene
-                )
-                return (visual_style, result)
-            
-            # מריצים 3 סגנונות במקביל (max_workers=3)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-                futures = [executor.submit(generate_one_style, s) for s in ['pixar', 'realistic', 'detailed']]
-                for future in concurrent.futures.as_completed(futures):
-                    try:
-                        visual_style, img_result = future.result()
-                        if img_result['success']:
-                            style_previews[visual_style] = {
-                                'image_url': img_result['image_url'],
-                                'elapsed_seconds': img_result['elapsed_seconds'],
-                                'cost': img_result.get('cost', 0)
-                            }
-                            total_cost += img_result.get('cost', 0)
-                            print(f"   ✅ [{visual_style}] done in {img_result['elapsed_seconds']}s")
-                        else:
-                            style_previews[visual_style] = {
-                                'success': False,
-                                'error': img_result.get('error', 'unknown')
-                            }
-                            print(f"   ❌ [{visual_style}] failed: {img_result.get('error', 'unknown')}")
-                    except Exception as parallel_err:
-                        print(f"   ❌ Style generation exception: {parallel_err}")
-            
-            total_time = time.time() - preview_start
-            
-            print(f"\n🎨 ============================================")
-            print(f"🎨 PREVIEW COMPLETE: {len(style_previews)} styles")
-            print(f"🎨 Total time: {total_time:.1f}s | Cost: ${total_cost:.3f}")
-            print(f"🎨 ============================================\n")
-            
-            self.send_json_response({
-                'success': True,
-                'story': story,  # 🎯 החזרת הסיפור המלא - הפרונט ישלח בחזרה ב-continue
-                'style_previews': style_previews,
-                'characters_bible': character_bible,
-                'first_page_scene': illustration,
-                'first_page_characters': chars_in_scene,
-                'first_page_text': first_page.get('text', ''),
-                'total_cost_usd': round(total_cost, 3),
-                'total_time_seconds': round(total_time, 1)
-            })
-        
+            result = self._run_style_preview(data)
+            self.send_json_response(result)
         except Exception as e:
-            print(f"❌ Style preview error: {str(e)}")
+            print(f"❌ Style preview (sync) error: {str(e)}")
             import traceback
             traceback.print_exc()
             self.send_json_response({
                 'success': False,
                 'error': str(e)
             }, status=500)
+
+    def _run_style_preview(self, data, on_progress=None):
+        """
+        🎨 v5.7 (2026-11-16): Pure-work implementation extracted from
+        handle_generate_style_preview, callable sync or from a background thread.
+
+        Returns the same result dict the sync endpoint returned. Raises on fatal
+        error.
+        """
+        def _report(pct, label):
+            if on_progress:
+                try:
+                    on_progress(pct, label)
+                except Exception:
+                    pass
+
+        # 📥 קלט
+        reference_images_b64 = data.get('reference_images', [])
+        if not reference_images_b64 and data.get('child_image'):
+            reference_images_b64 = [data['child_image']]
+
+        if not reference_images_b64:
+            raise Exception('No reference images provided')
+
+        child_name = data.get('childName', 'הילד')
+        child_age = data.get('childAge', '3-5')
+        child_gender = data.get('childGender', 'boy')
+        theme = data.get('theme', 'animals')
+        outfit = data.get('outfit', '')
+        custom_input = data.get('customInput', '')
+        writing_style = data.get('writing_style', 'funny')
+
+        print(f"\n🎨 ============================================")
+        print(f"🎨 STYLE PREVIEW: {child_name} (age {child_age})")
+        print(f"🎨 Theme: {theme} | Writing style: {writing_style}")
+        print(f"🎨 ============================================")
+
+        preview_start = time.time()
+
+        # 🖼️ פענוח תמונות הרפרנס
+        import base64 as _b64
+        reference_images_bytes = []
+        for img_b64 in reference_images_b64:
+            clean_b64 = img_b64.split(',', 1)[1] if ',' in img_b64 else img_b64
+            reference_images_bytes.append(_b64.b64decode(clean_b64))
+
+        # 📝 שלב 1: יצירת סיפור עם Claude
+        _report(5, "📝 Claude כותב את הסיפור...")
+        print(f"\n📝 Step 1: Creating story with Claude ({writing_style})...")
+        story_data_input = {
+            'childName': child_name,
+            'childAge': child_age,
+            'childGender': child_gender,
+            'theme': theme,
+            'style': writing_style,
+            'customInput': custom_input,
+            'use_lora': True,
+            'trigger_word': 'x'
+        }
+
+        try:
+            story = self.create_story_with_claude(story_data_input)
+        except Exception as claude_err:
+            raise Exception(f'Claude story generation failed: {claude_err}')
+
+        pages = story.get('pages', [])
+        if not pages:
+            raise Exception('Claude returned no pages')
+
+        # 📖 Character Bible
+        characters = story.get('characters', [])
+        character_bible = {}
+        for char in characters:
+            name = char.get('name', '').strip()
+            desc = char.get('english_description', '').strip()
+            if name and desc:
+                character_bible[name] = desc
+
+        print(f"   ✅ Story ready: {len(pages)} pages, {len(character_bible)} characters")
+        _report(30, "🎨 מצייר 3 סגנונות במקביל...")
+
+        # 🎨 שלב 2: עמוד 1 ב-3 סגנונות במקביל
+        first_page = pages[0]
+        illustration = first_page.get('illustration', '')
+        chars_in_scene = first_page.get('characters_in_scene', [])
+
+        print(f"\n🎨 Step 2: Generating page 1 in 3 visual styles (parallel)...")
+        print(f"   Scene: {illustration[:80]}...")
+
+        style_previews = {}
+        total_cost = 0.0
+        completed = [0]  # mutable counter for the closure
+
+        import concurrent.futures
+
+        def generate_one_style(visual_style):
+            """פונקציית עזר - יוצרת תמונה בסגנון אחד."""
+            print(f"   🎨 [{visual_style}] starting...")
+            result = self.generate_image_with_nano_banana(
+                scene_description=illustration,
+                reference_images_bytes=reference_images_bytes,
+                style=visual_style,
+                outfit=outfit,
+                child_age=child_age,
+                character_bible=character_bible,
+                characters_in_scene=chars_in_scene
+            )
+            return (visual_style, result)
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [executor.submit(generate_one_style, s) for s in ['pixar', 'realistic', 'detailed']]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    visual_style, img_result = future.result()
+                    if img_result['success']:
+                        style_previews[visual_style] = {
+                            'image_url': img_result['image_url'],
+                            'elapsed_seconds': img_result['elapsed_seconds'],
+                            'cost': img_result.get('cost', 0)
+                        }
+                        total_cost += img_result.get('cost', 0)
+                        print(f"   ✅ [{visual_style}] done in {img_result['elapsed_seconds']}s")
+                    else:
+                        style_previews[visual_style] = {
+                            'success': False,
+                            'error': img_result.get('error', 'unknown')
+                        }
+                        print(f"   ❌ [{visual_style}] failed: {img_result.get('error', 'unknown')}")
+                    completed[0] += 1
+                    # Progress: 30 -> 95 as the 3 styles land
+                    pct = 30 + int((completed[0] / 3) * 65)
+                    _report(pct, f"🎨 סגנון {completed[0]}/3 מוכן...")
+                except Exception as parallel_err:
+                    print(f"   ❌ Style generation exception: {parallel_err}")
+                    completed[0] += 1
+
+        total_time = time.time() - preview_start
+
+        print(f"\n🎨 ============================================")
+        print(f"🎨 PREVIEW COMPLETE: {len(style_previews)} styles")
+        print(f"🎨 Total time: {total_time:.1f}s | Cost: ${total_cost:.3f}")
+        print(f"🎨 ============================================\n")
+
+        _report(100, "✅ 3 הסגנונות מוכנים!")
+
+        return {
+            'success': True,
+            'story': story,
+            'style_previews': style_previews,
+            'characters_bible': character_bible,
+            'first_page_scene': illustration,
+            'first_page_characters': chars_in_scene,
+            'first_page_text': first_page.get('text', ''),
+            'total_cost_usd': round(total_cost, 3),
+            'total_time_seconds': round(total_time, 1)
+        }
     
+    # ============================================================
+    # 🔄 v5.7 (2026-11-16): Async wrappers for mobile-friendly flow
+    # ------------------------------------------------------------
+    # Each POST /api/start-* handler:
+    #   1. parses the request body (same shape as the sync endpoint)
+    #   2. creates a job record (status=pending)
+    #   3. spawns a daemon thread that runs the matching _run_* method
+    #      with a progress callback that updates the job record
+    #   4. returns {"job_id": "..."} immediately (well under any timeout)
+    # The client then polls GET /api/job-status/<job_id> until status is
+    # done or failed. Legacy sync endpoints remain for backward compat.
+    # ============================================================
+
+    def _spawn_job(self, job_type, data, work_fn):
+        """
+        Create a job + start a daemon thread running work_fn(data, on_progress).
+        Returns the job_id (caller sends it back to the client).
+        """
+        job_id = create_job(job_type)
+        update_job(job_id, status='running', progress_pct=1, progress_label='מתחיל...')
+
+        def _runner():
+            def _on_progress(pct, label):
+                try:
+                    # Clamp to [1, 99] - 100 is reserved for the final "done" write
+                    pct_clamped = max(1, min(99, int(pct)))
+                    update_job(job_id, progress_pct=pct_clamped, progress_label=str(label))
+                except Exception as e:
+                    print(f"⚠️ job {job_id} progress write failed: {e}")
+
+            try:
+                result = work_fn(data, on_progress=_on_progress)
+                update_job(
+                    job_id,
+                    status='done',
+                    progress_pct=100,
+                    progress_label='✅ הסתיים',
+                    result=result,
+                )
+                print(f"✅ job {job_id} ({job_type}) done")
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                update_job(
+                    job_id,
+                    status='failed',
+                    error=str(e),
+                    progress_label='❌ נכשל',
+                )
+                print(f"❌ job {job_id} ({job_type}) failed: {e}")
+
+        t = _threading.Thread(target=_runner, name=f"job-{job_id}", daemon=True)
+        t.start()
+        return job_id
+
+    def handle_start_book_generation(self):
+        """POST /api/start-book-generation → {job_id}; use GET /api/job-status/<id> to poll."""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            job_id = self._spawn_job('book_generation', data, self._run_book_generation)
+            self.send_json_response({'success': True, 'job_id': job_id})
+        except Exception as e:
+            print(f"❌ start-book-generation error: {e}")
+            self.send_json_response({'success': False, 'error': str(e)}, status=500)
+
+    def handle_start_style_preview(self):
+        """POST /api/start-style-preview → {job_id}; use GET /api/job-status/<id> to poll."""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            job_id = self._spawn_job('style_preview', data, self._run_style_preview)
+            self.send_json_response({'success': True, 'job_id': job_id})
+        except Exception as e:
+            print(f"❌ start-style-preview error: {e}")
+            self.send_json_response({'success': False, 'error': str(e)}, status=500)
+
+    def handle_job_status(self, job_id):
+        """GET /api/job-status/<id> → {status, progress_pct, progress_label, result?, error?}."""
+        try:
+            job = read_job(job_id)
+            if not job:
+                self.send_json_response({
+                    'success': False,
+                    'status': 'not_found',
+                    'error': 'job not found (expired or invalid id)'
+                }, status=404)
+                return
+            payload = {
+                'success': True,
+                'job_id': job.get('job_id'),
+                'status': job.get('status'),
+                'progress_pct': job.get('progress_pct', 0),
+                'progress_label': job.get('progress_label', ''),
+            }
+            # Include result only when it's ready, to keep poll responses small.
+            if job.get('status') == 'done':
+                payload['result'] = job.get('result')
+            elif job.get('status') == 'failed':
+                payload['error'] = job.get('error') or 'unknown error'
+            self.send_json_response(payload)
+        except Exception as e:
+            print(f"❌ job-status error for {job_id}: {e}")
+            self.send_json_response({'success': False, 'error': str(e)}, status=500)
+
     # ============================================================
     # 🍌 END OF NANO BANANA PIPELINE
     # ============================================================
-    
+
     def handle_suggest_alternative(self):
         """מציע חלופות לטקסט"""
         try:
