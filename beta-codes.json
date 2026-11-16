@@ -1,0 +1,10 @@
+{
+  "_comment": "Beta access codes. Edit this file to rename codes, change limits, add or remove friends. Codes are case-insensitive in the UI but stored here uppercase. A friend hits the max_books limit after that many *successful* book completions (not previews). Changes take effect on next deploy (Railway auto-deploy on push to main).",
+  "_last_modified": "2026-11-16 (v5.8)",
+  "codes": {
+    "LILUSH1": {"friend_name": "חבר 1", "max_books": 3, "notes": ""},
+    "LILUSH2": {"friend_name": "חבר 2", "max_books": 3, "notes": ""},
+    "LILUSH3": {"friend_name": "חבר 3", "max_books": 3, "notes": ""},
+    "LILUSH4": {"friend_name": "חבר 4", "max_books": 3, "notes": ""}
+  }
+}

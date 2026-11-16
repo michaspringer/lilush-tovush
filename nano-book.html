@@ -460,9 +460,32 @@
     @media (max-width: 700px) {
         .refs-grid, .style-grid, .field-row, .book-page { grid-template-columns: 1fr; }
     }
+    /* 🔐 v5.8: beta access banner shown at the top once the gate verifies */
+    .access-banner {
+        display: none;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        max-width: 960px;
+        margin: 0 auto 16px;
+        padding: 10px 16px;
+        background: #fff6d5;
+        border: 1px solid #f0d78a;
+        border-radius: 10px;
+        font-size: 0.95rem;
+        color: #6b4a00;
+    }
+    .access-banner .banner-feedback-link {
+        color: #c2660a;
+        text-decoration: none;
+        font-weight: 600;
+        white-space: nowrap;
+    }
+    .access-banner .banner-feedback-link:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
+<div id="accessBanner" class="access-banner"></div>
 <div class="container">
     <h1>📚 לילוש טובוש</h1>
     <p class="subtitle">ספר ילדים אישי - עם הפנים, השם והסיפור של הילד שלכם</p>
@@ -622,8 +645,69 @@
 </div>
 
 <script>
-    // Version: v5.2  |  Last modified: 2026-09-26 21:35 (Israel time)  |  Claude
-    // Changes: AbortController with 3-minute timeout, better error messages
+    // Version: v5.8  |  Last modified: 2026-11-16 23:00 (Israel time)  |  Claude
+    // v5.8: beta access-code gate on load + book-completion tracking.
+    // v5.7: start-+-poll against /api/start-* for mobile-friendly flow.
+    // v5.2: AbortController with 3-minute timeout, better error messages.
+
+    // 🔐 v5.8: Beta access-code gate - the FIRST thing that runs on page load.
+    // If the user has no code or the code is invalid/exhausted, redirect them
+    // to the landing page before they see or do anything.
+    const LS_CODE_KEY = 'lilush_access_code';
+    const LS_FRIEND_KEY = 'lilush_friend_name';
+    let accessCode = null;        // the verified code for this session
+    let booksRemaining = null;    // last-known remaining count
+
+    (async function gateAccessOrRedirect() {
+        const code = localStorage.getItem(LS_CODE_KEY);
+        if (!code) {
+            // No code at all - back to landing
+            window.location.replace('/');
+            return;
+        }
+        try {
+            const r = await fetch('/api/verify-access-code', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({code: code})
+            });
+            const data = await r.json();
+            if (!data.valid) {
+                // Code no longer valid (deleted from beta-codes.json?) - clear and go home
+                localStorage.removeItem(LS_CODE_KEY);
+                localStorage.removeItem(LS_FRIEND_KEY);
+                window.location.replace('/');
+                return;
+            }
+            accessCode = data.code;
+            booksRemaining = data.remaining;
+            if (data.exhausted) {
+                // Code is valid but the friend used their allowance - bounce to feedback
+                window.location.replace('/feedback');
+                return;
+            }
+            // Happy path - render a banner so the friend knows where they stand
+            renderAccessBanner(data);
+        } catch (err) {
+            console.error('access check failed', err);
+            // Network error - let them in anyway; the server will still cap usage
+            // when they try to complete a book.
+            accessCode = code;
+        }
+    })();
+
+    function renderAccessBanner(data) {
+        const banner = document.getElementById('accessBanner');
+        if (!banner) return;
+        const name = data.friend_name || '';
+        const rem = data.remaining;
+        banner.innerHTML = `
+            <span>שלום${name ? ' ' + escapeHtml(name) : ''} 👋 — נותרו לך <strong>${rem}</strong> ${rem === 1 ? 'ספר' : 'ספרים'} בבטא</span>
+            <a href="/feedback" class="banner-feedback-link">📝 פידבק</a>
+        `;
+        banner.style.display = 'flex';
+    }
+
     const referenceImages = [null, null, null];
     let selectedStyle = 'pixar';  // אתחול, אבל נקבע אחרי preview
     
@@ -1025,25 +1109,62 @@
     function renderBook(data) {
         document.getElementById('resultsArea').classList.add('active');
         document.getElementById('resultsTitle').textContent = `📖 ${data.book_title}`;
-        
+
         // 💾 שמירת נתוני הספר לצורך עריכה, חידוש והורדה
         window.currentBookData = data;
-        
+
         renderAllPages();
-        
+
         document.getElementById('costSummary').innerHTML = `
-            <strong>סיכום:</strong> 
-            ${data.successful_pages}/${data.total_pages} עמודים · 
-            סה"כ ${data.total_time_seconds} שניות · 
+            <strong>סיכום:</strong>
+            ${data.successful_pages}/${data.total_pages} עמודים ·
+            סה"כ ${data.total_time_seconds} שניות ·
             עלות <strong>$${data.total_cost_usd}</strong>
         `;
-        
+
         // 📄 הצגת אזור ההורדה
         const pdfArea = document.getElementById('pdfDownloadArea');
         if (data.successful_pages > 0) {
             pdfArea.style.display = 'block';
         } else {
             pdfArea.style.display = 'none';
+        }
+
+        // 🔐 v5.8: track book completion against the beta quota.
+        // Only counts a book as "completed" if at least one page actually
+        // rendered successfully (don't burn a quota slot on a total failure).
+        if (accessCode && data.successful_pages > 0) {
+            trackBookCompletion(accessCode).catch(err => console.error('track failed', err));
+        }
+    }
+
+    async function trackBookCompletion(code) {
+        try {
+            const r = await fetch('/api/track-book-completion', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({code: code})
+            });
+            const data = await r.json();
+            if (data.success) {
+                booksRemaining = data.remaining;
+                // Re-render the banner with the new count
+                renderAccessBanner({
+                    friend_name: localStorage.getItem(LS_FRIEND_KEY) || '',
+                    remaining: data.remaining,
+                    max: data.max
+                });
+                // If this was their last book, nudge them to the feedback form
+                if (data.remaining === 0) {
+                    setTimeout(() => {
+                        const wantFb = confirm('זה היה הספר האחרון שלך בבטא! נשמח אם תמלא טופס פידבק קצר.');
+                        if (wantFb) window.location.href = '/feedback';
+                    }, 1500);
+                }
+            }
+        } catch (err) {
+            // Non-fatal - the book is already rendered for the user.
+            console.error(err);
         }
     }
     

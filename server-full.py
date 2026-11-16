@@ -4,7 +4,20 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Version: v5.7  |  Last modified: 2026-11-16 22:35 (Israel time)  |  Claude
+Version: v5.8  |  Last modified: 2026-11-16 23:00 (Israel time)  |  Claude
+Changes in v5.8:
+  - 🔐 Beta access-code gate: 4 personal codes in beta-codes.json, per-friend
+    book limit (default 3), case-insensitive matching.
+  - 🏠 New real landing page at `/` (the old one was a corrupted commit with
+    Python source as HTML). Hebrew, hero, "how it works", code entry.
+  - 📝 New /feedback page + POST /api/submit-feedback (persisted as JSONL).
+  - NEW endpoints:
+      POST /api/verify-access-code     -> {valid, friend_name, used, max, remaining, exhausted}
+      POST /api/track-book-completion  -> increments counter; returns new status
+      POST /api/submit-feedback        -> saves feedback line to /tmp/lilush_feedback.jsonl
+  - Usage counters in /tmp/lilush_beta_usage.json (Railway restarts reset them -
+    OK for this beta scale).
+
 Changes in v5.7:
   - 📱 CRITICAL: async job system so mobile browsers stop losing the connection
     after ~60s. The sync endpoints (/api/generate-book-nano and
@@ -281,6 +294,108 @@ def _cleanup_old_jobs(max_age_seconds=7200):
         pass
 
 
+# ============================================================
+# 🔐 v5.8 (2026-11-16): Beta access-code gate + usage tracking
+# ------------------------------------------------------------
+# Codes and per-friend limits are in beta-codes.json (in the repo,
+# editable without a code change). Usage counters live in
+# /tmp/lilush_beta_usage.json - Railway restarts reset them, which
+# is acceptable for a 4-friend beta (worst case: a friend gets a
+# couple of bonus books after a deploy).
+# ============================================================
+_BETA_CODES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'beta-codes.json')
+_BETA_USAGE_PATH = '/tmp/lilush_beta_usage.json'
+_beta_lock = _threading.Lock()
+
+
+def load_beta_codes():
+    """Read beta-codes.json fresh each call. Returns {code: {friend_name, max_books, notes}}."""
+    try:
+        with open(_BETA_CODES_PATH, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        raw = data.get('codes', {}) or {}
+        # Normalize keys to uppercase for case-insensitive matching
+        return {str(k).strip().upper(): v for k, v in raw.items()}
+    except FileNotFoundError:
+        print(f"⚠️ beta-codes.json not found at {_BETA_CODES_PATH} - beta gate disabled")
+        return {}
+    except Exception as e:
+        print(f"⚠️ beta-codes.json load failed: {e}")
+        return {}
+
+
+def _load_usage():
+    try:
+        if not os.path.exists(_BETA_USAGE_PATH):
+            return {}
+        with open(_BETA_USAGE_PATH, 'r', encoding='utf-8') as f:
+            return json.load(f) or {}
+    except Exception as e:
+        print(f"⚠️ beta usage load failed: {e}")
+        return {}
+
+
+def _save_usage(usage):
+    try:
+        with open(_BETA_USAGE_PATH, 'w', encoding='utf-8') as f:
+            json.dump(usage, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"⚠️ beta usage save failed: {e}")
+
+
+def beta_get_status(code):
+    """Return {valid, friend_name, used, max, remaining} for a code (case-insensitive)."""
+    codes = load_beta_codes()
+    up = str(code or '').strip().upper()
+    if up not in codes:
+        return {'valid': False}
+    cfg = codes[up]
+    with _beta_lock:
+        usage = _load_usage()
+        used = int((usage.get(up) or {}).get('books_completed', 0))
+    max_books = int(cfg.get('max_books', 3))
+    return {
+        'valid': True,
+        'code': up,
+        'friend_name': cfg.get('friend_name', ''),
+        'used': used,
+        'max': max_books,
+        'remaining': max(0, max_books - used),
+    }
+
+
+def beta_increment(code):
+    """Increment the books_completed counter for a code. Returns the new status dict."""
+    codes = load_beta_codes()
+    up = str(code or '').strip().upper()
+    if up not in codes:
+        return {'valid': False}
+    with _beta_lock:
+        usage = _load_usage()
+        entry = usage.get(up) or {}
+        entry['books_completed'] = int(entry.get('books_completed', 0)) + 1
+        entry['last_book_at'] = time.time()
+        usage[up] = entry
+        _save_usage(usage)
+    return beta_get_status(up)
+
+
+def beta_save_feedback(record):
+    """Append a feedback record to /tmp/lilush_feedback.jsonl. Best-effort."""
+    try:
+        path = '/tmp/lilush_feedback.jsonl'
+        record = dict(record or {})
+        record['received_at'] = time.time()
+        with _beta_lock:
+            with open(path, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(record, ensure_ascii=False) + '\n')
+        print(f"📝 Feedback saved: code={record.get('code')} rating={record.get('rating')}")
+        return True
+    except Exception as e:
+        print(f"⚠️ feedback save failed: {e}")
+        return False
+
+
 class CORSRequestHandler(SimpleHTTPRequestHandler):
     
     def end_headers(self):
@@ -332,6 +447,9 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             # 📚 המערכת החדשה - סיפור דינמי מ-Claude + Nano Banana
             # Last modified by Claude: 2026-09-19 18:00 (Israel time)
             self.serve_file('nano-book.html', 'text/html')
+        elif self.path == '/feedback' or self.path == '/feedback.html':
+            # 📝 v5.8 (2026-11-16): beta feedback form
+            self.serve_file('feedback.html', 'text/html')
         else:
             # Try default handler
             try:
@@ -398,6 +516,12 @@ class CORSRequestHandler(SimpleHTTPRequestHandler):
             self.handle_start_book_generation()
         elif self.path == '/api/start-style-preview':  # 🔄 v5.7 async style preview
             self.handle_start_style_preview()
+        elif self.path == '/api/verify-access-code':  # 🔐 v5.8 beta gate
+            self.handle_verify_access_code()
+        elif self.path == '/api/track-book-completion':  # 🔐 v5.8 beta gate
+            self.handle_track_book_completion()
+        elif self.path == '/api/submit-feedback':  # 🔐 v5.8 beta feedback
+            self.handle_submit_feedback()
         elif self.path.startswith('/api/training-status/'):
             training_id = self.path.split('/')[-1]
             self.handle_training_status(training_id)
@@ -3313,6 +3437,102 @@ Example good responses:
             self.send_json_response(payload)
         except Exception as e:
             print(f"❌ job-status error for {job_id}: {e}")
+            self.send_json_response({'success': False, 'error': str(e)}, status=500)
+
+    # ============================================================
+    # 🔐 v5.8 (2026-11-16): Beta access-code endpoints
+    # ============================================================
+
+    def handle_verify_access_code(self):
+        """POST /api/verify-access-code with {code}. Returns status dict (valid, remaining, …)."""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            code = data.get('code', '')
+            status = beta_get_status(code)
+            if not status.get('valid'):
+                self.send_json_response({
+                    'success': False,
+                    'valid': False,
+                    'error': 'קוד הגישה לא זוהה. בדוק אם הקלדת נכון או בקש קוד חדש.'
+                })
+                return
+            if status.get('remaining', 0) <= 0:
+                self.send_json_response({
+                    'success': True,
+                    'valid': True,
+                    'exhausted': True,
+                    'code': status['code'],
+                    'friend_name': status.get('friend_name', ''),
+                    'used': status['used'],
+                    'max': status['max'],
+                    'remaining': 0,
+                    'message': 'כבר השתמשת בכל הספרים שהוקצו לך בבטא. תודה על הניסיון! אתה מוזמן לשלוח פידבק.'
+                })
+                return
+            self.send_json_response({
+                'success': True,
+                'valid': True,
+                'exhausted': False,
+                'code': status['code'],
+                'friend_name': status.get('friend_name', ''),
+                'used': status['used'],
+                'max': status['max'],
+                'remaining': status['remaining']
+            })
+        except Exception as e:
+            print(f"❌ verify-access-code error: {e}")
+            self.send_json_response({'success': False, 'error': str(e)}, status=500)
+
+    def handle_track_book_completion(self):
+        """POST /api/track-book-completion with {code}. Increments counter; returns new status."""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            code = data.get('code', '')
+            status_before = beta_get_status(code)
+            if not status_before.get('valid'):
+                self.send_json_response({'success': False, 'error': 'invalid code'}, status=400)
+                return
+            new_status = beta_increment(code)
+            print(f"📚 book completed for {new_status['code']} ({new_status.get('friend_name', '')}): {new_status['used']}/{new_status['max']}")
+            self.send_json_response({
+                'success': True,
+                'code': new_status['code'],
+                'friend_name': new_status.get('friend_name', ''),
+                'used': new_status['used'],
+                'max': new_status['max'],
+                'remaining': new_status['remaining']
+            })
+        except Exception as e:
+            print(f"❌ track-book-completion error: {e}")
+            self.send_json_response({'success': False, 'error': str(e)}, status=500)
+
+    def handle_submit_feedback(self):
+        """POST /api/submit-feedback with {code, rating, worked_well, needs_work, notes}."""
+        try:
+            content_length = int(self.headers['Content-Length'])
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            # Trim to reasonable sizes and only accept the fields we expect
+            def _clip(s, n):
+                if not isinstance(s, str):
+                    return ''
+                return s.strip()[:n]
+            record = {
+                'code': _clip(data.get('code', ''), 32).upper(),
+                'rating': _clip(str(data.get('rating', '')), 8),
+                'worked_well': _clip(data.get('worked_well', ''), 2000),
+                'needs_work': _clip(data.get('needs_work', ''), 2000),
+                'notes': _clip(data.get('notes', ''), 4000),
+                'user_agent': _clip(self.headers.get('User-Agent', ''), 500)
+            }
+            ok = beta_save_feedback(record)
+            self.send_json_response({'success': bool(ok)})
+        except Exception as e:
+            print(f"❌ submit-feedback error: {e}")
             self.send_json_response({'success': False, 'error': str(e)}, status=500)
 
     # ============================================================
