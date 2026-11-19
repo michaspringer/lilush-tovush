@@ -4,7 +4,19 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Version: v5.9  |  Last modified: 2026-11-19 18:55 (Israel time)  |  Claude
+Version: v5.10  |  Last modified: 2026-11-19 23:45 (Israel time)  |  Claude
+Changes in v5.10:
+  - 🐛 BUGFIX (critical for debugging): the frontend "lost connection to
+    server during polling" message was swallowing three distinct failure
+    modes (real network blip, HTTP 404 = job file gone due to container
+    restart, server-side failure with a real Python exception). Frontend
+    now surfaces each one with its own Hebrew message and the real server
+    error when there is one. Tolerance for true network blips raised from
+    4 (12s) to 6 (18s).
+  - 📋 Server-side: the job runner now prints the exception TYPE and a
+    full traceback on failure and the elapsed time on both success and
+    failure, so Railway logs clearly show what died when.
+
 Changes in v5.9:
   - 📏 Age-based text-length guidance added to the Claude story prompt.
     Previously the prompt only said "מתאים לגיל" and Claude defaulted to
@@ -3376,8 +3388,10 @@ Example good responses:
         """
         job_id = create_job(job_type)
         update_job(job_id, status='running', progress_pct=1, progress_label='מתחיל...')
+        print(f"🚀 job {job_id} ({job_type}) STARTED")
 
         def _runner():
+            thread_start = time.time()
             def _on_progress(pct, label):
                 try:
                     # Clamp to [1, 99] - 100 is reserved for the final "done" write
@@ -3395,17 +3409,19 @@ Example good responses:
                     progress_label='✅ הסתיים',
                     result=result,
                 )
-                print(f"✅ job {job_id} ({job_type}) done")
+                elapsed = time.time() - thread_start
+                print(f"✅ job {job_id} ({job_type}) DONE in {elapsed:.1f}s")
             except Exception as e:
                 import traceback
+                elapsed = time.time() - thread_start
+                print(f"❌ job {job_id} ({job_type}) FAILED after {elapsed:.1f}s: {type(e).__name__}: {e}")
                 traceback.print_exc()
                 update_job(
                     job_id,
                     status='failed',
-                    error=str(e),
+                    error=f"{type(e).__name__}: {e}",
                     progress_label='❌ נכשל',
                 )
-                print(f"❌ job {job_id} ({job_type}) failed: {e}")
 
         t = _threading.Thread(target=_runner, name=f"job-{job_id}", daemon=True)
         t.start()

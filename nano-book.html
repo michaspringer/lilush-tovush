@@ -697,7 +697,10 @@
 </div>
 
 <script>
-    // Version: v5.9  |  Last modified: 2026-11-19 18:55 (Israel time)  |  Claude
+    // Version: v5.10  |  Last modified: 2026-11-19 23:45 (Israel time)  |  Claude
+    // v5.10: fixed "lost connection to server during polling" swallowing real errors.
+    //        Now surfaces 404 (job gone - server restart) and failed status with the
+    //        real server error, and only retries true network blips. Tolerance 4->6.
     // v5.9: feedback CTA shown at the end of a completed book.
     // v5.8: beta access-code gate on load + book-completion tracking.
     // v5.7: start-+-poll against /api/start-* for mobile-friendly flow.
@@ -894,59 +897,108 @@
      * long-running endpoints. Keeps each HTTP call short so mobile browsers
      * and Cloudflare / Railway proxies never time it out.
      *
-     * startUrl: POST endpoint that returns {success, job_id}
-     * startBody: JSON body to POST
-     * onProgress: (pct:int, label:str) called on each poll update
-     * Returns: a Promise that resolves with the completed job's result dict,
-     *          or rejects with an Error.
+     * v5.10 (2026-11-19): overhauled error handling. The previous version
+     * caught EVERY failure (network, HTTP 404, server-reported failure) into
+     * one generic "lost connection" message, which hid the real cause.
+     * Now:
+     *   - true network errors increment a counter (tolerance raised 4->6)
+     *   - HTTP 404 surfaces immediately as "job disappeared"
+     *   - server-reported failures surface the real error from the job
+     *   - all messages are in Hebrew
+     * Also: console.warn on each failure so Railway logs / dev tools show
+     * the sequence.
      */
     async function startJobAndPoll(startUrl, startBody, onProgress) {
         // 1) kick off the job (short call, well under any timeout)
-        const startResp = await fetch(startUrl, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(startBody)
-        });
-        const startJson = await startResp.json();
+        let startJson;
+        try {
+            const startResp = await fetch(startUrl, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(startBody)
+            });
+            startJson = await startResp.json();
+        } catch (netErr) {
+            throw new Error('לא הצלחנו להתחיל את העבודה בשרת (נפילת רשת). נסה שוב.');
+        }
         if (!startJson.success || !startJson.job_id) {
-            throw new Error(startJson.error || 'failed to start job');
+            throw new Error(startJson.error || 'השרת לא החזיר job_id');
         }
         const jobId = startJson.job_id;
+        console.log('[poll] job started:', jobId);
 
         // 2) poll status every 3s. 5 min hard cap on total wait.
         const pollIntervalMs = 3000;
         const maxWaitMs = 5 * 60 * 1000;
         const startedAt = Date.now();
         let consecutiveNetErrors = 0;
+        const NET_ERROR_TOLERANCE = 6;  // 18s of flakiness tolerated
 
         while (Date.now() - startedAt < maxWaitMs) {
             await new Promise(r => setTimeout(r, pollIntervalMs));
+
+            // --- stage A: fetch the status (network layer) ---
+            let response;
             try {
-                const r = await fetch('/api/job-status/' + encodeURIComponent(jobId));
-                if (r.status === 404) {
-                    throw new Error('job disappeared (server restarted?)');
-                }
-                const sj = await r.json();
-                consecutiveNetErrors = 0;
-                if (onProgress && typeof sj.progress_pct === 'number') {
-                    onProgress(sj.progress_pct, sj.progress_label || '');
-                }
-                if (sj.status === 'done') {
-                    return sj.result;
-                }
-                if (sj.status === 'failed') {
-                    throw new Error(sj.error || 'server reported failure');
-                }
-                // still running - loop
+                response = await fetch('/api/job-status/' + encodeURIComponent(jobId));
             } catch (netErr) {
                 consecutiveNetErrors += 1;
-                // Tolerate up to 4 consecutive poll failures (12s of network trouble)
-                if (consecutiveNetErrors >= 4) {
-                    throw new Error('lost connection to server during polling');
+                console.warn(`[poll ${jobId}] network error #${consecutiveNetErrors}:`, netErr && netErr.message);
+                if (consecutiveNetErrors >= NET_ERROR_TOLERANCE) {
+                    throw new Error('הקשר לאינטרנט נפל ' + NET_ERROR_TOLERANCE + ' פעמים ברצף. נסה שוב בעוד רגע.');
                 }
+                continue;
             }
+
+            // --- stage B: handle HTTP status (logic layer, not retried) ---
+            if (response.status === 404) {
+                // The job file is gone. Most likely Railway restarted the
+                // container mid-job (free-tier cold start). No point retrying.
+                console.error(`[poll ${jobId}] 404 - job file gone (server restart?)`);
+                throw new Error('העבודה נעלמה מהשרת — ככל הנראה השרת אותחל תוך כדי. נסה שוב, זה בדרך כלל עובד מהניסיון השני.');
+            }
+
+            if (!response.ok) {
+                consecutiveNetErrors += 1;
+                console.warn(`[poll ${jobId}] HTTP ${response.status} #${consecutiveNetErrors}`);
+                if (consecutiveNetErrors >= NET_ERROR_TOLERANCE) {
+                    throw new Error('השרת החזיר שגיאה ' + response.status + ' שוב ושוב.');
+                }
+                continue;
+            }
+
+            // --- stage C: parse the JSON ---
+            let sj;
+            try {
+                sj = await response.json();
+            } catch (parseErr) {
+                consecutiveNetErrors += 1;
+                console.warn(`[poll ${jobId}] JSON parse error #${consecutiveNetErrors}`);
+                if (consecutiveNetErrors >= NET_ERROR_TOLERANCE) {
+                    throw new Error('קיבלנו תגובה מקולקלת מהשרת שוב ושוב.');
+                }
+                continue;
+            }
+
+            // --- successful poll - reset the flakiness counter ---
+            consecutiveNetErrors = 0;
+
+            if (onProgress && typeof sj.progress_pct === 'number') {
+                onProgress(sj.progress_pct, sj.progress_label || '');
+            }
+
+            if (sj.status === 'done') {
+                console.log(`[poll ${jobId}] done`);
+                return sj.result;
+            }
+            if (sj.status === 'failed') {
+                // Server did its job and reported a real failure - surface it.
+                console.error(`[poll ${jobId}] server failed:`, sj.error);
+                throw new Error(sj.error || 'השרת דיווח על כשל ביצירת הספר');
+            }
+            // status is 'running' or 'pending' - keep polling
         }
-        throw new Error('timed out after 5 minutes - the server may still be working');
+        throw new Error('חלף יותר מ-5 דקות - השרת אולי עדיין עובד ברקע. נסה שוב בעוד רגע.');
     }
 
     async function generatePreview() {
