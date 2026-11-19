@@ -4,7 +4,17 @@
 Children's Book Generator - Full Server
 Leonardo + Fal.ai Face Swap + PDF + InstantID + LoRA + PuLID POC + Nano Banana
 
-Version: v5.8  |  Last modified: 2026-11-16 23:00 (Israel time)  |  Claude
+Version: v5.9  |  Last modified: 2026-11-19 18:55 (Israel time)  |  Claude
+Changes in v5.9:
+  - 📏 Age-based text-length guidance added to the Claude story prompt.
+    Previously the prompt only said "מתאים לגיל" and Claude defaulted to
+    1-2 short sentences per page. Now explicit word counts per age tier:
+    0-2 -> 10-20 words, 3-5 -> 30-50, 6-8 -> 60-100, 9-12 -> 100-150.
+  - 📝 Added a prominent feedback CTA at the end of /nano-book's results
+    screen (visible once a book is successfully generated). Complements
+    the existing top banner so users don't have to scroll back up to find
+    the link.
+
 Changes in v5.8:
   - 🔐 Beta access-code gate: 4 personal codes in beta-codes.json, per-friend
     book limit (default 3), case-insensitive matching.
@@ -1817,15 +1827,27 @@ Return ONLY the English description, nothing else."""
             '6-8': '8',
             '9-12': '10'
         }
-        
+
+        # 🎨 v5.9 (2026-11-19): explicit text-length guidance per age.
+        # Without this, Claude defaults to ~1 short sentence per page, which
+        # feels thin. These values match typical picture-book / early-reader
+        # conventions and scale naturally with age.
+        text_length_by_age = {
+            '0-2': 'משפט אחד פשוט וקצר, 10-20 מילים. מילים בסיסיות וחזרה על צליל שמופיע קודם זה טוב.',
+            '3-5': '2-3 משפטים, 30-50 מילים לעמוד. משפטים קצרים וברורים, קצב נעים לקריאה בקול.',
+            '6-8': '3-5 משפטים, 60-100 מילים לעמוד. אוצר מילים עשיר יותר, אפשר דיאלוג פשוט.',
+            '9-12': '4-6 משפטים, 100-150 מילים לעמוד. דיאלוג, תיאור, פנימיות של הדמות.'
+        }
+
         pages = pages_by_age.get(data.get('childAge', '3-5'), '1')
+        text_length = text_length_by_age.get(data.get('childAge', '3-5'), text_length_by_age['3-5'])
         theme = theme_names.get(data.get('theme', ''), 'הרפתקאות')
         style = style_names.get(data.get('style', ''), 'מצחיק')
         style_instruction = style_instructions.get(data.get('style', ''), style_instructions['funny'])
-        
+
         # 🎯 NEW: בדיקה אם משתמשים ב-LoRA - אם כן, נשנה את הוראות התמונות
         use_lora = bool(data.get('use_lora') and data.get('trigger_word'))
-        
+
         prompt = f"""צור סיפור ילדים בעברית:
 
 שם: {data.get('childName', 'ילד')}
@@ -1837,6 +1859,8 @@ Return ONLY the English description, nothing else."""
 
 🎨 הוראות סגנון כתיבה:
 {style_instruction}
+
+📏 אורך הטקסט בכל עמוד: {text_length}
 """
         
         if data.get('customInput'):

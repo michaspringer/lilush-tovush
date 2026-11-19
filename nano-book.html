@@ -5,7 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>📚 לילוש טובוש — ספר אישי לילד</title>
 <style>
-    /* Version: v5.7  |  Last modified: 2026-11-16 22:35 (Israel time)  |  Claude
+    /* Version: v5.9  |  Last modified: 2026-11-19 18:55 (Israel time)  |  Claude
+       Changes in v5.9: Prominent feedback CTA at the end of a completed book -
+       complements the top banner so the user doesn't need to scroll back up
+       after reviewing the pages.
        Changes in v5.7: Switched generatePreview() and continueWithSelectedStyle() from
        a 60-120s sync fetch to start-+-poll against the new /api/start-* + /api/job-status
        endpoints. The HTTP call that kicked off the work used to time out under Chrome
@@ -482,6 +485,46 @@
         white-space: nowrap;
     }
     .access-banner .banner-feedback-link:hover { text-decoration: underline; }
+
+    /* 📝 v5.9: feedback CTA at the end of a completed book */
+    .feedback-cta {
+        margin-top: 24px;
+        padding: 20px 22px;
+        background: linear-gradient(135deg, #fff6d5 0%, #ffe2a0 100%);
+        border: 2px solid #f0d78a;
+        border-radius: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        flex-wrap: wrap;
+    }
+    .feedback-cta-text {
+        flex: 1;
+        min-width: 220px;
+    }
+    .feedback-cta-text strong {
+        display: block;
+        font-size: 1.1rem;
+        color: #6b4a00;
+        margin-bottom: 4px;
+    }
+    .feedback-cta-text span {
+        font-size: 0.95rem;
+        color: #7d5a1a;
+    }
+    .feedback-cta-btn {
+        background: #f59e0b;
+        color: white;
+        padding: 12px 22px;
+        border-radius: 10px;
+        text-decoration: none;
+        font-weight: 700;
+        font-size: 1rem;
+        white-space: nowrap;
+        transition: background 0.15s;
+    }
+    .feedback-cta-btn:hover { background: #c2660a; }
 </style>
 </head>
 <body>
@@ -641,11 +684,21 @@
                 📥 הורד את הספר כ-PDF
             </button>
         </div>
+
+        <!-- 📝 v5.9 (2026-11-19): prominent feedback CTA at the end of results -->
+        <div class="feedback-cta" id="feedbackCta" style="display:none;">
+            <div class="feedback-cta-text">
+                <strong>📝 איך היה?</strong>
+                <span>הפידבק שלך עוזר לנו להוציא את המוצר טוב יותר לאנשים נוספים.</span>
+            </div>
+            <a href="/feedback" class="feedback-cta-btn">שלח פידבק קצר ←</a>
+        </div>
     </div>
 </div>
 
 <script>
-    // Version: v5.8  |  Last modified: 2026-11-16 23:00 (Israel time)  |  Claude
+    // Version: v5.9  |  Last modified: 2026-11-19 18:55 (Israel time)  |  Claude
+    // v5.9: feedback CTA shown at the end of a completed book.
     // v5.8: beta access-code gate on load + book-completion tracking.
     // v5.7: start-+-poll against /api/start-* for mobile-friendly flow.
     // v5.2: AbortController with 3-minute timeout, better error messages.
@@ -1122,12 +1175,15 @@
             עלות <strong>$${data.total_cost_usd}</strong>
         `;
 
-        // 📄 הצגת אזור ההורדה
+        // 📄 הצגת אזור ההורדה + 📝 v5.9 פידבק CTA
         const pdfArea = document.getElementById('pdfDownloadArea');
+        const fbCta = document.getElementById('feedbackCta');
         if (data.successful_pages > 0) {
             pdfArea.style.display = 'block';
+            if (fbCta) fbCta.style.display = 'flex';
         } else {
             pdfArea.style.display = 'none';
+            if (fbCta) fbCta.style.display = 'none';
         }
 
         // 🔐 v5.8: track book completion against the beta quota.
