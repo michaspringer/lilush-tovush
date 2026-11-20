@@ -158,7 +158,11 @@ LEONARDO_API_KEY = os.environ.get('LEONARDO_API_KEY', '')
 REPLICATE_API_TOKEN = os.environ.get('REPLICATE_API_TOKEN', '')
 REPLICATE_USERNAME = os.environ.get('REPLICATE_USERNAME', '')  # Your Replicate username
 FAL_KEY = os.environ.get('FAL_KEY', '')
-IMAGE_MODE = os.environ.get('IMAGE_MODE', 'leonardo')
+# NOTE (v5.10, 2026-11-19): IMAGE_MODE only affects the legacy /api/generate-story
+# endpoint used by the old /app frontend. The current /nano-book flow always uses
+# Nano Banana regardless of this value. Default flipped from 'leonardo' to
+# 'nano-banana' so the startup log isn't misleading.
+IMAGE_MODE = os.environ.get('IMAGE_MODE', 'nano-banana')
 
 # Cloudinary for LoRA training
 CLOUDINARY_URL = os.environ.get('CLOUDINARY_URL', '')
@@ -5010,8 +5014,10 @@ def run_server(port=None):
     print("\n" + "="*60)
     print("🚀 לילוש טובוש")
     print("="*60)
-    print(f"📸 Images: {IMAGE_MODE}")
-    print(f"👤 Face Swap: {'ON' if FAL_KEY and HAS_FAL else 'OFF'}")
+    print(f"🍌 Nano Banana (Gemini): {'ON' if HAS_GEMINI else 'OFF - CHECK GEMINI_API_KEY!'}")
+    print(f"🧠 Claude API: {'ON' if CLAUDE_API_KEY and CLAUDE_API_KEY != 'YOUR_CLAUDE_KEY_HERE' else 'OFF - CHECK CLAUDE_API_KEY!'}")
+    print(f"☁️  Cloudinary: {'ON (' + CLOUDINARY_CLOUD_NAME + ')' if CLOUDINARY_CLOUD_NAME else 'OFF'}")
+    print(f"🔄 Legacy /app engine (IMAGE_MODE): {IMAGE_MODE}")
     print(f"📡 Port: {port}")
     print("="*60 + "\n")
     
